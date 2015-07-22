@@ -918,9 +918,16 @@ EOF
 
         android*)
           SDK_PATH=${sdk_path}
+          if [ ${tgt_isa} = "armv7" ]; then
+              TOOL_PREFIX=arm-linux-androideabi-
+              ARCH_ARM=arch-arm
+          else
+              TOOL_PREFIX=aarch64-linux-android-
+              ARCH_ARM=arch-arm64
+          fi
           COMPILER_LOCATION=`find "${SDK_PATH}" \
-                             -name "arm-linux-androideabi-gcc*" -print -quit`
-          TOOLCHAIN_PATH=${COMPILER_LOCATION%/*}/arm-linux-androideabi-
+                             -name "${TOOL_PREFIX}gcc*" -print -quit`
+          TOOLCHAIN_PATH=${COMPILER_LOCATION%/*}/${TOOL_PREFIX}
           CC=${TOOLCHAIN_PATH}gcc
           CXX=${TOOLCHAIN_PATH}g++
           AR=${TOOLCHAIN_PATH}ar
@@ -930,7 +937,7 @@ EOF
           NM=${TOOLCHAIN_PATH}nm
 
           if [ -z "${alt_libc}" ]; then
-            alt_libc=`find "${SDK_PATH}" -name arch-arm -print | \
+            alt_libc=`find "${SDK_PATH}" -name ${ARCH_ARM} -print | \
               awk '{n = split($0,a,"/"); \
                 split(a[n-1],b,"-"); \
                 print $0 " " b[2]}' | \
@@ -943,7 +950,10 @@ EOF
 
           # linker flag that routes around a CPU bug in some
           # Cortex-A8 implementations (NDK Dev Guide)
-          add_ldflags "-Wl,--fix-cortex-a8"
+          if [ ${tgt_isa} = "armv7" ]; then
+            add_ldflags "-Wl,--fix-cortex-a8"
+          fi
+          add_ldflags "-pie"
 
           enable_feature pic
           soft_enable realtime_only
