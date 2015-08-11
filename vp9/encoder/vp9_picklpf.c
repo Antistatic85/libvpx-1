@@ -40,13 +40,14 @@ static int64_t try_filter_frame(const YV12_BUFFER_CONFIG *sd,
   VP9_COMMON *const cm = &cpi->common;
   int64_t filt_err;
 
-  if (cpi->num_workers > 1)
+  if (cpi->max_threads > 1)
     vp9_loop_filter_frame_mt(cm->frame_to_show, cm, cpi->td.mb.e_mbd.plane,
                              filt_level, 1, partial_frame,
-                             cpi->workers, cpi->num_workers, &cpi->lf_row_sync);
+                             cpi->enc_thread_hndl, cpi->max_threads,
+                             &cpi->lf_row_sync);
   else
-    vp9_loop_filter_frame(cm->frame_to_show, cm, &cpi->td.mb.e_mbd, filt_level,
-                          1, partial_frame);
+    vp9_loop_filter_frame(cm->frame_to_show, cm, &cpi->td.mb.e_mbd, filt_level, 1,
+                          partial_frame);
 
 #if CONFIG_VP9_HIGHBITDEPTH
   if (cm->use_highbitdepth) {

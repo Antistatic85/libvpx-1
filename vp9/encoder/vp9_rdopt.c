@@ -2901,15 +2901,14 @@ int vp9_active_edge_sb(VP9_COMP *cpi,
 }
 
 void vp9_rd_pick_inter_mode_sb(VP9_COMP *cpi,
-                               TileDataEnc *tile_data,
+                               const TileInfo *const tile_info,
                                MACROBLOCK *x,
                                int mi_row, int mi_col,
                                RD_COST *rd_cost, BLOCK_SIZE bsize,
                                PICK_MODE_CONTEXT *ctx,
                                int64_t best_rd_so_far) {
   VP9_COMMON *const cm = &cpi->common;
-  TileInfo *const tile_info = &tile_data->tile_info;
-  RD_OPT *const rd_opt = &cpi->rd;
+  RD_OPT *const rd_opt = &x->rd;
   SPEED_FEATURES *const sf = &cpi->sf;
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = &xd->mi[0]->mbmi;
@@ -2949,10 +2948,10 @@ void vp9_rd_pick_inter_mode_sb(VP9_COMP *cpi,
   uint8_t ref_frame_skip_mask[2] = { 0 };
   uint16_t mode_skip_mask[MAX_REF_FRAMES] = { 0 };
   int mode_skip_start = sf->mode_skip_start + 1;
-  const int *const rd_threshes = rd_opt->threshes[segment_id][bsize];
-  const int *const rd_thresh_freq_fact = tile_data->thresh_freq_fact[bsize];
+  const int *const rd_threshes = cpi->rd.threshes[segment_id][bsize];
+  const int *const rd_thresh_freq_fact = x->rd.thresh_freq_fact[bsize];
   int64_t mode_threshold[MAX_MODES];
-  int *mode_map = tile_data->mode_map[bsize];
+  int *mode_map = rd_opt->mode_map[bsize];
   const int mode_search_skip_flags = sf->mode_search_skip_flags;
   int64_t mask_filter = 0;
   int64_t filter_cache[SWITCHABLE_FILTER_CONTEXTS];
@@ -3499,6 +3498,12 @@ void vp9_rd_pick_inter_mode_sb(VP9_COMP *cpi,
   }
 
   if (best_mode_index < 0 || best_rd >= best_rd_so_far) {
+    // If adaptive_pred_interp_filter is enabled, the sub 8x8 modes use the
+    // mbmi interp filter info in the pc_leaf context of 8x8 block. So preserve
+    // this data  before returning
+    // TODO (ram-ittiam): Reposition this init at an appropriate place.
+    if (bsize == BLOCK_8X8)
+      ctx->mic = *xd->mi[0];
     rd_cost->rate = INT_MAX;
     rd_cost->rdcost = INT64_MAX;
     return;
@@ -3525,7 +3530,7 @@ void vp9_rd_pick_inter_mode_sb(VP9_COMP *cpi,
          !is_inter_block(&best_mbmode));
 
   if (!cpi->rc.is_src_frame_alt_ref)
-    vp9_update_rd_thresh_fact(tile_data->thresh_freq_fact,
+    vp9_update_rd_thresh_fact(rd_opt->thresh_freq_fact,
                               sf->adaptive_rd_thresh, bsize, best_mode_index);
 
   // macroblock modes
@@ -3580,14 +3585,13 @@ void vp9_rd_pick_inter_mode_sb(VP9_COMP *cpi,
                        best_filter_diff, best_mode_skippable);
 }
 
-void vp9_rd_pick_inter_mode_sb_seg_skip(VP9_COMP *cpi,
-                                        TileDataEnc *tile_data,
-                                        MACROBLOCK *x,
+void vp9_rd_pick_inter_mode_sb_seg_skip(VP9_COMP *cpi, MACROBLOCK *x,
                                         RD_COST *rd_cost,
                                         BLOCK_SIZE bsize,
                                         PICK_MODE_CONTEXT *ctx,
                                         int64_t best_rd_so_far) {
   VP9_COMMON *const cm = &cpi->common;
+  RD_OPT *const rd_opt = &x->rd;
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = &xd->mi[0]->mbmi;
   unsigned char segment_id = mbmi->segment_id;
@@ -3668,7 +3672,7 @@ void vp9_rd_pick_inter_mode_sb_seg_skip(VP9_COMP *cpi,
   assert((cm->interp_filter == SWITCHABLE) ||
          (cm->interp_filter == mbmi->interp_filter));
 
-  vp9_update_rd_thresh_fact(tile_data->thresh_freq_fact,
+  vp9_update_rd_thresh_fact(rd_opt->thresh_freq_fact,
                             cpi->sf.adaptive_rd_thresh, bsize, THR_ZEROMV);
 
   vp9_zero(best_pred_diff);
@@ -3681,7 +3685,6 @@ void vp9_rd_pick_inter_mode_sb_seg_skip(VP9_COMP *cpi,
 }
 
 void vp9_rd_pick_inter_mode_sub8x8(VP9_COMP *cpi,
-                                   TileDataEnc *tile_data,
                                    MACROBLOCK *x,
                                    int mi_row, int mi_col,
                                    RD_COST *rd_cost,
@@ -3689,7 +3692,7 @@ void vp9_rd_pick_inter_mode_sub8x8(VP9_COMP *cpi,
                                    PICK_MODE_CONTEXT *ctx,
                                    int64_t best_rd_so_far) {
   VP9_COMMON *const cm = &cpi->common;
-  RD_OPT *const rd_opt = &cpi->rd;
+  RD_OPT *const rd_opt = &x->rd;
   SPEED_FEATURES *const sf = &cpi->sf;
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = &xd->mi[0]->mbmi;
@@ -3813,8 +3816,8 @@ void vp9_rd_pick_inter_mode_sub8x8(VP9_COMP *cpi,
     // Test best rd so far against threshold for trying this mode.
     if (!internal_active_edge &&
         rd_less_than_thresh(best_rd,
-                            rd_opt->threshes[segment_id][bsize][ref_index],
-                            tile_data->thresh_freq_fact[bsize][ref_index]))
+                            cpi->rd.threshes[segment_id][bsize][ref_index],
+                            x->rd.thresh_freq_fact[bsize][ref_index]))
       continue;
 
     comp_pred = second_ref_frame > INTRA_FRAME;
@@ -3922,10 +3925,10 @@ void vp9_rd_pick_inter_mode_sub8x8(VP9_COMP *cpi,
       int uv_skippable;
 
       this_rd_thresh = (ref_frame == LAST_FRAME) ?
-          rd_opt->threshes[segment_id][bsize][THR_LAST] :
-          rd_opt->threshes[segment_id][bsize][THR_ALTR];
+          cpi->rd.threshes[segment_id][bsize][THR_LAST] :
+          cpi->rd.threshes[segment_id][bsize][THR_ALTR];
       this_rd_thresh = (ref_frame == GOLDEN_FRAME) ?
-      rd_opt->threshes[segment_id][bsize][THR_GOLD] : this_rd_thresh;
+          cpi->rd.threshes[segment_id][bsize][THR_GOLD] : this_rd_thresh;
       for (i = 0; i < SWITCHABLE_FILTER_CONTEXTS; ++i)
         filter_cache[i] = INT64_MAX;
 
@@ -4248,7 +4251,7 @@ void vp9_rd_pick_inter_mode_sub8x8(VP9_COMP *cpi,
          (cm->interp_filter == best_mbmode.interp_filter) ||
          !is_inter_block(&best_mbmode));
 
-  vp9_update_rd_thresh_fact(tile_data->thresh_freq_fact,
+  vp9_update_rd_thresh_fact(rd_opt->thresh_freq_fact,
                             sf->adaptive_rd_thresh, bsize, best_ref_index);
 
   // macroblock modes

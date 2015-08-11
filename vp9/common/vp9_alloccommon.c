@@ -43,6 +43,9 @@ void vp9_set_mb_mi(VP9_COMMON *cm, int width, int height) {
   cm->mi_rows = aligned_height >> MI_SIZE_LOG2;
   cm->mi_stride = calc_mi_size(cm->mi_cols);
 
+  cm->sb_cols = mi_cols_aligned_to_sb(cm->mi_cols) >> MI_BLOCK_SIZE_LOG2;
+  cm->sb_rows = mi_cols_aligned_to_sb(cm->mi_rows) >> MI_BLOCK_SIZE_LOG2;
+
   cm->mb_cols = (cm->mi_cols + 1) >> 1;
   cm->mb_rows = (cm->mi_rows + 1) >> 1;
   cm->MBs = cm->mb_rows * cm->mb_cols;

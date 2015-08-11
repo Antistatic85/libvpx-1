@@ -482,23 +482,16 @@ static void write_modes_sb(VP9_COMP *cpi,
     update_partition_context(xd, mi_row, mi_col, subsize, bsize);
 }
 
-static void write_modes(VP9_COMP *cpi,
-                        const TileInfo *const tile, vpx_writer *w,
-                        TOKENEXTRA **tok, const TOKENEXTRA *const tok_end) {
-  const VP9_COMMON *const cm = &cpi->common;
-  MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
-  int mi_row, mi_col;
+static void write_modes(VP9_COMP *cpi, const TileInfo *const tile,
+                        vpx_writer *w, TOKENEXTRA **tok,
+                        const TOKENEXTRA *const tok_end, int mi_row) {
+  int mi_col;
 
-  set_partition_probs(cm, xd);
-
-  for (mi_row = tile->mi_row_start; mi_row < tile->mi_row_end;
-       mi_row += MI_BLOCK_SIZE) {
-    vp9_zero(xd->left_seg_context);
-    for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end;
-         mi_col += MI_BLOCK_SIZE)
-      write_modes_sb(cpi, tile, w, tok, tok_end, mi_row, mi_col,
-                     BLOCK_64X64);
-  }
+  vp9_zero(cpi->td.mb.e_mbd.left_seg_context);
+  for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end;
+       mi_col += MI_BLOCK_SIZE)
+    write_modes_sb(cpi, tile, w, tok, tok_end, mi_row, mi_col,
+                   BLOCK_64X64);
 }
 
 static void build_tree_distribution(VP9_COMP *cpi, TX_SIZE tx_size,
@@ -928,9 +921,9 @@ static int get_refresh_mask(VP9_COMP *cpi) {
 
 static size_t encode_tiles(VP9_COMP *cpi, uint8_t *data_ptr) {
   VP9_COMMON *const cm = &cpi->common;
+  MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
   vpx_writer residual_bc;
   int tile_row, tile_col;
-  TOKENEXTRA *tok_end;
   size_t total_size = 0;
   const int tile_cols = 1 << cm->log2_tile_cols;
   const int tile_rows = 1 << cm->log2_tile_rows;
@@ -940,20 +933,27 @@ static size_t encode_tiles(VP9_COMP *cpi, uint8_t *data_ptr) {
 
   for (tile_row = 0; tile_row < tile_rows; tile_row++) {
     for (tile_col = 0; tile_col < tile_cols; tile_col++) {
-      int tile_idx = tile_row * tile_cols + tile_col;
-      TOKENEXTRA *tok = cpi->tile_tok[tile_row][tile_col];
+      TileInfo tile;
+      int mi_row;
 
-      tok_end = cpi->tile_tok[tile_row][tile_col] +
-          cpi->tok_count[tile_row][tile_col];
+      vp9_tile_init(&tile, cm, tile_row, tile_col);
 
       if (tile_col < tile_cols - 1 || tile_row < tile_rows - 1)
         vpx_start_encode(&residual_bc, data_ptr + total_size + 4);
       else
         vpx_start_encode(&residual_bc, data_ptr + total_size);
 
-      write_modes(cpi, &cpi->tile_data[tile_idx].tile_info,
-                  &residual_bc, &tok, tok_end);
-      assert(tok == tok_end);
+      set_partition_probs(cm, xd);
+
+      for (mi_row = tile.mi_row_start; mi_row < tile.mi_row_end;
+          mi_row += MI_BLOCK_SIZE) {
+        TOKENEXTRA *tok_start, *tok_end;
+        const int sb_row = mi_row >> MI_BLOCK_SIZE_LOG2;
+
+        tok_start = cpi->tplist[sb_row][tile_row][tile_col].start;
+        tok_end = cpi->tplist[sb_row][tile_row][tile_col].stop;
+        write_modes(cpi, &tile, &residual_bc, &tok_start, tok_end, mi_row);
+      }
       vpx_stop_encode(&residual_bc);
       if (tile_col < tile_cols - 1 || tile_row < tile_rows - 1) {
         // size of this tile

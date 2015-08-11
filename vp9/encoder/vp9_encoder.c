@@ -44,7 +44,6 @@
 #include "vp9/encoder/vp9_encodeframe.h"
 #include "vp9/encoder/vp9_encodemv.h"
 #include "vp9/encoder/vp9_encoder.h"
-#include "vp9/encoder/vp9_ethread.h"
 #include "vp9/encoder/vp9_firstpass.h"
 #include "vp9/encoder/vp9_mbgraph.h"
 #include "vp9/encoder/vp9_picklpf.h"
@@ -340,9 +339,6 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
   vpx_free(cpi->mbmi_ext_base);
   cpi->mbmi_ext_base = NULL;
 
-  vpx_free(cpi->tile_data);
-  cpi->tile_data = NULL;
-
   // Delete sementation map
   vpx_free(cpi->segmentation_map);
   cpi->segmentation_map = NULL;
@@ -387,8 +383,11 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
   vp9_free_frame_buffer(&cpi->alt_ref_buffer);
   vp9_lookahead_destroy(cpi->lookahead);
 
-  vpx_free(cpi->tile_tok[0][0]);
-  cpi->tile_tok[0][0] = 0;
+  vpx_free(cpi->tok);
+  cpi->tok = 0;
+
+  vpx_free(cpi->tplist);
+  cpi->tplist = NULL;
 
   vp9_free_pc_tree(&cpi->td);
 
@@ -692,15 +691,20 @@ void vp9_alloc_compressor_data(VP9_COMP *cpi) {
 
   vp9_alloc_context_buffers(cm, cm->width, cm->height);
 
+  vpx_free(cpi->tok);
   alloc_context_buffers_ext(cpi);
-
-  vpx_free(cpi->tile_tok[0][0]);
 
   {
     unsigned int tokens = get_token_alloc(cm->mb_rows, cm->mb_cols);
-    CHECK_MEM_ERROR(cm, cpi->tile_tok[0][0],
-        vpx_calloc(tokens, sizeof(*cpi->tile_tok[0][0])));
+    CHECK_MEM_ERROR(cm, cpi->tok, vpx_calloc(tokens, sizeof(*cpi->tok)));
   }
+
+  vpx_free(cpi->tplist);
+  CHECK_MEM_ERROR(cm, cpi->tplist,
+                  vpx_calloc(cm->sb_rows, sizeof(*cpi->tplist)));
+
+  // don't create more threads than rows available
+  cpi->max_threads = MIN(cpi->max_threads, cm->sb_rows);
 
   vp9_setup_pc_tree(&cpi->common, &cpi->td);
 }
@@ -776,6 +780,14 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
 
   cm->width = oxcf->width;
   cm->height = oxcf->height;
+  // by default, single thread
+  cpi->max_threads = 1;
+#if CONFIG_MULTITHREAD
+  if (cpi->oxcf.max_threads) {
+    cpi->max_threads = cpi->oxcf.max_threads;
+  }
+#endif
+
   vp9_alloc_compressor_data(cpi);
 
   cpi->svc.temporal_layering_mode = oxcf->temporal_layering_mode;
@@ -1591,7 +1603,7 @@ static void cal_nmvsadcosts_hp(int *mvsadcost[2]) {
 
 VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
                                 BufferPool *const pool) {
-  unsigned int i;
+  unsigned int i, j;
   VP9_COMP *volatile const cpi = vpx_memalign(32, sizeof(VP9_COMP));
   VP9_COMMON *volatile const cm = cpi != NULL ? &cpi->common : NULL;
 
@@ -1628,7 +1640,6 @@ VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
 
   cm->current_video_frame = 0;
   cpi->partition_search_skippable_frame = 0;
-  cpi->tile_data = NULL;
 
   realloc_segmentation_maps(cpi);
 
@@ -1824,6 +1835,23 @@ VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
   cpi->source_var_thresh = 0;
   cpi->frames_till_next_var_check = 0;
 
+  // Default rd threshold factors for mode selection
+  for (i = 0; i < BLOCK_SIZES; ++i) {
+    for (j = 0; j < MAX_MODES; ++j) {
+      cpi->rd.thresh_freq_fact[i][j] = 32;
+      cpi->rd.mode_map[i][j] = j;
+    }
+  }
+
+  memcpy(cpi->td.mb.rd.thresh_freq_fact, cpi->rd.thresh_freq_fact,
+         sizeof(cpi->rd.thresh_freq_fact));
+  memcpy(cpi->td.mb.rd.mode_map, cpi->rd.mode_map,
+         sizeof(cpi->rd.mode_map));
+
+  // allocate space for encoder thread handles and create threads
+  if (cpi->max_threads > 1)
+    vp9_create_encoding_threads(cpi);
+
 #define BFP(BT, SDF, SDAF, VF, SVF, SVAF, SDX3F, SDX8F, SDX4DF)\
     cpi->fn_ptr[BT].sdf            = SDF; \
     cpi->fn_ptr[BT].sdaf           = SDAF; \
@@ -1919,7 +1947,6 @@ VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
 void vp9_remove_compressor(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
   unsigned int i;
-  int t;
 
   if (!cpi)
     return;
@@ -2015,27 +2042,25 @@ void vp9_remove_compressor(VP9_COMP *cpi) {
   vp9_denoiser_free(&(cpi->denoiser));
 #endif
 
-  for (t = 0; t < cpi->num_workers; ++t) {
-    VPxWorker *const worker = &cpi->workers[t];
-    EncWorkerData *const thread_data = &cpi->tile_thr_data[t];
-
-    // Deallocate allocated threads.
-    vpx_get_worker_interface()->end(worker);
-
-    // Deallocate allocated thread data.
-    if (t < cpi->num_workers - 1) {
-      vpx_free(thread_data->td->counts);
-      vp9_free_pc_tree(thread_data->td);
-      vpx_free(thread_data->td);
-    }
-  }
-  vpx_free(cpi->tile_thr_data);
-  vpx_free(cpi->workers);
-
-  if (cpi->num_workers > 1)
+  // Delete memory associated with threads
+  if (cpi->max_threads > 1) {
+    int j;
     vp9_loop_filter_dealloc(&cpi->lf_row_sync);
 
+    for (j = 0; j < cpi->max_threads; ++j) {
+      VPxWorker *const worker = &cpi->enc_thread_hndl[j];
+      vpx_get_worker_interface()->end(worker);
+      vpx_free(cpi->enc_thread_ctxt[j]->td.counts);
+      vp9_free_pc_tree(&cpi->enc_thread_ctxt[j]->td);
+      vpx_free(cpi->enc_thread_ctxt[j]);
+    }
+    vpx_free(cpi->enc_thread_hndl);
+    vpx_free(cpi->enc_thread_ctxt);
+    vpx_free(cpi->cur_sb_col);
+  }
+
   dealloc_compressor_data(cpi);
+  vpx_free(cpi->tok);
 
   for (i = 0; i < sizeof(cpi->mbgraph_stats) /
                   sizeof(cpi->mbgraph_stats[0]); ++i) {
@@ -2759,10 +2784,10 @@ static void loopfilter_frame(VP9_COMP *cpi, VP9_COMMON *cm) {
   }
 
   if (lf->filter_level > 0) {
-    if (cpi->num_workers > 1)
+    if (cpi->max_threads > 1)
       vp9_loop_filter_frame_mt(cm->frame_to_show, cm, xd->plane,
                                lf->filter_level, 0, 0,
-                               cpi->workers, cpi->num_workers,
+                               cpi->enc_thread_hndl, cpi->max_threads,
                                &cpi->lf_row_sync);
     else
       vp9_loop_filter_frame(cm->frame_to_show, cm, xd, lf->filter_level, 0, 0);

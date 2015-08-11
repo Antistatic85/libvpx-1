@@ -951,13 +951,12 @@ static int mode_offset(const PREDICTION_MODE mode) {
 }
 
 static INLINE void update_thresh_freq_fact(VP9_COMP *cpi,
-                                           TileDataEnc *tile_data,
-                                           BLOCK_SIZE bsize,
+                                           int *const rd_thresh_freq_fact,
                                            MV_REFERENCE_FRAME ref_frame,
                                            THR_MODES best_mode_idx,
                                            PREDICTION_MODE mode) {
   THR_MODES thr_mode_idx = mode_idx[ref_frame][mode_offset(mode)];
-  int *freq_fact = &tile_data->thresh_freq_fact[bsize][thr_mode_idx];
+  int *freq_fact = &rd_thresh_freq_fact[thr_mode_idx];
   if (thr_mode_idx == best_mode_idx)
     *freq_fact -= (*freq_fact >> 4);
   else
@@ -1064,12 +1063,10 @@ static const REF_MODE ref_mode_set_svc[RT_INTER_MODES] = {
 // TODO(jingning) placeholder for inter-frame non-RD mode decision.
 // this needs various further optimizations. to be continued..
 void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
-                         TileDataEnc *tile_data,
+                         const TileInfo *const tile_info,
                          int mi_row, int mi_col, RD_COST *rd_cost,
                          BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx) {
   VP9_COMMON *const cm = &cpi->common;
-  SPEED_FEATURES *const sf = &cpi->sf;
-  TileInfo *const tile_info = &tile_data->tile_info;
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = &xd->mi[0]->mbmi;
   struct macroblockd_plane *const pd = &xd->plane[0];
@@ -1095,7 +1092,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   const int64_t inter_mode_thresh = RDCOST(x->rdmult, x->rddiv,
                                            intra_cost_penalty, 0);
   const int *const rd_threshes = cpi->rd.threshes[mbmi->segment_id][bsize];
-  const int *const rd_thresh_freq_fact = tile_data->thresh_freq_fact[bsize];
+  int *const rd_thresh_freq_fact = x->rd.thresh_freq_fact[bsize];
   INTERP_FILTER filter_ref;
   const int bsl = mi_width_log2_lookup[bsize];
   const int pred_filter_search = cm->interp_filter == SWITCHABLE ?
@@ -1232,7 +1229,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       continue;
 
     i = (ref_frame == LAST_FRAME) ? GOLDEN_FRAME : LAST_FRAME;
-    if ((cpi->ref_frame_flags & flag_list[i]) && sf->reference_masking)
+    if ((cpi->ref_frame_flags & flag_list[i]) && cpi->sf.reference_masking)
       if (x->pred_mv_sad[ref_frame] > (x->pred_mv_sad[i] << 1))
         ref_frame_skip_mask |= (1 << ref_frame);
     if (ref_frame_skip_mask & (1 << ref_frame))
@@ -1632,7 +1629,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       // TODO(yunqingwang): Check intra mode mask and only update freq_fact
       // for those valid modes.
       for (i = 0; i < intra_modes; i++) {
-        update_thresh_freq_fact(cpi, tile_data, bsize, INTRA_FRAME,
+        update_thresh_freq_fact(cpi, rd_thresh_freq_fact, INTRA_FRAME,
                                 best_mode_idx, intra_mode_list[i]);
       }
     } else {
@@ -1640,7 +1637,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
         PREDICTION_MODE this_mode;
         if (best_ref_frame != ref_frame) continue;
         for (this_mode = NEARESTMV; this_mode <= NEWMV; ++this_mode) {
-          update_thresh_freq_fact(cpi, tile_data, bsize, ref_frame,
+          update_thresh_freq_fact(cpi, rd_thresh_freq_fact, ref_frame,
                                   best_mode_idx, this_mode);
         }
       }

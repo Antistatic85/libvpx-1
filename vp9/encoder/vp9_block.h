@@ -14,6 +14,8 @@
 #include "vp9/common/vp9_entropymv.h"
 #include "vp9/common/vp9_entropy.h"
 
+#include "vp9/encoder/vp9_rd.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -110,6 +112,12 @@ struct macroblock {
 
   // note that token_costs is the cost when eob node is skipped
   vp9_coeff_cost token_costs[TX_SIZES];
+
+  // Entropy/rd stats for a set of rows encoded by an encoder thread are stored
+  // here. After encoding the complete frame, stats across all threads are
+  // combined for updating the probability tables and rd thresholds. In single
+  // core encoding these are directly copied to the destination.
+  RD_OPT rd;
 
   int optimize;
 

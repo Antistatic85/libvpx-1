@@ -45,6 +45,7 @@
 #if CONFIG_VP9_TEMPORAL_DENOISING
 #include "vp9/encoder/vp9_denoiser.h"
 #endif
+#include "vp9/encoder/vp9_ethread.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -245,31 +246,6 @@ static INLINE int is_lossless_requested(const VP9EncoderConfig *cfg) {
   return cfg->best_allowed_q == 0 && cfg->worst_allowed_q == 0;
 }
 
-// TODO(jingning) All spatially adaptive variables should go to TileDataEnc.
-typedef struct TileDataEnc {
-  TileInfo tile_info;
-  int thresh_freq_fact[BLOCK_SIZES][MAX_MODES];
-  int mode_map[BLOCK_SIZES][MAX_MODES];
-} TileDataEnc;
-
-typedef struct RD_COUNTS {
-  vp9_coeff_count coef_counts[TX_SIZES][PLANE_TYPES];
-  int64_t comp_pred_diff[REFERENCE_MODES];
-  int64_t filter_diff[SWITCHABLE_FILTER_CONTEXTS];
-} RD_COUNTS;
-
-typedef struct ThreadData {
-  MACROBLOCK mb;
-  RD_COUNTS rd_counts;
-  FRAME_COUNTS *counts;
-
-  PICK_MODE_CONTEXT *leaf_tree;
-  PC_TREE *pc_tree;
-  PC_TREE *pc_root;
-} ThreadData;
-
-struct EncWorkerData;
-
 typedef struct ActiveMap {
   int enabled;
   int update;
@@ -306,9 +282,6 @@ typedef struct VP9_COMP {
   YV12_BUFFER_CONFIG *unscaled_last_source;
   YV12_BUFFER_CONFIG scaled_last_source;
 
-  TileDataEnc *tile_data;
-  int allocated_tiles;  // Keep track of memory allocated for tiles.
-
   // For a still frame, this flag is set to 1 to skip partition search.
   int partition_search_skippable_frame;
 
@@ -331,8 +304,14 @@ typedef struct VP9_COMP {
 
   YV12_BUFFER_CONFIG last_frame_uf;
 
-  TOKENEXTRA *tile_tok[4][1 << 6];
-  unsigned int tok_count[4][1 << 6];
+  // The tokens resulted while encoding a frame are stored in the frame buffer
+  // pointed by "*tok"
+  TOKENEXTRA *tok;
+
+  // tplist[sb_row][tile_row][tile_col], represents the start and end points of
+  // the region where the tokens resulted while encoding the sb_row are stored
+  // in the buffer "*tok".
+  TOKENLIST (*tplist)[4][1 << 6];
 
   // Ambient reconstruction err target for force key frames
   int64_t ambient_err;
@@ -383,6 +362,18 @@ typedef struct VP9_COMP {
 
   CYCLIC_REFRESH *cyclic_refresh;
   ActiveMap active_map;
+
+  // Multi-threading
+
+  // encoder thread handles
+  VPxWorker *enc_thread_hndl;
+  thread_context **enc_thread_ctxt;
+  VP9LfSync lf_row_sync;
+  int max_threads;
+  // Allocate memory to store the encoded superblock index in each row.
+  int *cur_sb_col;
+  // minimum spatial distance (in SB) between encoding threads
+  int sync_range;
 
   fractional_mv_step_fp *find_fractional_mv_step;
   vp9_full_search_fn_t full_search_sad;
@@ -494,12 +485,6 @@ typedef struct VP9_COMP {
   int64_t vbp_threshold_minmax;
   int64_t vbp_threshold_sad;
   BLOCK_SIZE vbp_bsize_min;
-
-  // Multi-threading
-  int num_workers;
-  VPxWorker *workers;
-  struct EncWorkerData *tile_thr_data;
-  VP9LfSync lf_row_sync;
 } VP9_COMP;
 
 void vp9_initialize_enc(void);

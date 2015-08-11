@@ -179,6 +179,9 @@ typedef struct VP9Common {
   int mb_cols, mi_cols;
   int mi_stride;
 
+  // SBs, sb_rows/cols is in 64-pixel units;
+  int sb_cols, sb_rows;
+
   /* profile settings */
   TX_MODE tx_mode;
 

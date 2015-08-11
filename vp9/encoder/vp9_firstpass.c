@@ -611,7 +611,7 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
   xd->mi = cm->mi_grid_visible;
   xd->mi[0] = cm->mi;
 
-  vp9_frame_init_quantizer(cpi);
+  vp9_frame_init_quantizer(cpi, x);
 
   for (i = 0; i < MAX_MB_PLANE; ++i) {
     p[i].coeff = ctx->coeff_pbuf[i][1];

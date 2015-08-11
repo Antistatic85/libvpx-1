@@ -348,8 +348,8 @@ void vp9_init_plane_quantizers(VP9_COMP *cpi, MACROBLOCK *x) {
   vp9_initialize_me_consts(cpi, x, x->q_index);
 }
 
-void vp9_frame_init_quantizer(VP9_COMP *cpi) {
-  vp9_init_plane_quantizers(cpi, &cpi->td.mb);
+void vp9_frame_init_quantizer(VP9_COMP *cpi, MACROBLOCK *x) {
+  vp9_init_plane_quantizers(cpi, x);
 }
 
 void vp9_set_quantizer(VP9_COMMON *cm, int q) {

@@ -41,6 +41,11 @@ typedef struct {
   uint8_t skip_eob_node;
 } TOKENEXTRA;
 
+typedef struct {
+  TOKENEXTRA *start;
+  TOKENEXTRA *stop;
+} TOKENLIST;
+
 extern const vpx_tree_index vp9_coef_tree[];
 extern const vpx_tree_index vp9_coef_con_tree[];
 extern const struct vp9_token vp9_coef_encodings[];

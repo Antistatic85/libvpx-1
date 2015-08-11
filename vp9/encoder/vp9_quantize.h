@@ -43,7 +43,7 @@ void vp9_regular_quantize_b_4x4(MACROBLOCK *x, int plane, int block,
 struct VP9_COMP;
 struct VP9Common;
 
-void vp9_frame_init_quantizer(struct VP9_COMP *cpi);
+void vp9_frame_init_quantizer(struct VP9_COMP *cpi, MACROBLOCK *x);
 
 void vp9_init_plane_quantizers(struct VP9_COMP *cpi, MACROBLOCK *x);
 

@@ -14,9 +14,7 @@
 #include <limits.h>
 
 #include "vp9/common/vp9_blockd.h"
-
-#include "vp9/encoder/vp9_block.h"
-#include "vp9/encoder/vp9_context_tree.h"
+#include "vp9/common/vp9_onyxc_int.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -101,6 +99,9 @@ typedef struct RD_OPT {
   int thresh_mult_sub8x8[MAX_REFS];
 
   int threshes[MAX_SEGMENTS][BLOCK_SIZES][MAX_MODES];
+  int thresh_freq_fact[BLOCK_SIZES][MAX_MODES];
+
+  int mode_map[BLOCK_SIZES][MAX_MODES];
 
   int64_t prediction_type_threshes[MAX_REF_FRAMES][REFERENCE_MODES];
 
@@ -122,22 +123,22 @@ void vp9_rd_cost_reset(RD_COST *rd_cost);
 void vp9_rd_cost_init(RD_COST *rd_cost);
 
 struct TileInfo;
-struct TileDataEnc;
 struct VP9_COMP;
 struct macroblock;
+struct macroblockd;
 
 int vp9_compute_rd_mult(const struct VP9_COMP *cpi, int qindex);
 
 void vp9_initialize_rd_consts(struct VP9_COMP *cpi);
 
-void vp9_initialize_me_consts(struct VP9_COMP *cpi, MACROBLOCK *x, int qindex);
+void vp9_initialize_me_consts(struct VP9_COMP *cpi, struct macroblock *x, int qindex);
 
 void vp9_model_rd_from_var_lapndz(unsigned int var, unsigned int n,
                                   unsigned int qstep, int *rate,
                                   int64_t *dist);
 
 int vp9_get_switchable_rate(const struct VP9_COMP *cpi,
-                            const MACROBLOCKD *const xd);
+                            const struct macroblockd *const xd);
 
 int vp9_raster_block_offset(BLOCK_SIZE plane_bsize,
                             int raster_block, int stride);
@@ -167,11 +168,11 @@ static INLINE int rd_less_than_thresh(int64_t best_rd, int thresh,
     return best_rd < ((int64_t)thresh * thresh_fact >> 5) || thresh == INT_MAX;
 }
 
-void vp9_mv_pred(struct VP9_COMP *cpi, MACROBLOCK *x,
+void vp9_mv_pred(struct VP9_COMP *cpi, struct macroblock *x,
                  uint8_t *ref_y_buffer, int ref_y_stride,
                  int ref_frame, BLOCK_SIZE block_size);
 
-void vp9_setup_pred_block(const MACROBLOCKD *xd,
+void vp9_setup_pred_block(const struct macroblockd *xd,
                           struct buf_2d dst[MAX_MB_PLANE],
                           const YV12_BUFFER_CONFIG *src,
                           int mi_row, int mi_col,

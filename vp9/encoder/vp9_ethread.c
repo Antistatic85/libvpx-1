@@ -8,11 +8,100 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "vp9/encoder/vp9_encodeframe.h"
-#include "vp9/encoder/vp9_encoder.h"
-#include "vp9/encoder/vp9_ethread.h"
+#include "./vpx_config.h"
 
-static void accumulate_rd_opt(ThreadData *td, ThreadData *td_t) {
+#include "vp9/common/vp9_reconinter.h"
+
+#include "vp9/encoder/vp9_encoder.h"
+#include "vp9/encoder/vp9_encodeframe.h"
+
+// synchronize encoder threads
+void vp9_enc_sync_read(VP9_COMP *cpi, int sb_row, int sb_col) {
+  const VP9_COMMON *const cm = &cpi->common;
+  const volatile int *const top_sb_col = cpi->cur_sb_col + (sb_row - 1);
+
+  // Check if the dependencies necessary to encode the current SB are
+  // resolved. If the dependencies are resolved encode else do a busy wait.
+  while (sb_row && !(sb_col & (cpi->sync_range - 1))) {
+    // top right dependency
+    int idx = sb_col + cpi->sync_range;
+
+    idx = MIN(idx, (cm->sb_cols - 1));
+    if (*top_sb_col >= idx)
+      break;
+    x86_pause_hint();
+    thread_sleep(0);
+  }
+}
+
+// synchronize encoder threads
+void vp9_enc_sync_write(struct VP9_COMP *cpi, int sb_row) {
+  int *const cur_sb_col = cpi->cur_sb_col + sb_row;
+
+  // update the cur sb col
+  (*cur_sb_col)++;
+}
+
+// Set up nsync by width.
+// The optimal sync_range for different resolution and platform should be
+// determined by testing. Currently, it is chosen to be a power-of-2 number.
+static int get_sync_range(int width) {
+  // TODO(ram-ittiam): nsync numbers have to be picked by testing
+  if (width < 640)
+    return 1;
+  else if (width <= 1280)
+    return 2;
+  else if (width <= 4096)
+    return 4;
+  else
+    return 8;
+}
+
+void vp9_create_encoding_threads(VP9_COMP *cpi) {
+  VP9_COMMON * const cm = &cpi->common;
+  const VPxWorkerInterface * const winterface = vpx_get_worker_interface();
+  int i;
+
+  CHECK_MEM_ERROR(cm, cpi->enc_thread_hndl,
+                  vpx_malloc(sizeof(*cpi->enc_thread_hndl) * cpi->max_threads));
+  CHECK_MEM_ERROR(cm, cpi->enc_thread_ctxt,
+                  vpx_malloc(sizeof(*cpi->enc_thread_ctxt) * cpi->max_threads));
+  for (i = 0; i < cpi->max_threads; ++i) {
+    VPxWorker *const worker = &cpi->enc_thread_hndl[i];
+    winterface->init(worker);
+    CHECK_MEM_ERROR(cm, cpi->enc_thread_ctxt[i],
+                    vpx_memalign(32, sizeof(thread_context)));
+
+    // Set up pc_tree.
+    cpi->enc_thread_ctxt[i]->td.leaf_tree = NULL;
+    cpi->enc_thread_ctxt[i]->td.pc_tree = NULL;
+    vp9_setup_pc_tree(cm, &cpi->enc_thread_ctxt[i]->td);
+
+    // Allocate frame counters in thread data.
+    CHECK_MEM_ERROR(cm, cpi->enc_thread_ctxt[i]->td.counts,
+                    vpx_calloc(1, sizeof(*cpi->enc_thread_ctxt[i]->td.counts)));
+
+    worker->data1 = cpi->enc_thread_ctxt[i];
+    worker->data2 = NULL;
+    if (i < cpi->max_threads - 1 && !winterface->reset(worker)) {
+      vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
+                         "Tile decoder thread creation failed");
+    }
+  }
+  // set row encoding hook
+  for (i = 0; i < cpi->max_threads; ++i) {
+    winterface->sync(&cpi->enc_thread_hndl[i]);
+    cpi->enc_thread_hndl[i].hook = (VPxWorkerHook) vp9_encoding_thread_process;
+  }
+  CHECK_MEM_ERROR(cm, cpi->cur_sb_col,
+                  vpx_malloc(sizeof(*cpi->cur_sb_col) * cm->sb_rows));
+  // init cur sb col
+  memset(cpi->cur_sb_col, -1, (sizeof(*cpi->cur_sb_col) * cm->sb_rows));
+  // set up nsync (currently unused).
+  cpi->sync_range = get_sync_range(cpi->oxcf.width);
+}
+
+void vp9_accumulate_rd_opt(ThreadData *td, ThreadData *td_t) {
   int i, j, k, l, m, n;
 
   for (i = 0; i < REFERENCE_MODES; i++)
@@ -31,168 +120,86 @@ static void accumulate_rd_opt(ThreadData *td, ThreadData *td_t) {
                   td_t->rd_counts.coef_counts[i][j][k][l][m][n];
 }
 
-static int enc_worker_hook(EncWorkerData *const thread_data, void *unused) {
-  VP9_COMP *const cpi = thread_data->cpi;
-  const VP9_COMMON *const cm = &cpi->common;
-  const int tile_cols = 1 << cm->log2_tile_cols;
-  const int tile_rows = 1 << cm->log2_tile_rows;
-  int t;
-
-  (void) unused;
-
-  for (t = thread_data->start; t < tile_rows * tile_cols;
-      t += cpi->num_workers) {
-    int tile_row = t / tile_cols;
-    int tile_col = t % tile_cols;
-
-    vp9_encode_tile(cpi, thread_data->td, tile_row, tile_col);
-  }
-
-  return 0;
-}
-
-static int get_max_tile_cols(VP9_COMP *cpi) {
-  const int aligned_width = ALIGN_POWER_OF_TWO(cpi->oxcf.width, MI_SIZE_LOG2);
-  int mi_cols = aligned_width >> MI_SIZE_LOG2;
-  int min_log2_tile_cols, max_log2_tile_cols;
-  int log2_tile_cols;
-
-  vp9_get_tile_n_bits(mi_cols, &min_log2_tile_cols, &max_log2_tile_cols);
-  log2_tile_cols = clamp(cpi->oxcf.tile_columns,
-                   min_log2_tile_cols, max_log2_tile_cols);
-  return (1 << log2_tile_cols);
-}
-
-void vp9_encode_tiles_mt(VP9_COMP *cpi) {
-  VP9_COMMON *const cm = &cpi->common;
-  const int tile_cols = 1 << cm->log2_tile_cols;
-  const VPxWorkerInterface *const winterface = vpx_get_worker_interface();
-  const int num_workers = MIN(cpi->oxcf.max_threads, tile_cols);
+void vp9_mb_copy(VP9_COMP *cpi, MACROBLOCK *x_dst, MACROBLOCK *x_src) {
+  VP9_COMMON *cm = &cpi->common;
+  MACROBLOCKD *const xd_dst = &x_dst->e_mbd;
+  MACROBLOCKD *const xd_src = &x_src->e_mbd;
   int i;
 
-  vp9_init_tile_data(cpi);
-
-  // Only run once to create threads and allocate thread data.
-  if (cpi->num_workers == 0) {
-    int allocated_workers = num_workers;
-
-    // While using SVC, we need to allocate threads according to the highest
-    // resolution.
-    if (cpi->use_svc) {
-      int max_tile_cols = get_max_tile_cols(cpi);
-      allocated_workers = MIN(cpi->oxcf.max_threads, max_tile_cols);
-    }
-
-    CHECK_MEM_ERROR(cm, cpi->workers,
-                    vpx_malloc(allocated_workers * sizeof(*cpi->workers)));
-
-    CHECK_MEM_ERROR(cm, cpi->tile_thr_data,
-                    vpx_calloc(allocated_workers,
-                    sizeof(*cpi->tile_thr_data)));
-
-    for (i = 0; i < allocated_workers; i++) {
-      VPxWorker *const worker = &cpi->workers[i];
-      EncWorkerData *thread_data = &cpi->tile_thr_data[i];
-
-      ++cpi->num_workers;
-      winterface->init(worker);
-
-      if (i < allocated_workers - 1) {
-        thread_data->cpi = cpi;
-
-        // Allocate thread data.
-        CHECK_MEM_ERROR(cm, thread_data->td,
-                        vpx_memalign(32, sizeof(*thread_data->td)));
-        vp9_zero(*thread_data->td);
-
-        // Set up pc_tree.
-        thread_data->td->leaf_tree = NULL;
-        thread_data->td->pc_tree = NULL;
-        vp9_setup_pc_tree(cm, thread_data->td);
-
-        // Allocate frame counters in thread data.
-        CHECK_MEM_ERROR(cm, thread_data->td->counts,
-                        vpx_calloc(1, sizeof(*thread_data->td->counts)));
-
-        // Create threads
-        if (!winterface->reset(worker))
-          vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
-                             "Tile encoder thread creation failed");
-      } else {
-        // Main thread acts as a worker and uses the thread data in cpi.
-        thread_data->cpi = cpi;
-        thread_data->td = &cpi->td;
-      }
-
-      winterface->sync(worker);
-    }
+  for (i = 0; i < MAX_MB_PLANE; ++i) {
+    x_dst->plane[i] = x_src->plane[i];
+    xd_dst->plane[i] = xd_src->plane[i];
   }
-
-  for (i = 0; i < num_workers; i++) {
-    VPxWorker *const worker = &cpi->workers[i];
-    EncWorkerData *thread_data;
-
-    worker->hook = (VPxWorkerHook)enc_worker_hook;
-    worker->data1 = &cpi->tile_thr_data[i];
-    worker->data2 = NULL;
-    thread_data = (EncWorkerData*)worker->data1;
-
-    // Before encoding a frame, copy the thread data from cpi.
-    if (thread_data->td != &cpi->td) {
-      thread_data->td->mb = cpi->td.mb;
-      thread_data->td->rd_counts = cpi->td.rd_counts;
-    }
-    if (thread_data->td->counts != &cpi->common.counts) {
-      memcpy(thread_data->td->counts, &cpi->common.counts,
-             sizeof(cpi->common.counts));
-    }
-
-    // Handle use_nonrd_pick_mode case.
-    if (cpi->sf.use_nonrd_pick_mode) {
-      MACROBLOCK *const x = &thread_data->td->mb;
-      MACROBLOCKD *const xd = &x->e_mbd;
-      struct macroblock_plane *const p = x->plane;
-      struct macroblockd_plane *const pd = xd->plane;
-      PICK_MODE_CONTEXT *ctx = &thread_data->td->pc_root->none;
-      int j;
-
-      for (j = 0; j < MAX_MB_PLANE; ++j) {
-        p[j].coeff = ctx->coeff_pbuf[j][0];
-        p[j].qcoeff = ctx->qcoeff_pbuf[j][0];
-        pd[j].dqcoeff = ctx->dqcoeff_pbuf[j][0];
-        p[j].eobs = ctx->eobs_pbuf[j][0];
-      }
-    }
+  xd_dst->mi_stride = xd_src->mi_stride;
+  xd_dst->mi = xd_src->mi;
+  xd_dst->block_refs[0] = xd_src->block_refs[0];
+  xd_dst->block_refs[1] = xd_src->block_refs[1];
+  xd_dst->cur_buf = xd_src->cur_buf;
+#if CONFIG_VP9_HIGHBITDEPTH
+  xd_dst->bd = xd_src->bd;
+#endif
+  xd_dst->lossless = xd_src->lossless;
+  xd_dst->corrupted = 0;
+  for (i = 0; i < MAX_MB_PLANE; i++) {
+    xd_dst->above_context[i] = xd_src->above_context[i];
   }
+  xd_dst->above_seg_context = xd_src->above_seg_context;
 
-  // Encode a frame
-  for (i = 0; i < num_workers; i++) {
-    VPxWorker *const worker = &cpi->workers[i];
-    EncWorkerData *const thread_data = (EncWorkerData*)worker->data1;
+  x_dst->mbmi_ext_base = x_src->mbmi_ext_base;
+  x_dst->skip_block = x_src->skip_block;
+  x_dst->select_tx_size = x_src->select_tx_size;
+  x_dst->skip_recode = x_src->skip_recode;
+  x_dst->skip_optimize = x_src->skip_optimize;
+  x_dst->q_index = x_src->q_index;
 
-    // Set the starting tile for each thread.
-    thread_data->start = i;
+  x_dst->errorperbit = x_src->errorperbit;
+  x_dst->sadperbit16 = x_src->sadperbit16;
+  x_dst->sadperbit4 = x_src->sadperbit4;
+  x_dst->rddiv = x_src->rddiv;
+  x_dst->rdmult = x_src->rdmult;
+  x_dst->mb_energy = x_src->mb_energy;
 
-    if (i == cpi->num_workers - 1)
-      winterface->execute(worker);
-    else
-      winterface->launch(worker);
+  for (i = 0; i < MV_JOINTS; i++) {
+    x_dst->nmvjointcost[i] = x_src->nmvjointcost[i];
+    x_dst->nmvjointsadcost[i] = x_src->nmvjointsadcost[i];
   }
+  x_dst->nmvcost[0] = x_src->nmvcost[0];
+  x_dst->nmvcost[1] = x_src->nmvcost[1];
+  x_dst->nmvcost_hp[0] = x_src->nmvcost_hp[0];
+  x_dst->nmvcost_hp[1] = x_src->nmvcost_hp[1];
+  x_dst->mvcost = x_src->mvcost;
+  x_dst->nmvsadcost[0] = x_src->nmvsadcost[0];
+  x_dst->nmvsadcost[1] = x_src->nmvsadcost[1];
+  x_dst->nmvsadcost_hp[0] = x_src->nmvsadcost_hp[0];
+  x_dst->nmvsadcost_hp[1] = x_src->nmvsadcost_hp[1];
+  x_dst->mvsadcost = x_src->mvsadcost;
 
-  // Encoding ends.
-  for (i = 0; i < num_workers; i++) {
-    VPxWorker *const worker = &cpi->workers[i];
-    winterface->sync(worker);
+  x_dst->min_partition_size = x_src->min_partition_size;
+  x_dst->max_partition_size = x_src->max_partition_size;
+
+  memcpy(x_dst->token_costs, x_src->token_costs,
+         sizeof(x_src->token_costs));
+
+  memcpy(x_dst->rd.threshes, cpi->rd.threshes, sizeof(cpi->rd.threshes));
+  // freq scaling factors initialization has to happen only for video frame 1.
+  // For all other frames, It self corrects itself while encoding.
+  if (cm->current_video_frame == 0) {
+    memcpy(x_dst->rd.thresh_freq_fact, cpi->rd.thresh_freq_fact,
+           sizeof(cpi->rd.thresh_freq_fact));
+    memcpy(x_dst->rd.mode_map, cpi->rd.mode_map,
+           sizeof(cpi->rd.mode_map));
   }
+  x_dst->rd.RDMULT = cpi->rd.RDMULT;
+  x_dst->rd.RDDIV = cpi->rd.RDDIV;
 
-  for (i = 0; i < num_workers; i++) {
-    VPxWorker *const worker = &cpi->workers[i];
-    EncWorkerData *const thread_data = (EncWorkerData*)worker->data1;
+  x_dst->optimize = x_src->optimize;
+  x_dst->quant_fp = x_src->quant_fp;
+  vp9_zero(x_dst->skip_txfm);
+  vp9_zero(x_dst->bsse);
 
-    // Accumulate counters.
-    if (i < cpi->num_workers - 1) {
-      vp9_accumulate_frame_counts(cm, thread_data->td->counts, 0);
-      accumulate_rd_opt(&cpi->td, thread_data->td);
-    }
-  }
+  x_dst->fwd_txm4x4 = x_src->fwd_txm4x4;
+  x_dst->itxm_add = x_src->itxm_add;
+#if CONFIG_VP9_HIGHBITDEPTH
+  x_dst->highbd_itxm_add = x_src->highbd_itxm_add;
+#endif
 }
