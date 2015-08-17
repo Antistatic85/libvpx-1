@@ -551,11 +551,12 @@ YV12_BUFFER_CONFIG *vp9_get_scaled_ref_frame(const VP9_COMP *cpi,
           &cm->buffer_pool->frame_bufs[scaled_idx].buf : NULL;
 }
 
-int vp9_get_switchable_rate(const VP9_COMP *cpi, const MACROBLOCKD *const xd) {
-  const MB_MODE_INFO *const mbmi = &xd->mi[0]->mbmi;
-  const int ctx = vp9_get_pred_context_switchable_interp(xd);
+int vp9_get_switchable_rate(const VP9_COMP *cpi, const MACROBLOCK *const x) {
+  const MB_MODE_INFO *const mbmi = &x->e_mbd.mi[0]->mbmi;
+  const int ctx = x->data_parallel_processing ?
+      SWITCHABLE_FILTERS : vp9_get_pred_context_switchable_interp(&x->e_mbd);
   return SWITCHABLE_INTERP_RATE_FACTOR *
-             cpi->switchable_interp_costs[ctx][mbmi->interp_filter];
+      cpi->switchable_interp_costs[ctx][mbmi->interp_filter];
 }
 
 void vp9_set_rd_speed_thresholds(VP9_COMP *cpi) {

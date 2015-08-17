@@ -138,7 +138,7 @@ void vp9_model_rd_from_var_lapndz(unsigned int var, unsigned int n,
                                   int64_t *dist);
 
 int vp9_get_switchable_rate(const struct VP9_COMP *cpi,
-                            const struct macroblockd *const xd);
+                            const struct macroblock *const x);
 
 int vp9_raster_block_offset(BLOCK_SIZE plane_bsize,
                             int raster_block, int stride);

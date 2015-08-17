@@ -171,6 +171,7 @@ static vpx_codec_err_t validate_config(vpx_codec_alg_priv_t *ctx,
   RANGE_CHECK_HI(cfg, rc_resize_up_thresh,   100);
   RANGE_CHECK_HI(cfg, rc_resize_down_thresh, 100);
   RANGE_CHECK(cfg,        g_pass,         VPX_RC_ONE_PASS, VPX_RC_LAST_PASS);
+  RANGE_CHECK_BOOL(cfg, use_gpu);
   RANGE_CHECK(extra_cfg, min_gf_interval, 0, (MAX_LAG_BUFFERS - 1));
   RANGE_CHECK(extra_cfg, max_gf_interval, 0, (MAX_LAG_BUFFERS - 1));
   if (extra_cfg->max_gf_interval > 0) {
@@ -482,6 +483,8 @@ static vpx_codec_err_t set_encoder_config(
   oxcf->aq_mode = extra_cfg->aq_mode;
 
   oxcf->frame_periodic_boost =  extra_cfg->frame_periodic_boost;
+
+  oxcf->use_gpu = cfg->use_gpu;
 
   oxcf->ss_number_layers = cfg->ss_number_layers;
   oxcf->ts_number_layers = cfg->ts_number_layers;
@@ -1544,6 +1547,7 @@ static vpx_codec_enc_cfg_map_t encoder_usage_cfg_map[] = {
       {0},                    // ts_rate_decimator
       0,                      // ts_periodicity
       {0},                    // ts_layer_id
+      0,                      // use_gpu
       {0},                  // layer_taget_bitrate
       0                     // temporal_layering_mode
     }

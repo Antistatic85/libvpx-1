@@ -192,6 +192,8 @@ void vp9_mb_copy(VP9_COMP *cpi, MACROBLOCK *x_dst, MACROBLOCK *x_src) {
   x_dst->rd.RDMULT = cpi->rd.RDMULT;
   x_dst->rd.RDDIV = cpi->rd.RDDIV;
 
+  x_dst->data_parallel_processing = x_src->data_parallel_processing;
+
   x_dst->optimize = x_src->optimize;
   x_dst->quant_fp = x_src->quant_fp;
   vp9_zero(x_dst->skip_txfm);

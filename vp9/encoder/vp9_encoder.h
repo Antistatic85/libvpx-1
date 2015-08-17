@@ -233,6 +233,8 @@ typedef struct VP9EncoderConfig {
   vpx_fixed_buf_t firstpass_mb_stats_in;
 #endif
 
+  int use_gpu;
+
   vp8e_tuning tuning;
   vp9e_tune_content content;
 #if CONFIG_VP9_HIGHBITDEPTH
@@ -354,6 +356,12 @@ typedef struct VP9_COMP {
   // Get threshold from external input. A suggested threshold is 800 for HD
   // clips, and 300 for < HD clips.
   int encode_breakout;
+
+  // pointer to GPU output Buffers
+  GPU_OUTPUT *gpu_output_base[GPU_BLOCK_SIZES];
+
+  uint8_t *color_sensitivity[2];
+  MV *pred_mv_map;
 
   unsigned char *segmentation_map;
 

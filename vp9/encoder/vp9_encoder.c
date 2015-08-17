@@ -339,6 +339,14 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
   vpx_free(cpi->mbmi_ext_base);
   cpi->mbmi_ext_base = NULL;
 
+  vpx_free(cpi->color_sensitivity[0]);
+  cpi->color_sensitivity[0] = NULL;
+  vpx_free(cpi->color_sensitivity[1]);
+  cpi->color_sensitivity[1] = NULL;
+
+  vpx_free(cpi->pred_mv_map);
+  cpi->pred_mv_map = NULL;
+
   // Delete sementation map
   vpx_free(cpi->segmentation_map);
   cpi->segmentation_map = NULL;
@@ -388,6 +396,10 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
 
   vpx_free(cpi->tplist);
   cpi->tplist = NULL;
+
+  if (cm->use_gpu) {
+    vp9_free_gpu_interface_buffers(cpi);
+  }
 
   vp9_free_pc_tree(&cpi->td);
 
@@ -788,6 +800,11 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
   }
 #endif
 
+  // TODO(ram-ittiam): Basic sanity checks should be added for setting 'use_gpu'
+  // flag. For example, when the current frame's resolution is different from
+  // the previous frame, then 'use_gpu' should be set to '0'. All similar
+  // conditions needs to be identified and added.
+  cm->use_gpu = cpi->oxcf.use_gpu;
   vp9_alloc_compressor_data(cpi);
 
   cpi->svc.temporal_layering_mode = oxcf->temporal_layering_mode;
@@ -1640,6 +1657,17 @@ VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
 
   cm->current_video_frame = 0;
   cpi->partition_search_skippable_frame = 0;
+
+  CHECK_MEM_ERROR(cm, cpi->color_sensitivity[0],
+                  vpx_calloc(cm->sb_cols * cm->sb_rows,
+                             sizeof(*cpi->color_sensitivity[0])));
+  CHECK_MEM_ERROR(cm, cpi->color_sensitivity[1],
+                  vpx_calloc(cm->sb_cols * cm->sb_rows,
+                             sizeof(*cpi->color_sensitivity[1])));
+
+  CHECK_MEM_ERROR(cm, cpi->pred_mv_map,
+                  vpx_calloc(cm->sb_cols * cm->sb_rows,
+                             sizeof(*cpi->pred_mv_map)));
 
   realloc_segmentation_maps(cpi);
 
@@ -3946,6 +3974,8 @@ static void check_initial_width(VP9_COMP *cpi,
     alloc_raw_frame_buffers(cpi);
     init_ref_frame_bufs(cm);
     alloc_util_frame_buffers(cpi);
+    if (cm->use_gpu)
+      vp9_alloc_gpu_interface_buffers(cpi);
 
     init_motion_estimation(cpi);  // TODO(agrange) This can be removed.
 

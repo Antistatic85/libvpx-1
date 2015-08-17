@@ -1093,7 +1093,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
                                            intra_cost_penalty, 0);
   const int *const rd_threshes = cpi->rd.threshes[mbmi->segment_id][bsize];
   int *const rd_thresh_freq_fact = x->rd.thresh_freq_fact[bsize];
-  INTERP_FILTER filter_ref;
+  INTERP_FILTER filter_ref = cm->interp_filter;
   const int bsl = mi_width_log2_lookup[bsize];
   const int pred_filter_search = cm->interp_filter == SWITCHABLE ?
       (((mi_row + mi_col) >> bsl) +
@@ -1112,6 +1112,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   struct buf_2d orig_dst = pd->dst;
   PRED_BUFFER *best_pred = NULL;
   PRED_BUFFER *this_mode_pred = NULL;
+  int is_gpu_block = get_gpu_block_size(bsize) != GPU_BLOCK_INVALID;
   const int pixels_in_block = bh * bw;
   int reuse_inter_pred = cpi->sf.reuse_inter_pred_sby && ctx->pred_pixel_ready;
   int ref_frame_skip_mask = 0;
@@ -1120,7 +1121,8 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   int best_early_term = 0;
   int ref_frame_cost[MAX_REF_FRAMES];
 
-  init_ref_frame_cost(cm, xd, ref_frame_cost);
+  if (!x->data_parallel_processing)
+    init_ref_frame_cost(cm, xd, ref_frame_cost);
 
   if (reuse_inter_pred) {
     int i;
@@ -1144,13 +1146,19 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   x->skip_encode = cpi->sf.skip_encode_frame && x->q_index < QIDX_SKIP_THRESH;
   x->skip = 0;
 
-  if (xd->up_available)
-    filter_ref = xd->mi[-xd->mi_stride]->mbmi.interp_filter;
-  else if (xd->left_available)
-    filter_ref = xd->mi[-1]->mbmi.interp_filter;
-  else
-    filter_ref = cm->interp_filter;
+  // in data parallel path if the block that is being processed is not a
+  // gpu block then there is no need to continue
+  if (x->data_parallel_processing && !is_gpu_block)
+    return ;
 
+  // in data parallel path the block under access cannot depend on neighbour
+  // information
+  if (!x->data_parallel_processing) {
+    if (xd->up_available)
+      filter_ref = xd->mi[-xd->mi_stride]->mbmi.interp_filter;
+    else if (xd->left_available)
+      filter_ref = xd->mi[-1]->mbmi.interp_filter;
+  }
   // initialize mode decisions
   vp9_rd_cost_reset(&best_rdc);
   vp9_rd_cost_reset(rd_cost);
@@ -1169,6 +1177,12 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   } else {
     usable_ref_frame = GOLDEN_FRAME;
   }
+
+  // in data parallel path only last frame is considered during inter mode
+  // analysis
+  if (x->data_parallel_processing)
+    usable_ref_frame = LAST_FRAME;
+
   for (ref_frame = LAST_FRAME; ref_frame <= usable_ref_frame; ++ref_frame) {
     const YV12_BUFFER_CONFIG *yv12 = get_ref_frame_buffer(cpi, ref_frame);
 
@@ -1183,23 +1197,36 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       vp9_setup_pred_block(xd, yv12_mb[ref_frame], yv12, mi_row, mi_col,
                            sf, sf);
 
-      if (cm->use_prev_frame_mvs)
-        vp9_find_mv_refs(cm, xd, xd->mi[0], ref_frame,
-                         candidates, mi_row, mi_col, NULL, NULL,
-                         x->mbmi_ext->mode_context);
-      else
-        const_motion[ref_frame] = mv_refs_rt(cm, x, xd, tile_info,
-                                             xd->mi[0],
-                                             ref_frame, candidates,
-                                             mi_row, mi_col);
+      if (x->data_parallel_processing) {
+        // approximate nearest and near mv with previous frame motion vectors
+        vp9_find_mv_refs_dp(cm, xd, xd->mi[0], ref_frame,
+                            candidates, mi_row, mi_col,
+                            x->mbmi_ext->mode_context);
+      } else {
+        if (cm->use_prev_frame_mvs)
+          vp9_find_mv_refs(cm, xd, xd->mi[0], ref_frame,
+                           candidates, mi_row, mi_col, NULL, NULL,
+                           x->mbmi_ext->mode_context);
+        else
+          const_motion[ref_frame] = mv_refs_rt(cm, x, xd, tile_info,
+                                               xd->mi[0],
+                                               ref_frame, candidates,
+                                               mi_row, mi_col);
+      }
 
       vp9_find_best_ref_mvs(xd, cm->allow_high_precision_mv, candidates,
                             &frame_mv[NEARESTMV][ref_frame],
                             &frame_mv[NEARMV][ref_frame]);
 
-      if (!vp9_is_scaled(sf) && bsize >= BLOCK_8X8)
+      if ((!vp9_is_scaled(sf) && bsize >= BLOCK_8X8) &&
+          (!x->use_gpu || x->data_parallel_processing || !is_gpu_block ||
+              ref_frame != LAST_FRAME))
         vp9_mv_pred(cpi, x, yv12_mb[ref_frame][0].buf, yv12->y_stride,
                     ref_frame, bsize);
+      else {
+        GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
+        x->pred_mv_sad[LAST_FRAME] = x->gpu_output[gpu_bsize]->pred_mv_sad;
+      }
     } else {
       ref_frame_skip_mask |= (1 << ref_frame);
     }
@@ -1217,6 +1244,13 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
     if (cpi->use_svc)
       this_mode = ref_mode_set_svc[idx].pred_mode;
 
+    if (x->data_parallel_processing &&
+        ref_mode_set[idx].ref_frame != LAST_FRAME)
+      continue;
+    if (x->data_parallel_processing &&
+        (this_mode != ZEROMV && this_mode != NEWMV))
+      continue;
+
     if (!(cpi->sf.inter_mode_mask[bsize] & (1 << this_mode)))
       continue;
 
@@ -1229,9 +1263,10 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       continue;
 
     i = (ref_frame == LAST_FRAME) ? GOLDEN_FRAME : LAST_FRAME;
-    if ((cpi->ref_frame_flags & flag_list[i]) && cpi->sf.reference_masking)
-      if (x->pred_mv_sad[ref_frame] > (x->pred_mv_sad[i] << 1))
-        ref_frame_skip_mask |= (1 << ref_frame);
+    if (!x->data_parallel_processing &&
+        (cpi->ref_frame_flags & flag_list[i]) && cpi->sf.reference_masking)
+        if (x->pred_mv_sad[ref_frame] > (x->pred_mv_sad[i] << 1))
+          ref_frame_skip_mask |= (1 << ref_frame);
     if (ref_frame_skip_mask & (1 << ref_frame))
       continue;
 
@@ -1281,22 +1316,40 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
           cond_cost_list(cpi, cost_list),
           x->nmvjointcost, x->mvcost, &dis,
           &x->pred_sse[ref_frame], NULL, 0, 0);
-      } else if (!combined_motion_search(cpi, x, bsize, mi_row, mi_col,
-        &frame_mv[NEWMV][ref_frame], &rate_mv, best_rdc.rdcost)) {
-        continue;
+      } else if (x->use_gpu && !x->data_parallel_processing && is_gpu_block) {
+        GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
+        if (x->gpu_output[gpu_bsize]->rv)
+          continue;
+        x->pred_mv_sad[LAST_FRAME] = x->gpu_output[gpu_bsize]->pred_mv_sad;
+        frame_mv[NEWMV][LAST_FRAME].as_int =
+            x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].mv.as_int;
+        rate_mv = vp9_mv_bit_cost(
+            &frame_mv[NEWMV][LAST_FRAME].as_mv,
+            &x->mbmi_ext->ref_mvs[mbmi->ref_frame[0]][0].as_mv, x->nmvjointcost,
+            x->mvcost, MV_COST_WEIGHT);
+      } else {
+        int rv = !combined_motion_search(cpi, x, bsize, mi_row, mi_col,
+                                         &frame_mv[NEWMV][ref_frame], &rate_mv,
+                                         best_rdc.rdcost);
+        if (x->data_parallel_processing) {
+          GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
+          x->gpu_output[gpu_bsize]->rv = rv;
+          x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].mv.as_mv =
+              frame_mv[this_mode][LAST_FRAME].as_mv;
+        }
+        if (rv)
+          continue;
+        if (frame_mv[NEWMV][LAST_FRAME].as_int != INVALID_MV) {
+          const int pre_stride = xd->plane[0].pre[0].stride;
+          const uint8_t * const pre_buf = xd->plane[0].pre[0].buf +
+              (frame_mv[NEWMV][LAST_FRAME].as_mv.row >> 3) * pre_stride +
+              (frame_mv[NEWMV][LAST_FRAME].as_mv.col >> 3);
+          best_pred_sad = cpi->fn_ptr[bsize].sdf(x->plane[0].src.buf,
+                                                 x->plane[0].src.stride,
+                                                 pre_buf, pre_stride);
+          x->pred_mv_sad[LAST_FRAME] = best_pred_sad;
+        }
       }
-    }
-
-    if (this_mode == NEWMV && ref_frame == LAST_FRAME &&
-        frame_mv[NEWMV][LAST_FRAME].as_int != INVALID_MV) {
-      const int pre_stride = xd->plane[0].pre[0].stride;
-      const uint8_t * const pre_buf = xd->plane[0].pre[0].buf +
-          (frame_mv[NEWMV][LAST_FRAME].as_mv.row >> 3) * pre_stride +
-          (frame_mv[NEWMV][LAST_FRAME].as_mv.col >> 3);
-      best_pred_sad = cpi->fn_ptr[bsize].sdf(x->plane[0].src.buf,
-                                   x->plane[0].src.stride,
-                                   pre_buf, pre_stride);
-      x->pred_mv_sad[LAST_FRAME] = best_pred_sad;
     }
 
     if (cpi->use_svc) {
@@ -1314,7 +1367,8 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
     }
 
 
-    if (this_mode != NEARESTMV &&
+    if (!x->data_parallel_processing &&
+        this_mode != NEARESTMV &&
         frame_mv[this_mode][ref_frame].as_int ==
             frame_mv[NEARESTMV][ref_frame].as_int)
       continue;
@@ -1333,6 +1387,20 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
         pd->dst.buf = this_mode_pred->data;
         pd->dst.stride = bw;
       }
+    }
+
+    if (x->use_gpu && !x->data_parallel_processing && is_gpu_block &&
+        ((this_mode == ZEROMV || this_mode == NEWMV) &&
+            ref_mode_set[idx].ref_frame == LAST_FRAME)) {
+      GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
+
+      mbmi->interp_filter = x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].interp_filter;
+      mbmi->tx_size = x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].tx_size;
+      this_rdc = x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].this_rdc;
+      sse_y = x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].sse_y;
+
+      vp9_build_inter_predictors_sby(xd, mi_row, mi_col, bsize);
+      goto skip_gpu;
     }
 
     if ((this_mode == NEWMV || filter_ref == SWITCHABLE) && pred_filter_search
@@ -1354,7 +1422,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
         vp9_build_inter_predictors_sby(xd, mi_row, mi_col, bsize);
         model_rd_for_sb_y(cpi, bsize, x, xd, &pf_rate[filter], &pf_dist[filter],
                           &pf_var[filter], &pf_sse[filter]);
-        pf_rate[filter] += vp9_get_switchable_rate(cpi, xd);
+        pf_rate[filter] += vp9_get_switchable_rate(cpi, x);
         cost = RDCOST(x->rdmult, x->rddiv, pf_rate[filter], pf_dist[filter]);
         pf_tx_size[filter] = mbmi->tx_size;
         if (cost < best_cost) {
@@ -1408,6 +1476,25 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       }
     }
 
+    if (x->data_parallel_processing) {
+      GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
+
+      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].this_rdc =
+          this_rdc;
+      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].interp_filter =
+          mbmi->interp_filter;
+      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].tx_size = mbmi
+          ->tx_size;
+      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].mv.as_mv =
+          frame_mv[this_mode][LAST_FRAME].as_mv;
+      x->gpu_output[gpu_bsize]->pred_mv_sad = x->pred_mv_sad[LAST_FRAME];
+      x->gpu_output[gpu_bsize]->modeoutput[this_mode - ZEROMV].sse_y = sse_y;
+
+      continue ;
+    }
+
+skip_gpu:
+
     if (!this_early_term) {
       this_sse = (int64_t)sse_y;
       block_yrd(cpi, x, &this_rdc.rate, &this_rdc.dist, &is_skippable,
@@ -1428,11 +1515,11 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
 
       if (cm->interp_filter == SWITCHABLE) {
         if ((mbmi->mv[0].as_mv.row | mbmi->mv[0].as_mv.col) & 0x07)
-          this_rdc.rate += vp9_get_switchable_rate(cpi, xd);
+          this_rdc.rate += vp9_get_switchable_rate(cpi, x);
       }
     } else {
       this_rdc.rate += cm->interp_filter == SWITCHABLE ?
-          vp9_get_switchable_rate(cpi, xd) : 0;
+          vp9_get_switchable_rate(cpi, x) : 0;
       this_rdc.rate += vp9_cost_bit(vp9_get_skip_prob(cm, xd), 1);
     }
 
@@ -1504,6 +1591,9 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       break;
     }
   }
+
+  if (x->data_parallel_processing)
+    return;
 
   mbmi->mode          = best_mode;
   mbmi->interp_filter = best_pred_filter;

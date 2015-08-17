@@ -21,10 +21,13 @@ extern "C" {
 extern const uint8_t b_width_log2_lookup[BLOCK_SIZES];
 extern const uint8_t b_height_log2_lookup[BLOCK_SIZES];
 extern const uint8_t mi_width_log2_lookup[BLOCK_SIZES];
+extern const uint8_t mi_height_log2_lookup[BLOCK_SIZES];
 extern const uint8_t num_8x8_blocks_wide_lookup[BLOCK_SIZES];
 extern const uint8_t num_8x8_blocks_high_lookup[BLOCK_SIZES];
 extern const uint8_t num_4x4_blocks_high_lookup[BLOCK_SIZES];
 extern const uint8_t num_4x4_blocks_wide_lookup[BLOCK_SIZES];
+extern const uint8_t num_mxn_blocks_wide_lookup[BLOCK_SIZES];
+extern const uint8_t num_mxn_blocks_high_lookup[BLOCK_SIZES];
 extern const uint8_t size_group_lookup[BLOCK_SIZES];
 extern const uint8_t num_pels_log2_lookup[BLOCK_SIZES];
 extern const PARTITION_TYPE partition_lookup[][BLOCK_SIZES];

@@ -270,6 +270,8 @@ typedef struct VP9Common {
   int byte_alignment;
   int skip_loop_filter;
 
+  int use_gpu;
+
   // Private data associated with the frame buffer callbacks.
   void *cb_priv;
   vpx_get_frame_buffer_cb_fn_t get_fb_cb;

@@ -2533,7 +2533,7 @@ static int64_t handle_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
         int64_t tmp_skip_sse = INT64_MAX;
 
         mbmi->interp_filter = i;
-        rs = vp9_get_switchable_rate(cpi, xd);
+        rs = vp9_get_switchable_rate(cpi, x);
         rs_rd = RDCOST(x->rdmult, x->rddiv, rs, 0);
 
         if (i > 0 && intpel_mv) {
@@ -2617,7 +2617,7 @@ static int64_t handle_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   // Set the appropriate filter
   mbmi->interp_filter = cm->interp_filter != SWITCHABLE ?
       cm->interp_filter : best_filter;
-  rs = cm->interp_filter == SWITCHABLE ? vp9_get_switchable_rate(cpi, xd) : 0;
+  rs = cm->interp_filter == SWITCHABLE ? vp9_get_switchable_rate(cpi, x) : 0;
 
   if (pred_exists) {
     if (best_needs_copy) {
@@ -3635,7 +3635,7 @@ void vp9_rd_pick_inter_mode_sb_seg_skip(VP9_COMP *cpi, MACROBLOCK *x,
       int best_rs = INT_MAX;
       for (i = 0; i < SWITCHABLE_FILTERS; ++i) {
         mbmi->interp_filter = i;
-        rs = vp9_get_switchable_rate(cpi, xd);
+        rs = vp9_get_switchable_rate(cpi, x);
         if (rs < best_rs) {
           best_rs = rs;
           best_filter = mbmi->interp_filter;
@@ -3646,7 +3646,7 @@ void vp9_rd_pick_inter_mode_sb_seg_skip(VP9_COMP *cpi, MACROBLOCK *x,
   // Set the appropriate filter
   if (cm->interp_filter == SWITCHABLE) {
     mbmi->interp_filter = best_filter;
-    rate2 += vp9_get_switchable_rate(cpi, xd);
+    rate2 += vp9_get_switchable_rate(cpi, x);
   } else {
     mbmi->interp_filter = cm->interp_filter;
   }
@@ -3961,7 +3961,7 @@ void vp9_rd_pick_inter_mode_sub8x8(VP9_COMP *cpi,
 
             if (tmp_rd == INT64_MAX)
               continue;
-            rs = vp9_get_switchable_rate(cpi, xd);
+            rs = vp9_get_switchable_rate(cpi, x);
             rs_rd = RDCOST(x->rdmult, x->rddiv, rs, 0);
             filter_cache[switchable_filter_index] = tmp_rd;
             filter_cache[SWITCHABLE_FILTERS] =
@@ -4039,7 +4039,7 @@ void vp9_rd_pick_inter_mode_sub8x8(VP9_COMP *cpi,
       distortion2 += distortion;
 
       if (cm->interp_filter == SWITCHABLE)
-        rate2 += vp9_get_switchable_rate(cpi, xd);
+        rate2 += vp9_get_switchable_rate(cpi, x);
 
       if (!mode_excluded)
         mode_excluded = comp_pred ? cm->reference_mode == SINGLE_REFERENCE

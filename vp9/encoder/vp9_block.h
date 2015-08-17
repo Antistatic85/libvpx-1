@@ -15,6 +15,7 @@
 #include "vp9/common/vp9_entropy.h"
 
 #include "vp9/encoder/vp9_rd.h"
+#include "vp9/encoder/vp9_egpu.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -118,6 +119,15 @@ struct macroblock {
   // combined for updating the probability tables and rd thresholds. In single
   // core encoding these are directly copied to the destination.
   RD_OPT rd;
+
+  int use_gpu;
+
+  // pointer to MV results from GPU
+  GPU_OUTPUT *gpu_output[GPU_BLOCK_SIZES];
+
+  // Indicates whether the current algorithm is processed in a data parallel
+  // manner
+  int data_parallel_processing;
 
   int optimize;
 

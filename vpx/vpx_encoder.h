@@ -733,6 +733,14 @@ extern "C" {
     */
     unsigned int           ts_layer_id[VPX_TS_MAX_PERIODICITY];
 
+    /*!\brief Enable/disable GPU computing, if supported by the codec
+     *
+     * If GPU computing is enabled, part of the encoding handled by the CPU is
+     * off-loaded to GPU. The platform should support OpenCL GPU compute API.
+     * Still Experimental.
+     */
+    int                    use_gpu;
+
     /*!\brief Target bitrate for each spatial/temporal layer.
      *
      * These values specify the target coding bitrate to be used for each
