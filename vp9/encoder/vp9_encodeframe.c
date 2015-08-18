@@ -739,6 +739,8 @@ static int choose_partitioning(VP9_COMP *cpi,
       x->color_sensitivity[0] = cpi->color_sensitivity[0][sb_index];
       x->color_sensitivity[1] = cpi->color_sensitivity[1][sb_index];
       x->pred_mv[LAST_FRAME] = cpi->pred_mv_map[sb_index];
+
+      return 0;
     }
 
     if (!(is_one_pass_cbr_svc(cpi) && cpi->svc.spatial_layer_id)) {
