@@ -3618,6 +3618,9 @@ static void nonrd_use_partition(VP9_COMP *cpi,
       break;
   }
 
+  if (x->data_parallel_processing)
+    return;
+
   if (partition != PARTITION_SPLIT || bsize == BLOCK_8X8)
     update_partition_context(xd, mi_row, mi_col, subsize, bsize);
 }
