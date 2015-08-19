@@ -41,6 +41,8 @@ struct GPU_OUTPUT {
     int_mv mv;
     int interp_filter;
     int tx_size;
+    int skip_txfm;
+    int this_early_term;
     unsigned int sse_y;
   } modeoutput[GPU_INTER_MODES];
 } __attribute__ ((aligned(32)));
