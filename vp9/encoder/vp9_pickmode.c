@@ -1218,15 +1218,9 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
                             &frame_mv[NEARESTMV][ref_frame],
                             &frame_mv[NEARMV][ref_frame]);
 
-      if ((!vp9_is_scaled(sf) && bsize >= BLOCK_8X8) &&
-          (!x->use_gpu || x->data_parallel_processing || !is_gpu_block ||
-              ref_frame != LAST_FRAME))
+      if (!vp9_is_scaled(sf) && bsize >= BLOCK_8X8)
         vp9_mv_pred(cpi, x, yv12_mb[ref_frame][0].buf, yv12->y_stride,
                     ref_frame, bsize);
-      else {
-        GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
-        x->pred_mv_sad[LAST_FRAME] = x->gpu_output[gpu_bsize]->pred_mv_sad;
-      }
     } else {
       ref_frame_skip_mask |= (1 << ref_frame);
     }
@@ -1390,14 +1384,17 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
     }
 
     if (x->use_gpu && !x->data_parallel_processing && is_gpu_block &&
-        ((this_mode == ZEROMV || this_mode == NEWMV) &&
-            ref_mode_set[idx].ref_frame == LAST_FRAME)) {
+        ref_frame == LAST_FRAME && (this_mode == ZEROMV || this_mode == NEWMV)) {
       GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
+      int mode_index = GPU_INTER_OFFSET(this_mode);
 
-      mbmi->interp_filter = x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].interp_filter;
-      mbmi->tx_size = x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].tx_size;
-      this_rdc = x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].this_rdc;
-      sse_y = x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].sse_y;
+      if (((mbmi->mv[0].as_mv.row | mbmi->mv[0].as_mv.col) & 0x07) == 0)
+        mbmi->interp_filter = (filter_ref == SWITCHABLE) ? EIGHTTAP : filter_ref;
+      else
+        mbmi->interp_filter = x->gpu_output[gpu_bsize]->modeoutput[mode_index].interp_filter;
+      mbmi->tx_size = x->gpu_output[gpu_bsize]->modeoutput[mode_index].tx_size;
+      this_rdc = x->gpu_output[gpu_bsize]->modeoutput[mode_index].this_rdc;
+      sse_y = x->gpu_output[gpu_bsize]->modeoutput[mode_index].sse_y;
 
       vp9_build_inter_predictors_sby(xd, mi_row, mi_col, bsize);
       goto skip_gpu;
@@ -1483,12 +1480,13 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
           this_rdc;
       x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].interp_filter =
           mbmi->interp_filter;
-      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].tx_size = mbmi
-          ->tx_size;
+      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].tx_size =
+          mbmi->tx_size;
       x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].mv.as_mv =
           frame_mv[this_mode][LAST_FRAME].as_mv;
       x->gpu_output[gpu_bsize]->pred_mv_sad = x->pred_mv_sad[LAST_FRAME];
-      x->gpu_output[gpu_bsize]->modeoutput[this_mode - ZEROMV].sse_y = sse_y;
+      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].sse_y =
+          sse_y;
 
       continue ;
     }
