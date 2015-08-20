@@ -1314,7 +1314,8 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
         GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
         if (x->gpu_output[gpu_bsize]->rv)
           continue;
-        x->pred_mv_sad[LAST_FRAME] = x->gpu_output[gpu_bsize]->pred_mv_sad;
+        best_pred_sad = x->pred_mv_sad[LAST_FRAME] =
+            x->gpu_output[gpu_bsize]->pred_mv_sad;
         frame_mv[NEWMV][LAST_FRAME].as_int =
             x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].mv.as_int;
         rate_mv = vp9_mv_bit_cost(
@@ -1322,9 +1323,11 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
             &x->mbmi_ext->ref_mvs[mbmi->ref_frame[0]][0].as_mv, x->nmvjointcost,
             x->mvcost, MV_COST_WEIGHT);
       } else {
+        int64_t best_rd_sofar = !x->data_parallel_processing ? best_rdc.rdcost :
+            (RDCOST(x->rdmult, x->rddiv, this_rdc.rate, this_rdc.dist));
         int rv = !combined_motion_search(cpi, x, bsize, mi_row, mi_col,
                                          &frame_mv[NEWMV][ref_frame], &rate_mv,
-                                         best_rdc.rdcost);
+                                         best_rd_sofar);
         if (x->data_parallel_processing) {
           GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
           x->gpu_output[gpu_bsize]->rv = rv;
@@ -1479,22 +1482,16 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
 
     if (x->data_parallel_processing) {
       GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
+      int mode_index = GPU_INTER_OFFSET(this_mode);
 
-      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].this_rdc =
-          this_rdc;
-      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].interp_filter =
-          mbmi->interp_filter;
-      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].tx_size =
-          mbmi->tx_size;
-      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].mv.as_mv =
-          frame_mv[this_mode][LAST_FRAME].as_mv;
+      x->gpu_output[gpu_bsize]->modeoutput[mode_index].this_rdc = this_rdc;
+      x->gpu_output[gpu_bsize]->modeoutput[mode_index].interp_filter = mbmi->interp_filter;
+      x->gpu_output[gpu_bsize]->modeoutput[mode_index].tx_size = mbmi->tx_size;
+      x->gpu_output[gpu_bsize]->modeoutput[mode_index].mv.as_mv = frame_mv[this_mode][LAST_FRAME].as_mv;
       x->gpu_output[gpu_bsize]->pred_mv_sad = x->pred_mv_sad[LAST_FRAME];
-      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].sse_y =
-          sse_y;
-      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].skip_txfm =
-          x->skip_txfm[0];
-      x->gpu_output[gpu_bsize]->modeoutput[GPU_INTER_OFFSET(this_mode)].this_early_term =
-          this_early_term;
+      x->gpu_output[gpu_bsize]->modeoutput[mode_index].sse_y = sse_y;
+      x->gpu_output[gpu_bsize]->modeoutput[mode_index].skip_txfm = x->skip_txfm[0];
+      x->gpu_output[gpu_bsize]->modeoutput[mode_index].this_early_term = this_early_term;
 
       if (!this_early_term)
         continue;
