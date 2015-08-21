@@ -34,17 +34,17 @@ struct VP9_COMP;
 struct macroblockd;
 
 struct GPU_OUTPUT {
+  int64_t dist[GPU_INTER_MODES];
+  int rate[GPU_INTER_MODES];
+  int_mv mv[GPU_INTER_MODES];
+  unsigned int sse_y[GPU_INTER_MODES];
+  unsigned int var_y[GPU_INTER_MODES];
+  char interp_filter[GPU_INTER_MODES];
+  char tx_size[GPU_INTER_MODES];
+  char skip_txfm[GPU_INTER_MODES];
+  char this_early_term[GPU_INTER_MODES];
   int pred_mv_sad;
   int rv;
-  struct MODE_OUTPUT {
-    RD_COST this_rdc;
-    int_mv mv;
-    int interp_filter;
-    int tx_size;
-    int skip_txfm;
-    int this_early_term;
-    unsigned int sse_y;
-  } modeoutput[GPU_INTER_MODES];
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT GPU_OUTPUT;
 
