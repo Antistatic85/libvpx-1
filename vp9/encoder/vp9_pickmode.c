@@ -1410,7 +1410,8 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       goto skip_gpu;
     }
 
-    if ((this_mode == NEWMV || filter_ref == SWITCHABLE) && pred_filter_search
+    if ((this_mode == NEWMV || filter_ref == SWITCHABLE)
+        && (pred_filter_search || bsize >= BLOCK_32X32)
         && (ref_frame == LAST_FRAME ||
             (ref_frame == GOLDEN_FRAME && cpi->use_svc))
         && (((mbmi->mv[0].as_mv.row | mbmi->mv[0].as_mv.col) & 0x07) != 0)) {
