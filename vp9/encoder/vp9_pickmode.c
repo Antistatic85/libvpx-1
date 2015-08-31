@@ -1427,7 +1427,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
         int64_t cost;
         mbmi->interp_filter = filter;
         vp9_build_inter_predictors_sby(xd, mi_row, mi_col, bsize);
-        if (bsize > BLOCK_32X32 &&
+        if (bsize >= BLOCK_32X32 &&
             !cyclic_refresh_segment_id_boosted(xd->mi[0]->mbmi.segment_id) &&
             cm->base_qindex) {
           model_rd_for_sb_y_large(cpi, bsize, x, xd, &pf_rate[filter],
@@ -1475,7 +1475,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
         pd->dst.buf = this_mode_pred->data;
         pd->dst.stride = this_mode_pred->stride;
       }
-      if (x->skip_txfm[0] == SKIP_TXFM_AC_DC && bsize > BLOCK_32X32 &&
+      if (x->skip_txfm[0] == SKIP_TXFM_AC_DC && bsize >= BLOCK_32X32 &&
           !cyclic_refresh_segment_id_boosted(xd->mi[0]->mbmi.segment_id) &&
           cm->base_qindex) {
         check_for_uv_skip(cpi, bsize, x, xd, mi_row, mi_col, &this_early_term);
@@ -1485,7 +1485,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       vp9_build_inter_predictors_sby(xd, mi_row, mi_col, bsize);
 
       // For large partition blocks, extra testing is done.
-      if (bsize > BLOCK_32X32 &&
+      if (bsize >= BLOCK_32X32 &&
           !cyclic_refresh_segment_id_boosted(xd->mi[0]->mbmi.segment_id) &&
           cm->base_qindex) {
         model_rd_for_sb_y_large(cpi, bsize, x, xd, &this_rdc.rate,
