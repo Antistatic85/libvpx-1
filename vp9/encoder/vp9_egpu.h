@@ -24,9 +24,8 @@ extern "C" {
 
 // Block sizes for which MV computations are done in GPU
 typedef enum GPU_BLOCK_SIZE {
-  GPU_BLOCK_16X16 = 0,
-  GPU_BLOCK_32X32 = 1,
-  GPU_BLOCK_64X64 = 2,
+  GPU_BLOCK_32X32 = 0,
+  GPU_BLOCK_64X64 = 1,
   GPU_BLOCK_SIZES,
   GPU_BLOCK_INVALID = GPU_BLOCK_SIZES
 } GPU_BLOCK_SIZE;

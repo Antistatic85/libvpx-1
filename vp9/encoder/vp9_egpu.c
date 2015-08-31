@@ -17,7 +17,6 @@
 #include "vp9/encoder/vp9_egpu.h"
 
 const BLOCK_SIZE vp9_actual_block_size_lookup[GPU_BLOCK_SIZES] = {
-    BLOCK_16X16,
     BLOCK_32X32,
     BLOCK_64X64,
 };
@@ -29,7 +28,7 @@ const BLOCK_SIZE vp9_gpu_block_size_lookup[BLOCK_SIZES] = {
     GPU_BLOCK_INVALID,
     GPU_BLOCK_INVALID,
     GPU_BLOCK_INVALID,
-    GPU_BLOCK_16X16,
+    GPU_BLOCK_INVALID,
     GPU_BLOCK_INVALID,
     GPU_BLOCK_INVALID,
     GPU_BLOCK_32X32,
