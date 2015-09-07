@@ -87,8 +87,10 @@ static void free_seg_map(VP9_COMMON *cm) {
   }
 }
 
-void vp9_free_ref_frame_buffers(BufferPool *pool) {
+void vp9_free_ref_frame_buffers(VP9_COMMON *cm, BufferPool *pool) {
   int i;
+
+  (void)cm;
 
   for (i = 0; i < FRAME_BUFFERS; ++i) {
     if (pool->frame_bufs[i].ref_count > 0 &&
@@ -98,6 +100,11 @@ void vp9_free_ref_frame_buffers(BufferPool *pool) {
     }
     vpx_free(pool->frame_bufs[i].mvs);
     pool->frame_bufs[i].mvs = NULL;
+#if CONFIG_GPU_COMPUTE
+    if (cm != NULL && cm->use_gpu)
+      vp9_gpu_free_frame_buffer(cm, &pool->frame_bufs[i].buf);
+    else
+#endif
     vp9_free_frame_buffer(&pool->frame_bufs[i].buf);
   }
 }

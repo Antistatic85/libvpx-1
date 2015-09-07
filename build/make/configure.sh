@@ -560,6 +560,10 @@ process_common_cmdline() {
         [ -d "${optval}" ] || die "Not a directory: ${optval}"
         sdk_path="${optval}"
         ;;
+      --opencl-lib=*)
+        [ -f "${optval}" ] || die "Not a valid file: ${optval}"
+        opencl_lib="${optval}"
+        ;;
       --libc|--as|--prefix|--libdir|--sdk-path)
         die "Option ${opt} requires argument"
         ;;
@@ -1310,6 +1314,10 @@ EOF
         check_header pthread.h && add_extralibs -lpthread
         ;;
     esac
+  fi
+
+  if enabled opencl; then
+    add_extralibs "$opencl_lib"
   fi
 
   # only for MIPS platforms

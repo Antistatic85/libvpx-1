@@ -379,7 +379,7 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
   vpx_free(cpi->active_map.map);
   cpi->active_map.map = NULL;
 
-  vp9_free_ref_frame_buffers(cm->buffer_pool);
+  vp9_free_ref_frame_buffers(cm, cm->buffer_pool);
 #if CONFIG_VP9_POSTPROC
   vp9_free_postproc_buffers(cm);
 #endif
@@ -389,7 +389,7 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
   vp9_free_frame_buffer(&cpi->scaled_source);
   vp9_free_frame_buffer(&cpi->scaled_last_source);
   vp9_free_frame_buffer(&cpi->alt_ref_buffer);
-  vp9_lookahead_destroy(cpi->lookahead);
+  vp9_lookahead_destroy(cm, cpi->lookahead);
 
   vpx_free(cpi->tok);
   cpi->tok = 0;
@@ -399,6 +399,11 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
 
   if (cm->use_gpu) {
     vp9_free_gpu_interface_buffers(cpi);
+
+#if CONFIG_GPU_COMPUTE
+    vp9_egpu_remove(cpi);
+    vp9_gpu_remove(&cpi->common);
+#endif
   }
 
   vp9_free_pc_tree(&cpi->td);
@@ -627,7 +632,7 @@ static void alloc_raw_frame_buffers(VP9_COMP *cpi) {
   const VP9EncoderConfig *oxcf = &cpi->oxcf;
 
   if (!cpi->lookahead)
-    cpi->lookahead = vp9_lookahead_init(oxcf->width, oxcf->height,
+    cpi->lookahead = vp9_lookahead_init(cm, oxcf->width, oxcf->height,
                                         cm->subsampling_x, cm->subsampling_y,
 #if CONFIG_VP9_HIGHBITDEPTH
                                       cm->use_highbitdepth,
@@ -806,6 +811,19 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
   // conditions needs to be identified and added.
   cm->use_gpu = cpi->oxcf.use_gpu;
   vp9_alloc_compressor_data(cpi);
+#if CONFIG_GPU_COMPUTE
+  if (cm->use_gpu) {
+    // TODO(karthick-ittiam): If the GPU initialization fails, the calling
+    // function signals it as memory allocation error, instead of the error
+    // signaled below. This needs to be fixed.
+    if (vp9_gpu_init(cm))
+      vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
+                         "GPU initialization failed");
+    if (vp9_egpu_init(cpi))
+      vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
+                         "EGPU initialization failed");
+  }
+#endif
 
   cpi->svc.temporal_layering_mode = oxcf->temporal_layering_mode;
 
@@ -2103,7 +2121,7 @@ void vp9_remove_compressor(VP9_COMP *cpi) {
 #endif
 
   vp9_remove_common(cm);
-  vp9_free_ref_frame_buffers(cm->buffer_pool);
+  vp9_free_ref_frame_buffers(cm, cm->buffer_pool);
 #if CONFIG_VP9_POSTPROC
   vp9_free_postproc_buffers(cm);
 #endif
@@ -3190,15 +3208,35 @@ static void set_frame_size(VP9_COMP *cpi) {
 
   alloc_frame_mvs(cm, cm->new_fb_idx);
 
-  // Reset the frame pointers to the current frame size.
-  vp9_realloc_frame_buffer(get_frame_new_buffer(cm),
-                           cm->width, cm->height,
-                           cm->subsampling_x, cm->subsampling_y,
+  {
+    vpx_get_frame_buffer_cb_fn_t cb = NULL;
+    vpx_codec_frame_buffer_t *codec_frame_buffer = NULL;
+    void *cb_priv = NULL;
+
+#if CONFIG_GPU_COMPUTE
+    vpx_codec_frame_buffer_t raw_frame_buffer;
+    gpu_cb_priv gpu_priv = {cm, get_frame_new_buffer(cm)};
+
+    if (cm->use_gpu) {
+      cb = vp9_gpu_get_frame_buffer;
+      codec_frame_buffer = &raw_frame_buffer;
+      cb_priv = &gpu_priv;
+    }
 #if CONFIG_VP9_HIGHBITDEPTH
-                           cm->use_highbitdepth,
+    // gpu kernels for now do not support higher bit depths.
+    assert(cm->use_highbitdepth == 0);
 #endif
-                           VP9_ENC_BORDER_IN_PIXELS, cm->byte_alignment,
-                           NULL, NULL, NULL);
+#endif
+
+    // Reset the frame pointers to the current frame size.
+    vp9_realloc_frame_buffer(get_frame_new_buffer(cm), cm->width, cm->height,
+                             cm->subsampling_x, cm->subsampling_y,
+#if CONFIG_VP9_HIGHBITDEPTH
+                             cm->use_highbitdepth,
+#endif
+                             VP9_ENC_BORDER_IN_PIXELS, cm->byte_alignment,
+                             codec_frame_buffer, cb, cb_priv);
+  }
 
   alloc_util_frame_buffers(cpi);
   init_motion_estimation(cpi);

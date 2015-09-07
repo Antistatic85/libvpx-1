@@ -49,6 +49,9 @@ typedef struct yv12_buffer_config {
   uint8_t *alpha_buffer;
 
   uint8_t *buffer_alloc;
+#if CONFIG_OPENCL
+  void *gpu_mem;
+#endif
   int buffer_alloc_sz;
   int border;
   int frame_size;

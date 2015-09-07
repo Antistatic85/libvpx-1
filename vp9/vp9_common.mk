@@ -69,6 +69,10 @@ ifeq ($(CONFIG_VP9_POSTPROC),yes)
 VP9_COMMON_SRCS-$(HAVE_SSE2) += common/x86/vp9_mfqe_sse2.asm
 VP9_COMMON_SRCS-$(HAVE_SSE2) += common/x86/vp9_postproc_sse2.asm
 endif
+VP9_COMMON_SRCS-yes += common/vp9_gpu.c
+VP9_COMMON_SRCS-yes += common/vp9_gpu.h
+VP9_COMMON_SRCS-$(CONFIG_OPENCL) += common/opencl/vp9_opencl.c
+VP9_COMMON_SRCS-$(CONFIG_OPENCL) += common/opencl/vp9_opencl.h
 
 ifneq ($(CONFIG_VP9_HIGHBITDEPTH),yes)
 VP9_COMMON_SRCS-$(HAVE_DSPR2)  += common/mips/dspr2/vp9_itrans4_dspr2.c

@@ -1155,13 +1155,15 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
     ref_frame = ref_mode_set_dp[idx].ref_frame;
     assert(ref_frame == LAST_FRAME);
 
+    if (!is_gpu_inter_mode(this_mode))
+      continue;
+
     // Select prediction reference frames.
     for (i = 0; i < MAX_MB_PLANE; i++)
       xd->plane[i].pre[0] = yv12_mb[ref_frame][i];
 
     mbmi->ref_frame[0] = ref_frame;
     set_ref_ptrs(cm, xd, ref_frame, NONE);
-
 
     if (this_mode == NEWMV) {
       int64_t best_rd_sofar =
@@ -1477,7 +1479,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
           cond_cost_list(cpi, cost_list),
           x->nmvjointcost, x->mvcost, &dis,
           &x->pred_sse[ref_frame], NULL, 0, 0);
-      } else if (x->use_gpu && is_gpu_block) {
+      } else if (x->use_gpu && is_gpu_block && is_gpu_inter_mode(this_mode)) {
         GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
         if (x->gpu_output[gpu_bsize]->rv)
           continue;
@@ -1547,9 +1549,9 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
 
     if (x->use_gpu && is_gpu_block &&
         ref_frame == LAST_FRAME &&
-        (this_mode == NEWMV || mbmi->mv[0].as_int == 0)) {
+        (is_gpu_inter_mode(this_mode) || mbmi->mv[0].as_int == 0)) {
       GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
-      int gpu_mode_index = (this_mode == ZEROMV || this_mode == NEWMV) ?
+      int gpu_mode_index = is_gpu_inter_mode(this_mode) ?
           GPU_INTER_OFFSET(this_mode) : GPU_INTER_OFFSET(ZEROMV);
 
       mbmi->interp_filter = x->gpu_output[gpu_bsize]->interp_filter[gpu_mode_index];

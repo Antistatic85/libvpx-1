@@ -1007,6 +1007,178 @@ static int choose_partitioning(VP9_COMP *cpi,
   return 0;
 }
 
+#if CONFIG_GPU_COMPUTE
+
+void set_partition_types(VP9_COMP *cpi, MACROBLOCK *const x,
+                         GPU_INPUT **gpu_input_base,
+                         MODE_INFO **mi, int mi_row, int mi_col,
+                         BLOCK_SIZE bsize) {
+  VP9_COMMON *const cm = &cpi->common;
+  GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
+  GPU_INPUT *gpu_input = NULL;
+  const int bsl = b_width_log2_lookup[bsize], hbs = (1 << bsl) / 4;
+  const int mis = cm->mi_stride;
+  PARTITION_TYPE partition;
+  BLOCK_SIZE subsize;
+
+  if (mi_row >= cm->mi_rows || mi_col >= cm->mi_cols)
+    return;
+
+  if (bsize < get_actual_block_size(0))
+    return;
+
+  subsize = (bsize >= BLOCK_8X8) ? mi[0]->mbmi.sb_type : BLOCK_4X4;
+  partition = partition_lookup[bsl][subsize];
+  switch (partition) {
+    case PARTITION_NONE:
+      if (gpu_input_base[gpu_bsize] != NULL) {
+        gpu_input = gpu_input_base[gpu_bsize]
+            + vp9_get_gpu_buffer_index(cpi, mi_row, mi_col, gpu_bsize);
+        gpu_input->do_compute = 1;
+      }
+      break;
+    case PARTITION_VERT:
+      break;
+    case PARTITION_HORZ:
+      break;
+    case PARTITION_SPLIT:
+      subsize = get_subsize(bsize, PARTITION_SPLIT);
+      set_partition_types(cpi, x, gpu_input_base, mi, mi_row, mi_col, subsize);
+      set_partition_types(cpi, x, gpu_input_base, mi + hbs, mi_row,
+                          mi_col + hbs, subsize);
+      set_partition_types(cpi, x, gpu_input_base, mi + hbs * mis, mi_row + hbs,
+                          mi_col, subsize);
+      set_partition_types(cpi, x, gpu_input_base, mi + hbs * mis + hbs,
+                          mi_row + hbs, mi_col + hbs, subsize);
+      break;
+    default:
+      assert(0 && "Invalid partition type.");
+      break;
+  }
+}
+
+void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) {
+  VP9_COMMON *const cm = &cpi->common;
+  MACROBLOCK *const x = &cpi->td.mb;
+  MACROBLOCKD *const xd = &x->e_mbd;
+  VP9_EGPU *egpu = &cpi->egpu;
+  GPU_INPUT *gpu_input_base[GPU_BLOCK_SIZES] = {NULL};
+  GPU_BLOCK_SIZE gpu_bsize;
+  int mi_row, mi_col;
+
+  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; ++gpu_bsize) {
+    const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
+    const int mi_row_step = num_8x8_blocks_high_lookup[bsize];
+    const int mi_col_step = num_8x8_blocks_wide_lookup[bsize];
+
+    egpu->acquire_input_buffer(cpi, gpu_bsize, (void **) &gpu_input_base[gpu_bsize]);
+
+    for (mi_row = tile->mi_row_start; mi_row < tile->mi_row_end; mi_row +=
+        mi_row_step) {
+      int subframe_idx;
+
+      subframe_idx = vp9_get_subframe_index(cm, mi_row);
+      if (subframe_idx < CPU_SUB_FRAMES)
+        continue;
+      for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end; mi_col +=
+          mi_col_step) {
+        GPU_INPUT *gpu_input = gpu_input_base[gpu_bsize] +
+            vp9_get_gpu_buffer_index(cpi, mi_row, mi_col, gpu_bsize);
+        gpu_input->do_compute = 0;
+      }
+    }
+  }
+
+  for (mi_row = tile->mi_row_start; mi_row < tile->mi_row_end; mi_row +=
+      MI_BLOCK_SIZE) {
+    int subframe_idx;
+
+    subframe_idx = vp9_get_subframe_index(cm, mi_row);
+    if (subframe_idx < CPU_SUB_FRAMES)
+      continue;
+
+    for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end;
+        mi_col += MI_BLOCK_SIZE) {
+      const int sb_index = get_sb_index(cm, mi_row, mi_col);
+      const int idx_str = cm->mi_stride * mi_row + mi_col;
+      MODE_INFO **mi = cm->mi_grid_visible + idx_str;
+
+      set_offsets(cpi, tile, x, mi_row, mi_col, BLOCK_64X64);
+      choose_partitioning(cpi, tile, x, mi_row, mi_col);
+      cpi->color_sensitivity[0][sb_index] = x->color_sensitivity[0];
+      cpi->color_sensitivity[1][sb_index] = x->color_sensitivity[1];
+      if (mi[0]->mbmi.ref_frame[0] == LAST_FRAME) {
+        cpi->pred_mv_map[sb_index] = mi[0]->mbmi.mv[0].as_mv;
+      } else {
+        vp9_zero(cpi->pred_mv_map[sb_index]);
+      }
+      set_partition_types(cpi, x, gpu_input_base, mi, mi_row, mi_col, BLOCK_64X64);
+    }
+  }
+
+  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; ++gpu_bsize) {
+    const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
+    const int mi_row_step = num_8x8_blocks_high_lookup[bsize];
+    const int mi_col_step = num_8x8_blocks_wide_lookup[bsize];
+
+    for (mi_row = tile->mi_row_start; mi_row < tile->mi_row_end; mi_row +=
+        mi_row_step) {
+      int subframe_idx;
+
+      subframe_idx = vp9_get_subframe_index(cm, mi_row);
+      if (subframe_idx < CPU_SUB_FRAMES)
+        continue;
+      for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end; mi_col +=
+          mi_col_step) {
+        GPU_INPUT *gpu_input = gpu_input_base[gpu_bsize] +
+            vp9_get_gpu_buffer_index(cpi, mi_row, mi_col, gpu_bsize);
+        const int bsl = mi_width_log2(bsize);
+        int pred_filter_search = cm->interp_filter == SWITCHABLE ?
+            (((mi_row + mi_col) >> bsl) +
+                get_chessboard_index(cm->current_video_frame)) & 0x1 : 0;
+
+        if (pred_filter_search)
+          gpu_input->filter_type = SWITCHABLE;
+        else
+          gpu_input->filter_type = EIGHTTAP;
+
+        if (!gpu_input->do_compute) {
+          continue;
+        } else {
+          MB_MODE_INFO *mbmi = &xd->mi[0]->mbmi;
+          int mi_width, mi_height;
+          const MV_REFERENCE_FRAME ref_frame = LAST_FRAME;
+          int_mv *const candidates = x->mbmi_ext->ref_mvs[ref_frame];
+          BLOCK_SIZE sb_type_copy = mbmi->sb_type;
+
+          mi_width = num_8x8_blocks_wide_lookup[bsize];
+          mi_height = num_8x8_blocks_high_lookup[bsize];
+
+          set_mi_row_col(xd, tile, mi_row, mi_height,
+                         mi_col, mi_width,
+                         cm->mi_rows, cm->mi_cols);
+
+          mbmi->sb_type = bsize;
+
+          vp9_find_mv_refs_dp(cm, xd, xd->mi[0], ref_frame,
+                              candidates, mi_row, mi_col,
+                              x->mbmi_ext->mode_context);
+
+          vp9_find_best_ref_mvs(xd, cm->allow_high_precision_mv, candidates,
+                                &gpu_input->nearest_mv, &gpu_input->near_mv);
+
+          clamp_mv2(&gpu_input->nearest_mv.as_mv, xd);
+          clamp_mv2(&gpu_input->near_mv.as_mv, xd);
+
+          mbmi->sb_type = sb_type_copy;
+        }
+      }
+    }
+  }
+}
+
+#endif
+
 static void update_state(VP9_COMP *cpi, ThreadData *td,
                          PICK_MODE_CONTEXT *ctx,
                          int mi_row, int mi_col, BLOCK_SIZE bsize,
@@ -3644,7 +3816,61 @@ static void encode_nonrd_sb_row(VP9_COMP *cpi,
   memset(&xd->left_context, 0, sizeof(xd->left_context));
   memset(xd->left_seg_context, 0, sizeof(xd->left_seg_context));
 
-  x->use_gpu = cm->use_gpu;
+  // when gpu is enabled, before encoding the frame make sure all the
+  // dependencies are met
+  if (cm->use_gpu) {
+    SubFrameInfo subframe;
+    int subframe_idx = vp9_get_subframe_index(cm, mi_row);
+
+    // GPU ME compute analysis of the input image is done in parts.
+
+    // The input image is divided in to sub-frames, and GPU computes ME one
+    // sub-frame after another. After the completion of the sub-frame, the GPU
+    // returns its output so that CPU can start encoding. Hence for the first
+    // sub-frame of the image the CPU has to wait and does nothing.
+
+    // To avoid this, the first/first-few sub frames are run directly on CPU.
+    // While CPU is encoding first few sub frames, GPU can process the
+    // remaining sections and send the output in time for CPU.
+    vp9_subframe_init(&subframe, cm, subframe_idx);
+    if (subframe_idx < CPU_SUB_FRAMES) {
+      x->use_gpu = 0;
+    } else {
+      x->use_gpu = cm->use_gpu;
+    }
+#if CONFIG_GPU_COMPUTE
+    if (!x->data_parallel_processing && x->use_gpu) {
+      VP9_EGPU *egpu = &cpi->egpu;
+      egpu->enc_sync_read(cpi, subframe_idx);
+      if (mi_row == subframe.mi_row_start) {
+        GPU_BLOCK_SIZE gpu_bsize;
+        for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
+          GPU_OUTPUT *gpu_output_subframe;
+          egpu->acquire_output_buffer(cpi, gpu_bsize,
+                                      (void **)&gpu_output_subframe,
+                                      subframe_idx);
+
+          if (subframe_idx == 0) {
+            cpi->gpu_output_base[gpu_bsize] = gpu_output_subframe;
+          } else {
+            // Check if the acquired memory pointer for the given subframe is
+            // contiguous with respect to the previous subframes
+            const int buffer_offset =
+                vp9_get_gpu_buffer_index(cpi, subframe.mi_row_start, 0, gpu_bsize);
+
+            (void)buffer_offset;
+
+            assert(gpu_output_subframe - cpi->gpu_output_base[gpu_bsize] ==
+                buffer_offset);
+          }
+        }
+      }
+    }
+#else
+    if (x->data_parallel_processing && !x->use_gpu)
+      return;
+#endif
+  }
 
   // Code each SB in the row
   for (mi_col = tile_info->mi_col_start; mi_col < tile_info->mi_col_end;
@@ -3912,7 +4138,11 @@ static void encode_tiles(VP9_COMP *cpi) {
   if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode && !frame_is_intra_only(cm)) {
     td->mb.data_parallel_processing = 1;
 
+#if CONFIG_GPU_COMPUTE
+    vp9_gpu_mv_compute(cpi, &td->mb);
+#else
     encode_sb_rows(cpi, td, mi_row_start, mi_row_end, MI_BLOCK_SIZE);
+#endif
 
     // reset data parallel processing flag
     td->mb.data_parallel_processing = 0;

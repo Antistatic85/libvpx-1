@@ -477,7 +477,9 @@ typedef struct VP9_COMP {
 #if CONFIG_VP9_TEMPORAL_DENOISING
   VP9_DENOISER denoiser;
 #endif
-
+#if CONFIG_GPU_COMPUTE
+  VP9_EGPU egpu;
+#endif
   int resize_pending;
   int resize_state;
   int resize_scale_num;
