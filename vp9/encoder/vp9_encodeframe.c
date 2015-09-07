@@ -2995,16 +2995,20 @@ static void nonrd_pick_sb_modes(VP9_COMP *cpi,
     if (cyclic_refresh_segment_id_boosted(mbmi->segment_id))
       x->rdmult = vp9_cyclic_refresh_get_rdmult(cpi->cyclic_refresh);
 
-  if (cm->frame_type == KEY_FRAME)
+  if (cm->frame_type == KEY_FRAME) {
     hybrid_intra_mode_search(cpi, x, rd_cost, bsize, ctx);
-  else if (segfeature_active(&cm->seg, mbmi->segment_id, SEG_LVL_SKIP))
+  } else if (segfeature_active(&cm->seg, mbmi->segment_id, SEG_LVL_SKIP)) {
     set_mode_info_seg_skip(x, cm->tx_mode, rd_cost, bsize);
-  else if (bsize >= BLOCK_8X8)
-    vp9_pick_inter_mode(cpi, x, tile_info, mi_row, mi_col,
-                        rd_cost, bsize, ctx);
-  else
+  } else if (bsize >= BLOCK_8X8) {
+    if (x->data_parallel_processing)
+      vp9_pick_inter_mode_dp(cpi, x, mi_row, mi_col, bsize);
+    else
+      vp9_pick_inter_mode(cpi, x, tile_info, mi_row, mi_col, rd_cost, bsize,
+                          ctx);
+  } else {
     vp9_pick_inter_mode_sub8x8(cpi, x, mi_row, mi_col,
                                rd_cost, bsize, ctx);
+  }
 
   duplicate_mode_info_in_sb(cm, xd, mi_row, mi_col, bsize);
 
