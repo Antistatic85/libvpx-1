@@ -1554,7 +1554,13 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       int gpu_mode_index = is_gpu_inter_mode(this_mode) ?
           GPU_INTER_OFFSET(this_mode) : GPU_INTER_OFFSET(ZEROMV);
 
-      mbmi->interp_filter = x->gpu_output[gpu_bsize]->interp_filter[gpu_mode_index];
+      if (((mbmi->mv[0].as_mv.row | mbmi->mv[0].as_mv.col) & 0x07) == 0) {
+        mbmi->interp_filter =
+            (filter_ref == SWITCHABLE) ? EIGHTTAP : filter_ref;
+      } else {
+        mbmi->interp_filter =
+            x->gpu_output[gpu_bsize]->interp_filter[gpu_mode_index];
+      }
       mbmi->tx_size = x->gpu_output[gpu_bsize]->tx_size[gpu_mode_index];
       this_rdc.rate = x->gpu_output[gpu_bsize]->rate[gpu_mode_index];
       this_rdc.dist = x->gpu_output[gpu_bsize]->dist[gpu_mode_index];
