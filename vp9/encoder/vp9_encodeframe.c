@@ -1115,66 +1115,6 @@ void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) 
       set_partition_types(cpi, x, gpu_input_base, mi, mi_row, mi_col, BLOCK_64X64);
     }
   }
-
-  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; ++gpu_bsize) {
-    const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
-    const int mi_row_step = num_8x8_blocks_high_lookup[bsize];
-    const int mi_col_step = num_8x8_blocks_wide_lookup[bsize];
-
-    for (mi_row = tile->mi_row_start; mi_row < tile->mi_row_end; mi_row +=
-        mi_row_step) {
-      int subframe_idx;
-
-      subframe_idx = vp9_get_subframe_index(cm, mi_row);
-      if (subframe_idx < CPU_SUB_FRAMES)
-        continue;
-      for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end; mi_col +=
-          mi_col_step) {
-        GPU_INPUT *gpu_input = gpu_input_base[gpu_bsize] +
-            vp9_get_gpu_buffer_index(cpi, mi_row, mi_col, gpu_bsize);
-        const int bsl = mi_width_log2(bsize);
-        int pred_filter_search = cm->interp_filter == SWITCHABLE ?
-            (((mi_row + mi_col) >> bsl) +
-                get_chessboard_index(cm->current_video_frame)) & 0x1 : 0;
-
-        if (pred_filter_search)
-          gpu_input->filter_type = SWITCHABLE;
-        else
-          gpu_input->filter_type = EIGHTTAP;
-
-        if (!gpu_input->do_compute) {
-          continue;
-        } else {
-          MB_MODE_INFO *mbmi = &xd->mi[0]->mbmi;
-          int mi_width, mi_height;
-          const MV_REFERENCE_FRAME ref_frame = LAST_FRAME;
-          int_mv *const candidates = x->mbmi_ext->ref_mvs[ref_frame];
-          BLOCK_SIZE sb_type_copy = mbmi->sb_type;
-
-          mi_width = num_8x8_blocks_wide_lookup[bsize];
-          mi_height = num_8x8_blocks_high_lookup[bsize];
-
-          set_mi_row_col(xd, tile, mi_row, mi_height,
-                         mi_col, mi_width,
-                         cm->mi_rows, cm->mi_cols);
-
-          mbmi->sb_type = bsize;
-
-          vp9_find_mv_refs_dp(cm, xd, xd->mi[0], ref_frame,
-                              candidates, mi_row, mi_col,
-                              x->mbmi_ext->mode_context);
-
-          vp9_find_best_ref_mvs(xd, cm->allow_high_precision_mv, candidates,
-                                &gpu_input->nearest_mv, &gpu_input->near_mv);
-
-          clamp_mv2(&gpu_input->nearest_mv.as_mv, xd);
-          clamp_mv2(&gpu_input->near_mv.as_mv, xd);
-
-          mbmi->sb_type = sb_type_copy;
-        }
-      }
-    }
-  }
 }
 
 #endif

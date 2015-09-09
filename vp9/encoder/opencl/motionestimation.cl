@@ -131,9 +131,6 @@ typedef union int_mv {
 } int_mv;
 
 typedef struct GPU_INPUT {
-  int_mv nearest_mv;
-  int_mv near_mv;
-  int filter_type;
   int do_compute;
 }GPU_INPUT;
 
