@@ -132,7 +132,9 @@ static int combined_motion_search(VP9_COMP *cpi, MACROBLOCK *x,
   const int sadpb = x->sadperbit16;
   MV mvp_full;
   const int ref = mbmi->ref_frame[0];
-  const MV ref_mv = x->mbmi_ext->ref_mvs[ref][0].as_mv;
+  const MV zeromv = {0, 0};
+  const MV ref_mv =
+      x->data_parallel_processing ? zeromv : x->mbmi_ext->ref_mvs[ref][0].as_mv;
   int dis;
   int rate_mode;
   const int tmp_col_min = x->mv_col_min;
@@ -155,7 +157,7 @@ static int combined_motion_search(VP9_COMP *cpi, MACROBLOCK *x,
   vp9_set_mv_search_range(x, &ref_mv);
 
   assert(x->mv_best_ref_index[ref] <= 2);
-  if (x->mv_best_ref_index[ref] < 2)
+  if (x->mv_best_ref_index[ref] < 2 && !x->data_parallel_processing)
     mvp_full = x->mbmi_ext->ref_mvs[ref][x->mv_best_ref_index[ref]].as_mv;
   else
     mvp_full = x->pred_mv[ref];
@@ -1124,24 +1126,11 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
     frame_mv[ZEROMV][ref_frame].as_int = 0;
 
     if ((cpi->ref_frame_flags & flag_list[ref_frame]) && (yv12 != NULL)) {
-      int_mv *const candidates = x->mbmi_ext->ref_mvs[ref_frame];
       const struct scale_factors *const sf = &cm->frame_refs[ref_frame - 1].sf;
 
       vp9_setup_pred_block(xd, yv12_mb[ref_frame], yv12, mi_row, mi_col,
                            sf, sf);
 
-      // approximate nearest and near mv with previous frame motion vectors
-      vp9_find_mv_refs_dp(cm, xd, xd->mi[0], ref_frame,
-                          candidates, mi_row, mi_col,
-                          x->mbmi_ext->mode_context);
-
-      vp9_find_best_ref_mvs(xd, cm->allow_high_precision_mv, candidates,
-                            &frame_mv[NEARESTMV][ref_frame],
-                            &frame_mv[NEARMV][ref_frame]);
-
-      if (!vp9_is_scaled(sf) && bsize >= BLOCK_8X8)
-        vp9_mv_pred(cpi, x, yv12_mb[ref_frame][0].buf, yv12->y_stride,
-                    ref_frame, bsize);
     }
   }
 

@@ -65,41 +65,6 @@ void vp9_gpu_set_mvinfo_offsets(VP9_COMP *const cpi, MACROBLOCK *const x,
       (block_index_row * blocks_in_row) + block_index_col;
 }
 
-void vp9_find_mv_refs_dp(const VP9_COMMON *cm, const MACROBLOCKD *xd,
-                         MODE_INFO *mi, MV_REFERENCE_FRAME ref_frame,
-                         int_mv *mv_ref_list,
-                         int mi_row, int mi_col,
-                         uint8_t *mode_context) {
-  int i, refmv_count = 0;
-  const POSITION *const mv_ref_search = mv_ref_blocks[mi->mbmi.sb_type];
-  const TileInfo *const tile_info = &xd->tile;
-
-  // Blank the reference vector list
-  memset(mv_ref_list, 0, sizeof(*mv_ref_list) * MAX_MV_REF_CANDIDATES);
-
-  for (i = 0; i < MVREF_NEIGHBOURS; ++i) {
-    const POSITION *const mv_ref = &mv_ref_search[i];
-    MV_REF *prev_frame_mvs = cm->prev_frame->mvs + mi_row * cm->mi_cols + mi_col;
-    if (is_inside(tile_info, mi_col, mi_row, cm->mi_rows, mv_ref)) {
-      prev_frame_mvs += mv_ref->col + mv_ref->row * cm->mi_cols;
-
-      if (prev_frame_mvs->ref_frame[0] == ref_frame)
-        ADD_MV_REF_LIST(prev_frame_mvs->mv[0], refmv_count, mv_ref_list, Done);
-      else if (prev_frame_mvs->ref_frame[1] == ref_frame) {
-        ADD_MV_REF_LIST(prev_frame_mvs->mv[1], refmv_count, mv_ref_list, Done);
-      }
-    }
-  }
-
-  Done:
-
-  mode_context[ref_frame] = 0;
-
-  // Clamp vectors
-  for (i = 0; i < MAX_MV_REF_CANDIDATES; ++i)
-    clamp_mv_ref(&mv_ref_list[i].as_mv, xd);
-}
-
 static int get_subframe_offset(int idx, int mi_rows, int sb_rows) {
   const int offset = ((idx * sb_rows) / MAX_SUB_FRAMES) << MI_BLOCK_SIZE_LOG2;
   return MIN(offset, mi_rows);

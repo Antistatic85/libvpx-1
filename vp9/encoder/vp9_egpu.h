@@ -123,12 +123,6 @@ void vp9_gpu_set_mvinfo_offsets(struct VP9_COMP *const cpi,
                                 struct macroblock *const x,
                                 int mi_row, int mi_col, BLOCK_SIZE bsize);
 
-void vp9_find_mv_refs_dp(const VP9_COMMON *cm, const MACROBLOCKD *xd,
-                         MODE_INFO *mi, MV_REFERENCE_FRAME ref_frame,
-                         int_mv *mv_ref_list,
-                         int mi_row, int mi_col,
-                         uint8_t *mode_context);
-
 void vp9_subframe_init(SubFrameInfo *subframe, const VP9_COMMON *cm, int row);
 
 int vp9_get_subframe_index(const VP9_COMMON *cm, int mi_row);
