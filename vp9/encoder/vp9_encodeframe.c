@@ -1066,6 +1066,8 @@ void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) 
   GPU_BLOCK_SIZE gpu_bsize;
   int mi_row, mi_col;
 
+  assert(!(cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ && cm->seg.enabled));
+
   for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; ++gpu_bsize) {
     const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
     const int mi_row_step = num_8x8_blocks_high_lookup[bsize];

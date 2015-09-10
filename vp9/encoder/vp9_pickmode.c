@@ -1098,7 +1098,6 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
 
   assert(x->data_parallel_processing);
   assert(!cpi->use_svc);
-  assert(!cyclic_refresh_segment_id_boosted(xd->mi[0]->mbmi.segment_id));
   assert(cm->base_qindex);
 
   // in data parallel path if the block that is being processed is not a
