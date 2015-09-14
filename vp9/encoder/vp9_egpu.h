@@ -18,11 +18,7 @@ extern "C" {
 #include "vp9/common/vp9_enums.h"
 #include "vp9/common/vp9_mv.h"
 
-#if CONFIG_GPU_COMPUTE
-#define GPU_INTER_MODES 1 // ZEROMV
-#else
 #define GPU_INTER_MODES 2 // ZEROMV and NEWMV
-#endif
 
 #define MAX_SUB_FRAMES 1
 #define CPU_SUB_FRAMES 0
@@ -41,6 +37,7 @@ struct VP9_COMP;
 struct macroblockd;
 
 typedef struct GPU_INPUT {
+  int_mv pred_mv;
   int do_compute;
 } GPU_INPUT;
 
@@ -63,6 +60,18 @@ typedef struct GPU_RD_PARAMETERS {
   TX_MODE tx_mode;
   int dc_dequant;
   int ac_dequant;
+
+  int nmvsadcost[2][MV_VALS];
+  int sad_per_bit;
+
+  unsigned int inter_mode_cost[GPU_INTER_MODES];
+  int mvcost[2][MV_VALS];
+  int nmvjointcost[MV_JOINTS];
+  int error_per_bit;
+
+  int rd_mult;
+  int rd_div;
+  int switchable_interp_costs[SWITCHABLE_FILTERS];
 } GPU_RD_PARAMETERS;
 
 typedef struct SubFrameInfo {
@@ -104,13 +113,7 @@ static INLINE int mi_height_log2(BLOCK_SIZE bsize) {
 }
 
 static INLINE int is_gpu_inter_mode(PREDICTION_MODE mode) {
-  // this function will be removed once the newmv opencl computation kernels
-  // are added
-#if CONFIG_GPU_COMPUTE
-  return (mode == ZEROMV);
-#else
   return (mode == ZEROMV || mode == NEWMV);
-#endif
 }
 
 int vp9_get_gpu_buffer_index(struct VP9_COMP *const cpi, int mi_row, int mi_col,
@@ -137,7 +140,7 @@ int vp9_egpu_init(struct VP9_COMP *cpi);
 void vp9_fill_mv_reference_partition(struct VP9_COMP *cpi,
                                      const TileInfo *const tile);
 
-void vp9_gpu_mv_compute(struct VP9_COMP *cpi, struct macroblock *const x);
+void vp9_gpu_mv_compute(struct VP9_COMP *cpi);
 
 #endif
 

@@ -181,6 +181,8 @@ static int combined_motion_search(VP9_COMP *cpi, MACROBLOCK *x,
   *rate_mv = vp9_mv_bit_cost(&mvp_full, &ref_mv,
                              x->nmvjointcost, x->mvcost, MV_COST_WEIGHT);
 
+  if (x->data_parallel_processing)
+    x->mbmi_ext->mode_context[ref] = BOTH_PREDICTED;
   rate_mode = cpi->inter_mode_cost[x->mbmi_ext->mode_context[ref]]
                                   [INTER_OFFSET(NEWMV)];
   rv = !(RDCOST(x->rdmult, x->rddiv, (*rate_mv + rate_mode), 0) >
@@ -1222,7 +1224,7 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
       model_rd_for_sb_y_large(cpi, bsize, x, xd, &this_rdc.rate,
                               &this_rdc.dist, &var_y, &sse_y);
     }
-    if (x->skip_txfm[0] == SKIP_TXFM_AC_DC) {
+    if (x->skip_txfm[0] == SKIP_TXFM_AC_DC && this_mode != NEWMV) {
       check_for_uv_skip(cpi, bsize, x, xd, mi_row, mi_col, &this_early_term);
     }
 
@@ -1558,6 +1560,10 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       x->skip_txfm[0] = x->gpu_output[gpu_bsize]->skip_txfm[gpu_mode_index];
 
       vp9_build_inter_predictors_sby(xd, mi_row, mi_col, bsize);
+
+      if (x->skip_txfm[0] == SKIP_TXFM_AC_DC && this_mode == NEWMV) {
+        check_for_uv_skip(cpi, bsize, x, xd, mi_row, mi_col, &this_early_term);
+      }
       goto skip_gpu;
     }
 

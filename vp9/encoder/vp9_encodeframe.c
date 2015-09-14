@@ -1060,7 +1060,6 @@ void set_partition_types(VP9_COMP *cpi, MACROBLOCK *const x,
 void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) {
   VP9_COMMON *const cm = &cpi->common;
   MACROBLOCK *const x = &cpi->td.mb;
-  MACROBLOCKD *const xd = &x->e_mbd;
   VP9_EGPU *egpu = &cpi->egpu;
   GPU_INPUT *gpu_input_base[GPU_BLOCK_SIZES] = {NULL};
   GPU_BLOCK_SIZE gpu_bsize;
@@ -1115,6 +1114,33 @@ void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) 
         vp9_zero(cpi->pred_mv_map[sb_index]);
       }
       set_partition_types(cpi, x, gpu_input_base, mi, mi_row, mi_col, BLOCK_64X64);
+    }
+  }
+
+  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; ++gpu_bsize) {
+    const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
+    const int mi_row_step = num_8x8_blocks_high_lookup[bsize];
+    const int mi_col_step = num_8x8_blocks_wide_lookup[bsize];
+
+    for (mi_row = tile->mi_row_start; mi_row < tile->mi_row_end; mi_row +=
+        mi_row_step) {
+      int subframe_idx;
+
+      subframe_idx = vp9_get_subframe_index(cm, mi_row);
+      if (subframe_idx < CPU_SUB_FRAMES)
+        continue;
+      for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end; mi_col +=
+          mi_col_step) {
+        GPU_INPUT *gpu_input = gpu_input_base[gpu_bsize] +
+            vp9_get_gpu_buffer_index(cpi, mi_row, mi_col, gpu_bsize);
+
+        if (!gpu_input->do_compute) {
+          continue;
+        } else {
+          const int sb_index = get_sb_index(cm, mi_row, mi_col);
+          gpu_input->pred_mv.as_mv = cpi->pred_mv_map[sb_index];
+        }
+      }
     }
   }
 }
@@ -4081,7 +4107,7 @@ static void encode_tiles(VP9_COMP *cpi) {
     td->mb.data_parallel_processing = 1;
 
 #if CONFIG_GPU_COMPUTE
-    vp9_gpu_mv_compute(cpi, &td->mb);
+    vp9_gpu_mv_compute(cpi);
 #else
     encode_sb_rows(cpi, td, mi_row_start, mi_row_end, MI_BLOCK_SIZE);
 #endif

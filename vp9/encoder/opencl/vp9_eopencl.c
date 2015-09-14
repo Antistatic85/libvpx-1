@@ -13,14 +13,22 @@
 #include "vp9/encoder/opencl/vp9_eopencl.h"
 
 #define OPENCL_DEVELOPER_MODE 1
-
 #define BUILD_OPTION_LENGTH 128
-
+#define INTEL_HD_GRAPHICS_ID 32902
 #if ARCH_ARM
 #define PREFIX_PATH "./"
 #else
 #define PREFIX_PATH "../../vp9/encoder/opencl/"
 #endif
+
+static const int pixel_rows_per_workitem_log2_inter_pred[GPU_BLOCK_SIZES]
+                                                         = {3, 3};
+
+static const int pixel_rows_per_workitem_log2_full_pixel[GPU_BLOCK_SIZES]
+                                                                = {3, 4};
+
+static const int pixel_rows_per_workitem_log2_sub_pixel[GPU_BLOCK_SIZES]
+                                                                = {4, 5};
 
 static char *read_src(const char *src_file_name) {
   FILE *fp;
@@ -35,7 +43,6 @@ static char *read_src(const char *src_file_name) {
   err = fseek(fp, 0, SEEK_END);
   if (err != 0)
     return NULL;
-
 
   size = ftell(fp);
   if (size < 0)
@@ -76,15 +83,19 @@ static cl_ulong get_event_time_elapsed(cl_event event) {
 
 static void vp9_opencl_set_static_kernel_args(VP9_COMP *cpi,
                                               GPU_BLOCK_SIZE gpu_bsize) {
+  VP9_COMMON *cm = &cpi->common;
   VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
   cl_mem *gpu_ip = &eopencl->gpu_input[gpu_bsize].opencl_mem;
   cl_mem *gpu_op = &eopencl->gpu_output[gpu_bsize];
+  cl_mem *gpu_scratch = &eopencl->gpu_scratch[gpu_bsize];
   cl_mem *rdopt_parameters = &eopencl->rdopt_parameters.opencl_mem;
   cl_int y_stride = cpi->scaled_source.y_stride;
   int64_t yplane_size = (cpi->scaled_source.y_height +
       2 * cpi->scaled_source.border) * (uint64_t) y_stride;
   int64_t uvplane_size = (cpi->scaled_source.uv_height +
       2 * (cpi->scaled_source.border >> 1)) * (uint64_t) (y_stride >> 1);
+  cl_int mi_rows = cm->mi_rows;
+  cl_int mi_cols = cm->mi_cols;
   cl_int status;
 
   status  = clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 2,
@@ -100,6 +111,58 @@ static void vp9_opencl_set_static_kernel_args(VP9_COMP *cpi,
   status |= clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 7,
                            sizeof(cl_long), &uvplane_size);
   assert(status == CL_SUCCESS);
+
+  status  = clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 2,
+                           sizeof(cl_int), &y_stride);
+  status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 3,
+                           sizeof(cl_mem), gpu_ip);
+  status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 4,
+                           sizeof(cl_mem), gpu_op);
+  status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 5,
+                           sizeof(cl_mem), rdopt_parameters);
+  status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 6,
+                           sizeof(cl_int), &mi_rows);
+  status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 7,
+                           sizeof(cl_int), &mi_cols);
+  assert(status == CL_SUCCESS);
+
+  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 2,
+                           sizeof(cl_int), &y_stride);
+  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 3,
+                           sizeof(cl_mem), gpu_ip);
+  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 4,
+                           sizeof(cl_mem), gpu_op);
+  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 5,
+                           sizeof(cl_mem), rdopt_parameters);
+  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 6,
+                           sizeof(cl_int), &mi_rows);
+  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 7,
+                           sizeof(cl_int), &mi_cols);
+  assert(status == CL_SUCCESS);
+
+  status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 2,
+                           sizeof(cl_int), &y_stride);
+  status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 3,
+                           sizeof(cl_mem), gpu_ip);
+  status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 4,
+                           sizeof(cl_mem), gpu_op);
+  status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 5,
+                           sizeof(cl_mem), rdopt_parameters);
+  status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 6,
+                           sizeof(cl_mem), gpu_scratch);
+  assert(status == CL_SUCCESS);
+
+  status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 2,
+                           sizeof(cl_int), &y_stride);
+  status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 3,
+                           sizeof(cl_mem), gpu_ip);
+  status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 4,
+                           sizeof(cl_mem), gpu_op);
+  status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 5,
+                           sizeof(cl_mem), rdopt_parameters);
+  status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 6,
+                           sizeof(cl_mem), gpu_scratch);
+  assert(status == CL_SUCCESS);
 }
 
 static void vp9_opencl_set_dynamic_kernel_args(VP9_COMP *cpi,
@@ -112,6 +175,30 @@ static void vp9_opencl_set_dynamic_kernel_args(VP9_COMP *cpi,
   status = clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 0,
                           sizeof(cl_mem), &frm_ref->gpu_mem);
   status |= clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 1,
+                           sizeof(cl_mem), &img_src->gpu_mem);
+  assert(status == CL_SUCCESS);
+
+  status = clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 0,
+                          sizeof(cl_mem), &frm_ref->gpu_mem);
+  status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 1,
+                           sizeof(cl_mem), &img_src->gpu_mem);
+  assert(status == CL_SUCCESS);
+
+  status = clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 0,
+                          sizeof(cl_mem), &frm_ref->gpu_mem);
+  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 1,
+                           sizeof(cl_mem), &img_src->gpu_mem);
+  assert(status == CL_SUCCESS);
+
+  status = clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 0,
+                          sizeof(cl_mem), &frm_ref->gpu_mem);
+  status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 1,
+                           sizeof(cl_mem), &img_src->gpu_mem);
+  assert(status == CL_SUCCESS);
+
+  status = clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 0,
+                          sizeof(cl_mem), &frm_ref->gpu_mem);
+  status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 1,
                            sizeof(cl_mem), &img_src->gpu_mem);
   assert(status == CL_SUCCESS);
 }
@@ -153,6 +240,13 @@ static void vp9_opencl_alloc_buffers(VP9_COMP *cpi) {
     eopencl->gpu_output[gpu_bsize] = clCreateBuffer(
         opencl->context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
         alloc_size * sizeof(GPU_OUTPUT), NULL, &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    // alloc space of rd calc tmp buffers
+    eopencl->gpu_scratch[gpu_bsize] = clCreateBuffer(
+        opencl->context,  CL_MEM_READ_WRITE,
+        alloc_size * sizeof(GPU_SCRATCH), NULL, &status);
     if (status != CL_SUCCESS)
       goto fail;
 
@@ -241,6 +335,10 @@ static void vp9_opencl_free_buffers(VP9_COMP *cpi) {
     status = clReleaseMemObject(eopencl->gpu_output[gpu_bsize]);
     if (status != CL_SUCCESS)
       goto fail;
+
+    status = clReleaseMemObject(eopencl->gpu_scratch[gpu_bsize]);
+    if (status != CL_SUCCESS)
+      goto fail;
   }
 
   return;
@@ -324,6 +422,8 @@ static void vp9_opencl_execute(VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
   YV12_BUFFER_CONFIG *img_src = cpi->Source;
   YV12_BUFFER_CONFIG *frm_ref = get_ref_frame_buffer(cpi, LAST_FRAME);
 
+  const int b_width_in_pixels_log2 = b_width_log2_lookup[bsize] + 2;
+  const int b_width_in_pixels = 1 << b_width_in_pixels_log2;
   const int b_height_in_pixels_log2 = b_height_log2_lookup[bsize] + 2;
   const int b_height_in_pixels = 1 << b_height_in_pixels_log2;
   const int b_height_mask = b_height_in_pixels - 1;
@@ -333,8 +433,12 @@ static void vp9_opencl_execute(VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
   int block_row_offset;
   int subframe_height;
 
+  const size_t workitem_size[2] = {NUM_PIXELS_PER_WORKITEM, 1};
+  size_t local_size[2];
   size_t global_size[2];
   size_t global_offset[2];
+  size_t local_size_full_pixel[2], local_size_sub_pixel[2];
+  size_t local_size_inter_pred[2];
   const int ms_pixels = (num_8x8_blocks_wide_lookup[bsize] / 2) * 8;
 
   cl_int status = CL_SUCCESS;
@@ -422,6 +526,78 @@ static void vp9_opencl_execute(VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
                                   0, NULL, event_ptr[0]);
   assert(status == CL_SUCCESS);
 
+  // launch full pixel search new mv analysis kernel
+  // number of workitems per block
+  local_size[0] = b_width_in_pixels / workitem_size[0];
+  local_size[1] = b_height_in_pixels / workitem_size[1];
+
+  local_size_full_pixel[0] = local_size[0];
+  local_size_full_pixel[1] =
+      local_size[1] >> pixel_rows_per_workitem_log2_full_pixel[gpu_bsize];
+
+  // total number of workitems
+  global_size[0] = blocks_in_row * local_size_full_pixel[0];
+  global_size[1] = blocks_in_col * local_size_full_pixel[1];
+
+  // if the frame is partitioned in to sub-frames, the global work item
+  // size is scaled accordingly. the global offset determines the subframe
+  // that is being analysed by the gpu.
+  global_offset[0] = 0;
+  global_offset[1] = block_row_offset * local_size_full_pixel[1];
+
+  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                  eopencl->full_pixel_search[gpu_bsize],
+                                  2, global_offset, global_size,
+                                  local_size_full_pixel,
+                                  0, NULL, event_ptr[1]);
+  assert(status == CL_SUCCESS);
+
+  local_size_sub_pixel[0] = local_size[0];
+  local_size_sub_pixel[1] =
+      local_size[1] >> pixel_rows_per_workitem_log2_sub_pixel[gpu_bsize];
+
+  global_size[0] = blocks_in_row * local_size_sub_pixel[0];
+  global_size[1] = blocks_in_col * local_size_sub_pixel[1];
+
+  global_offset[0] = 0;
+  global_offset[1] = block_row_offset * local_size_sub_pixel[1];
+
+  // launch sub pixel search kernel
+  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                  eopencl->sub_pixel_search[gpu_bsize],
+                                  2, global_offset, global_size,
+                                  local_size_sub_pixel,
+                                  0, NULL, event_ptr[2]);
+  assert(status == CL_SUCCESS);
+
+  // launch inter prediction and sse compute kernel
+  local_size_inter_pred[0] = local_size[0];
+  local_size_inter_pred[1] =
+      local_size[1] >> pixel_rows_per_workitem_log2_inter_pred[gpu_bsize];
+
+  global_size[0] = blocks_in_row * local_size_inter_pred[0] * 2;
+  global_size[1] = blocks_in_col * local_size_inter_pred[1];
+
+  global_offset[0] = 0;
+  global_offset[1] = block_row_offset * local_size_inter_pred[1];
+
+  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                  eopencl->inter_prediction_and_sse[gpu_bsize],
+                                  2, global_offset, global_size,
+                                  local_size_inter_pred,
+                                  0, NULL, event_ptr[3]);
+
+  // launch rd compute kernel
+  global_size[0] = blocks_in_row;
+  global_size[1] = blocks_in_col;
+  global_offset[0] = 0;
+  global_offset[1] = block_row_offset;
+
+  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                  eopencl->rd_calculation_newmv[gpu_bsize],
+                                  2, global_offset, global_size, NULL,
+                                  0, NULL, event_ptr[4]);
+
 #if OPENCL_PROFILING
   for (i = 0; i < NUM_KERNELS; i++) {
     cl_ulong time_elapsed;
@@ -484,6 +660,18 @@ void vp9_eopencl_remove(VP9_COMP *cpi) {
     status = clReleaseKernel(eopencl->rd_calculation_zeromv[gpu_bsize]);
     if (status != CL_SUCCESS)
       goto fail;
+    status = clReleaseKernel(eopencl->full_pixel_search[gpu_bsize]);
+    if (status != CL_SUCCESS)
+      goto fail;
+    status = clReleaseKernel(eopencl->sub_pixel_search[gpu_bsize]);
+    if (status != CL_SUCCESS)
+      goto fail;
+    status = clReleaseKernel(eopencl->inter_prediction_and_sse[gpu_bsize]);
+    if (status != CL_SUCCESS)
+      goto fail;
+    status = clReleaseKernel(eopencl->rd_calculation_newmv[gpu_bsize]);
+    if (status != CL_SUCCESS)
+      goto fail;
   }
 
 #if OPENCL_PROFILING
@@ -504,41 +692,18 @@ fail:
   return;
 }
 
-int vp9_eopencl_init(VP9_COMP *cpi) {
-  VP9_COMMON *cm = &cpi->common;
-  VP9_GPU *gpu = &cm->gpu;
-  VP9_OPENCL *opencl = gpu->compute_framework;
-  VP9_EGPU *egpu = &cpi->egpu;
-  VP9_EOPENCL *eopencl;
-  cl_int status;
-  cl_device_id device;
+static int vp9_eopencl_build_subpel_kernel(VP9_COMP *cpi) {
+  VP9_OPENCL *opencl = cpi->common.gpu.compute_framework;
+  VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
+  cl_int status = CL_SUCCESS;
+  cl_device_id device = opencl->device;
   cl_uint vendor_id;
   cl_program program;
-  // TODO(karthick-ittiam) : Pass this prefix path as an input from testbench
-  const char *kernel_file_name= PREFIX_PATH"motionestimation.cl";
-  char build_options[GPU_BLOCK_SIZES][BUILD_OPTION_LENGTH] = {
-      "-DBLOCK_SIZE_IN_PIXELS=32",
-      "-DBLOCK_SIZE_IN_PIXELS=64"
-  };
+  const char *kernel_file_name= PREFIX_PATH"vp9_subpel.cl";
+  char build_options[BUILD_OPTION_LENGTH];
   char *kernel_src = NULL;
   GPU_BLOCK_SIZE gpu_bsize;
-
-  egpu->compute_framework = vpx_calloc(1, sizeof(VP9_EOPENCL));
-  egpu->alloc_buffers = vp9_opencl_alloc_buffers;
-  egpu->free_buffers = vp9_opencl_free_buffers;
-  egpu->acquire_input_buffer = vp9_opencl_acquire_input_buffer;
-  egpu->acquire_output_buffer = vp9_opencl_acquire_output_buffer;
-  egpu->acquire_rd_param_buffer = vp9_opencl_acquire_rd_param_buffer;
-  egpu->enc_sync_read = vp9_opencl_enc_sync_read;
-  egpu->execute = vp9_opencl_execute;
-  egpu->remove = vp9_eopencl_remove;
-
-  eopencl = egpu->compute_framework;
-
-  eopencl->opencl = opencl;
-
-  // device id
-  device = opencl->device;
+  BLOCK_SIZE bsize;
 
   // vendor id
   status = clGetDeviceInfo(device, CL_DEVICE_VENDOR_ID,
@@ -554,6 +719,7 @@ int vp9_eopencl_init(VP9_COMP *cpi) {
     goto fail;
 
   for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
+    bsize = get_actual_block_size(gpu_bsize);
     program = clCreateProgramWithSource(opencl->context, 1,
                                         (const char**)(void *)&kernel_src,
                                         NULL,
@@ -561,8 +727,16 @@ int vp9_eopencl_init(VP9_COMP *cpi) {
     if (status != CL_SUCCESS)
       goto fail;
 
+    sprintf(build_options,
+            "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d -DINTEL_HD_GRAPHICS=%d",
+            PREFIX_PATH,
+            num_8x8_blocks_wide_lookup[bsize] * 8,
+            1 << pixel_rows_per_workitem_log2_sub_pixel[gpu_bsize],
+            (vendor_id == INTEL_HD_GRAPHICS_ID));
+
     // Build the program
-    status = clBuildProgram(program, 1, &device, build_options[gpu_bsize],
+    status = clBuildProgram(program, 1, &device,
+                            build_options,
                             NULL, NULL);
     if (status != CL_SUCCESS) {
       // Enable this if you are a OpenCL developer and need to print the build
@@ -593,8 +767,9 @@ int vp9_eopencl_init(VP9_COMP *cpi) {
 #endif
       goto fail;
     }
-    eopencl->rd_calculation_zeromv[gpu_bsize] =
-        clCreateKernel(program, "vp9_zero_motion_search", &status);
+
+    eopencl->sub_pixel_search[gpu_bsize] = clCreateKernel(
+        program, "vp9_sub_pixel_search", &status);
     if (status != CL_SUCCESS)
       goto fail;
 
@@ -610,5 +785,221 @@ int vp9_eopencl_init(VP9_COMP *cpi) {
   if (kernel_src != NULL)
     vpx_free(kernel_src);
   return 1;
+}
+
+static int vp9_eopencl_build_fullpel_kernel(VP9_COMP *cpi) {
+  VP9_OPENCL *opencl = cpi->common.gpu.compute_framework;
+  VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
+  cl_int status = CL_SUCCESS;
+  cl_device_id device = opencl->device;
+  cl_program program;
+  const char *kernel_file_name= PREFIX_PATH"vp9_fullpel.cl";
+  char build_options[BUILD_OPTION_LENGTH];
+  char *kernel_src = NULL;
+  GPU_BLOCK_SIZE gpu_bsize;
+  BLOCK_SIZE bsize;
+
+  // device id
+  device = opencl->device;
+
+  // Read kernel source files
+  kernel_src = read_src(kernel_file_name);
+  if (kernel_src == NULL)
+    goto fail;
+
+  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
+    bsize = get_actual_block_size(gpu_bsize);
+    program = clCreateProgramWithSource(opencl->context, 1,
+                                        (const char**)(void *)&kernel_src,
+                                        NULL,
+                                        &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    sprintf(build_options,
+            "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
+            PREFIX_PATH,
+            num_8x8_blocks_wide_lookup[bsize] * 8,
+            1 << pixel_rows_per_workitem_log2_full_pixel[gpu_bsize]);
+
+    // Build the program
+    status = clBuildProgram(program, 1, &device, build_options,
+                            NULL, NULL);
+    if (status != CL_SUCCESS) {
+      // Enable this if you are a OpenCL developer and need to print the build
+      // errors of the OpenCL kernel
+#if OPENCL_DEVELOPER_MODE
+      uint8_t *build_log;
+      size_t build_log_size;
+
+      clGetProgramBuildInfo(program,
+                            device,
+                            CL_PROGRAM_BUILD_LOG,
+                            0,
+                            NULL,
+                            &build_log_size);
+      build_log = (uint8_t*)vpx_malloc(build_log_size);
+      if (build_log == NULL)
+        goto fail;
+
+      clGetProgramBuildInfo(program,
+                            device,
+                            CL_PROGRAM_BUILD_LOG,
+                            build_log_size,
+                            build_log,
+                            NULL);
+      build_log[build_log_size-1] = '\0';
+      fprintf(stderr, "Build Log:\n%s\n", build_log);
+      vpx_free(build_log);
+#endif
+      goto fail;
+    }
+
+    eopencl->full_pixel_search[gpu_bsize] = clCreateKernel(
+        program, "vp9_full_pixel_search", &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    status = clReleaseProgram(program);
+    if (status != CL_SUCCESS)
+      goto fail;
+  }
+
+  vpx_free(kernel_src);
+  return 0;
+
+  fail:
+  if (kernel_src != NULL)
+    vpx_free(kernel_src);
+  return 1;
+}
+
+static int vp9_eopencl_build_rd_kernel(VP9_COMP *cpi) {
+  VP9_OPENCL *opencl = cpi->common.gpu.compute_framework;
+  VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
+  cl_int status = CL_SUCCESS;
+  cl_device_id device = opencl->device;
+  cl_program program;
+  const char *kernel_file_name= PREFIX_PATH"vp9_rd.cl";
+  char build_options[BUILD_OPTION_LENGTH];
+  char *kernel_src = NULL;
+  GPU_BLOCK_SIZE gpu_bsize;
+  BLOCK_SIZE bsize;
+
+  // device id
+  device = opencl->device;
+
+  // Read kernel source files
+  kernel_src = read_src(kernel_file_name);
+  if (kernel_src == NULL)
+    goto fail;
+
+  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
+    bsize = get_actual_block_size(gpu_bsize);
+    program = clCreateProgramWithSource(opencl->context, 1,
+                                        (const char**)(void *)&kernel_src,
+                                        NULL,
+                                        &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    sprintf(build_options,
+            "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
+            PREFIX_PATH,
+            num_8x8_blocks_wide_lookup[bsize] * 8,
+            1 << pixel_rows_per_workitem_log2_inter_pred[gpu_bsize]);
+
+    // Build the program
+    status = clBuildProgram(program, 1, &device,
+                            build_options,
+                            NULL, NULL);
+    if (status != CL_SUCCESS) {
+      // Enable this if you are a OpenCL developer and need to print the build
+      // errors of the OpenCL kernel
+#if OPENCL_DEVELOPER_MODE
+      uint8_t *build_log;
+      size_t build_log_size;
+
+      clGetProgramBuildInfo(program,
+                            device,
+                            CL_PROGRAM_BUILD_LOG,
+                            0,
+                            NULL,
+                            &build_log_size);
+      build_log = (uint8_t*)vpx_malloc(build_log_size);
+      if (build_log == NULL)
+        goto fail;
+
+      clGetProgramBuildInfo(program,
+                            device,
+                            CL_PROGRAM_BUILD_LOG,
+                            build_log_size,
+                            build_log,
+                            NULL);
+      build_log[build_log_size-1] = '\0';
+      fprintf(stderr, "Build Log:\n%s\n", build_log);
+      vpx_free(build_log);
+#endif
+      goto fail;
+    }
+
+    eopencl->rd_calculation_zeromv[gpu_bsize] =
+        clCreateKernel(program, "vp9_zero_motion_search", &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    eopencl->rd_calculation_newmv[gpu_bsize] = clCreateKernel(
+        program, "vp9_rd_calculation", &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    eopencl->inter_prediction_and_sse[gpu_bsize] =
+        clCreateKernel(program, "vp9_inter_prediction_and_sse", &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    status = clReleaseProgram(program);
+    if (status != CL_SUCCESS)
+      goto fail;
+  }
+
+  vpx_free(kernel_src);
+  return 0;
+
+  fail:
+  if (kernel_src != NULL)
+    vpx_free(kernel_src);
+  return 1;
+}
+
+int vp9_eopencl_init(VP9_COMP *cpi) {
+  VP9_COMMON *cm = &cpi->common;
+  VP9_GPU *gpu = &cm->gpu;
+  VP9_OPENCL *opencl = gpu->compute_framework;
+  VP9_EGPU *egpu = &cpi->egpu;
+  VP9_EOPENCL *eopencl;
+
+  egpu->compute_framework = vpx_calloc(1, sizeof(VP9_EOPENCL));
+  egpu->alloc_buffers = vp9_opencl_alloc_buffers;
+  egpu->free_buffers = vp9_opencl_free_buffers;
+  egpu->acquire_input_buffer = vp9_opencl_acquire_input_buffer;
+  egpu->acquire_output_buffer = vp9_opencl_acquire_output_buffer;
+  egpu->acquire_rd_param_buffer = vp9_opencl_acquire_rd_param_buffer;
+  egpu->enc_sync_read = vp9_opencl_enc_sync_read;
+  egpu->execute = vp9_opencl_execute;
+  egpu->remove = vp9_eopencl_remove;
+  eopencl = egpu->compute_framework;
+  eopencl->opencl = opencl;
+
+  if (vp9_eopencl_build_rd_kernel(cpi))
+    return 1;
+
+  if (vp9_eopencl_build_fullpel_kernel(cpi))
+    return 1;
+
+  if (vp9_eopencl_build_subpel_kernel(cpi))
+    return 1;
+
+  return 0;
 }
 

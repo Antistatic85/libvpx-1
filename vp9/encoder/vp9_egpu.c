@@ -136,16 +136,40 @@ int vp9_egpu_init(VP9_COMP *cpi) {
 #endif
 }
 
-static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi, MACROBLOCK *const x) {
+static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi) {
   VP9_EGPU *egpu = &cpi->egpu;
+  MACROBLOCK *const x = &cpi->td.mb;
   struct macroblockd_plane *const pd = &x->e_mbd.plane[0];
   GPU_RD_PARAMETERS *rd_param_ptr;
+  int i;
 
   egpu->acquire_rd_param_buffer(cpi, (void **)&rd_param_ptr);
 
   rd_param_ptr->tx_mode = cpi->common.tx_mode;
   rd_param_ptr->dc_dequant = pd->dequant[0];
   rd_param_ptr->ac_dequant = pd->dequant[1];
+  memcpy(rd_param_ptr->nmvsadcost[0], x->nmvsadcost[0] - MV_MAX,
+         sizeof(rd_param_ptr->nmvsadcost[0]));
+  memcpy(rd_param_ptr->nmvsadcost[1], x->nmvsadcost[1] - MV_MAX,
+         sizeof(rd_param_ptr->nmvsadcost[1]));
+  rd_param_ptr->sad_per_bit = x->sadperbit16;
+  rd_param_ptr->inter_mode_cost[0] =
+      cpi->inter_mode_cost[BOTH_PREDICTED][INTER_OFFSET(ZEROMV)];
+  rd_param_ptr->inter_mode_cost[1] =
+      cpi->inter_mode_cost[BOTH_PREDICTED][INTER_OFFSET(NEWMV)];
+  memcpy(rd_param_ptr->mvcost[0], x->mvcost[0] - MV_MAX,
+         sizeof(rd_param_ptr->mvcost[0]));
+  memcpy(rd_param_ptr->mvcost[1], x->mvcost[1] - MV_MAX,
+         sizeof(rd_param_ptr->mvcost[1]));
+  for(i = 0; i < MV_JOINTS; i++) {
+    rd_param_ptr->nmvjointcost[i] = x->nmvjointcost[i];
+  }
+  rd_param_ptr->error_per_bit = x->errorperbit;
+  rd_param_ptr->rd_mult = cpi->rd.RDMULT;
+  rd_param_ptr->rd_div = cpi->rd.RDDIV;
+  for (i = 0; i < SWITCHABLE_FILTERS; i++)
+    rd_param_ptr->switchable_interp_costs[i] =
+        cpi->switchable_interp_costs[SWITCHABLE_FILTERS][i];
 }
 
 static void vp9_gpu_fill_mv_input(VP9_COMP *cpi, const TileInfo * const tile) {
@@ -161,7 +185,7 @@ static void vp9_gpu_fill_mv_input(VP9_COMP *cpi, const TileInfo * const tile) {
   }
 }
 
-void vp9_gpu_mv_compute(VP9_COMP *cpi, MACROBLOCK *const x) {
+void vp9_gpu_mv_compute(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
   const int tile_cols = 1 << cm->log2_tile_cols;
   int tile_col, tile_row;
@@ -171,7 +195,7 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi, MACROBLOCK *const x) {
   int subframe_idx;
 
   // fill rd param info
-  vp9_gpu_fill_rd_parameters(cpi, x);
+  vp9_gpu_fill_rd_parameters(cpi);
 
   // fill mv info
   for (tile_row = 0; tile_row < tile_rows; ++tile_row) {

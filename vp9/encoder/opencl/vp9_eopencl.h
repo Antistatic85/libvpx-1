@@ -18,7 +18,17 @@ extern "C" {
 #include "vp9/common/opencl/CL/cl.h"
 #include "vp9/encoder/vp9_encoder.h"
 
-#define NUM_KERNELS 1
+#define NUM_PIXELS_PER_WORKITEM 8
+#define NUM_KERNELS 5
+
+typedef struct {
+  unsigned int sse8x8[64];
+  int sum8x8[64];
+}SUM_SSE;
+
+typedef struct {
+  SUM_SSE sum_sse[EIGHTTAP_SMOOTH + 1];
+}GPU_SCRATCH;
 
 typedef struct VP9_EOPENCL {
   VP9_OPENCL *opencl;
@@ -29,7 +39,13 @@ typedef struct VP9_EOPENCL {
   opencl_buffer gpu_output_sub_buffer[GPU_BLOCK_SIZES][MAX_SUB_FRAMES];
   opencl_buffer rdopt_parameters;
 
+  cl_mem gpu_scratch[GPU_BLOCK_SIZES];
+
   cl_kernel rd_calculation_zeromv[GPU_BLOCK_SIZES];
+  cl_kernel full_pixel_search[GPU_BLOCK_SIZES];
+  cl_kernel sub_pixel_search[GPU_BLOCK_SIZES];
+  cl_kernel inter_prediction_and_sse[GPU_BLOCK_SIZES];
+  cl_kernel rd_calculation_newmv[GPU_BLOCK_SIZES];
 
   // gpu profiling code
   cl_event event[MAX_SUB_FRAMES];
