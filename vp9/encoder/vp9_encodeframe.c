@@ -4137,6 +4137,19 @@ static void encode_tiles_mt(VP9_COMP *cpi) {
   // Initialize cur_sb_col to -1 for all SB rows.
   memset(cpi->cur_sb_col, -1, (sizeof(*cpi->cur_sb_col) * cm->sb_rows));
 
+#if CONFIG_GPU_COMPUTE
+  // enable gpu processing
+  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode && !frame_is_intra_only(cm)) {
+    // set data parallel processing flag
+    cpi->td.mb.data_parallel_processing = 1;
+
+    vp9_gpu_mv_compute(cpi);
+
+    // reset data parallel processing flag
+    cpi->td.mb.data_parallel_processing = 0;
+  }
+#endif
+
   for (thread_id = 0; thread_id < cpi->max_threads ; ++thread_id) {
     VPxWorker *const worker = &cpi->enc_thread_hndl[thread_id];
     thread_context *const thread_ctxt = (thread_context *)worker->data1;
@@ -4183,6 +4196,7 @@ int vp9_encoding_thread_process(thread_context *const thread_ctxt, void* data2) 
   SPEED_FEATURES *const sf = &cpi->sf;
 
   (void)data2;
+  (void)cm;
   // initialize mb in thread context
   vp9_mb_copy(cpi, &thread_ctxt->td.mb, &cpi->td.mb);
   vp9_zero(*td->counts);
@@ -4204,6 +4218,7 @@ int vp9_encoding_thread_process(thread_context *const thread_ctxt, void* data2) 
     vp9_zero(x->zcoeff_blk);
   }
 
+#if !CONFIG_GPU_COMPUTE
   // enable gpu processing
   if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode && !frame_is_intra_only(cm)) {
     // set data parallel processing flag
@@ -4216,6 +4231,7 @@ int vp9_encoding_thread_process(thread_context *const thread_ctxt, void* data2) 
     // reset data parallel processing flag
     x->data_parallel_processing = 0;
   }
+#endif
 
   // encode superblock rows
   encode_sb_rows(cpi, td, thread_ctxt->mi_row_start, thread_ctxt->mi_row_end,
