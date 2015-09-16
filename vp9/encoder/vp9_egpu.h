@@ -70,7 +70,6 @@ typedef struct GPU_RD_PARAMETERS {
   int rd_div;
   unsigned int inter_mode_cost[GPU_INTER_MODES];
   int switchable_interp_costs[SWITCHABLE_FILTERS];
-  int mvcost[2][MV_VALS];
 
   int nmvjointcost[MV_JOINTS];
   int nmvsadcost[2][MV_VALS];

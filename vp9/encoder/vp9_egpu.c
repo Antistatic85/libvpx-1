@@ -166,10 +166,6 @@ static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi) {
       cpi->inter_mode_cost[BOTH_PREDICTED][INTER_OFFSET(ZEROMV)];
   rd_param_ptr->inter_mode_cost[1] =
       cpi->inter_mode_cost[BOTH_PREDICTED][INTER_OFFSET(NEWMV)];
-  memcpy(rd_param_ptr->mvcost[0], x->mvcost[0] - MV_MAX,
-         sizeof(rd_param_ptr->mvcost[0]));
-  memcpy(rd_param_ptr->mvcost[1], x->mvcost[1] - MV_MAX,
-         sizeof(rd_param_ptr->mvcost[1]));
   for(i = 0; i < MV_JOINTS; i++) {
     rd_param_ptr->nmvjointcost[i] = x->nmvjointcost[i];
   }

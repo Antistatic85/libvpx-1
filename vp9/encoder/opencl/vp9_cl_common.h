@@ -197,7 +197,6 @@ typedef struct GPU_RD_PARAMETERS {
   int rd_div;
   unsigned int inter_mode_cost[GPU_INTER_MODES];
   int switchable_interp_costs[SWITCHABLE_FILTERS];
-  int mvcost[2][MV_VALS];
 
   int nmvjointcost[MV_JOINTS];
   int nmvsadcost[2][MV_VALS];
@@ -225,12 +224,6 @@ inline MV_JOINT_TYPE vp9_get_mv_joint(const MV *mv) {
   } else {
     return mv->col == 0 ? MV_JOINT_HZVNZ : MV_JOINT_HNZVNZ;
   }
-}
-
-inline int mv_cost(MV *mv, __global int *joint_cost,
-                   __global int *comp_cost_0, __global int *comp_cost_1) {
-  return joint_cost[vp9_get_mv_joint(mv)] +
-      comp_cost_0[mv->row] + comp_cost_1[mv->col];
 }
 
 void vp9_gpu_set_mv_search_range(INIT *x, int mi_row, int mi_col, int mi_rows,
