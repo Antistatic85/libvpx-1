@@ -35,12 +35,6 @@ __constant ushort2 vp9_bilinear_filters[16] = {
 
 //=====   FUNCTION MACROS   =====
 //--------------------------------------
-///* estimated cost of a motion vector (r,c) */
-#define MVC(v, r, c)                                             \
-     (((nmvjointcost[((r) != refmv.row) * 2 + ((c) != refmv.col)]\
-          + nmvcost_0[((r) - refmv.row)]                         \
-                 + nmvcost_1[((c) - refmv.col)])                 \
-                      * error_per_bit + 4096) >> 13)
 
 // The VP9_BILINEAR_FILTERS_2TAP macro returns a pointer to the bilinear
 // filter kernel as a 2 tap filter.
@@ -251,25 +245,8 @@ void calculate_subpel_variance(__global uchar *ref_frame,
   }
 }
 
-int mv_err_cost(MV *mv, MV *ref,
-                __global int *nmvcost_0,
-                __global int *nmvcost_1,
-                __global int *nmvjointcost,
-                int error_per_bit) {
-  MV diff;
-
-  diff.row = mv->row - ref->row;
-  diff.col = mv->col - ref->col;
-
-  return ROUND_POWER_OF_TWO(mv_cost(&diff, nmvjointcost, nmvcost_0,
-                                    nmvcost_1) * error_per_bit, 13);
-}
-
 MV check_better_subpel(__global uchar *ref_frame,
                        __global uchar *cur_frame,
-                       __global int *nmvcost_0,
-                       __global int *nmvcost_1,
-                       __global int *nmvjointcost,
                        int stride,
                        unsigned int *v,
                        int r,
@@ -279,7 +256,6 @@ MV check_better_subpel(__global uchar *ref_frame,
                        MV minmv,
                        MV maxmv,
                        unsigned int *pbesterr,
-                       int error_per_bit,
                        __local int *intermediate_int) {
 
   int sum, thismse;
@@ -305,7 +281,7 @@ MV check_better_subpel(__global uchar *ref_frame,
     thismse = sse - (((long int)sum * sum)
         / (BLOCK_SIZE_IN_PIXELS * BLOCK_SIZE_IN_PIXELS));
 
-    if ((*v = MVC(*v, r, c) + thismse) < *pbesterr) {
+    if ((*v = thismse) < *pbesterr) {
       *pbesterr = *v;
       best_mv.row = r;
       best_mv.col = c;
@@ -320,9 +296,6 @@ MV check_better_subpel(__global uchar *ref_frame,
 
 MV first_level_checks(__global uchar *ref_frame,
                       __global uchar *cur_frame,
-                      __global int *nmvcost_0,
-                      __global int *nmvcost_1,
-                      __global int *nmvjointcost,
                       int stride,
                       int hstep,
                       MV best_mv,
@@ -330,7 +303,6 @@ MV first_level_checks(__global uchar *ref_frame,
                       MV minmv,
                       MV maxmv,
                       unsigned int *pbesterr,
-                      int error_per_bit,
                       __local int *intermediate_int) {
   unsigned int left, right, up, down, diag, whichdir;
   int distortion;
@@ -343,31 +315,31 @@ MV first_level_checks(__global uchar *ref_frame,
   besterr = *pbesterr;
 
   best_mv = check_better_subpel(ref_frame, cur_frame,
-                                nmvcost_0, nmvcost_1, nmvjointcost, stride,
+                                stride,
                                 &left, tr, (tc - hstep),
                                 best_mv, refmv, minmv, maxmv,
-                                &besterr, error_per_bit,
+                                &besterr,
                                 intermediate_int);
 
   best_mv = check_better_subpel(ref_frame, cur_frame,
-                                nmvcost_0, nmvcost_1, nmvjointcost, stride,
+                                stride,
                                 &right, tr, (tc + hstep),
                                 best_mv, refmv, minmv, maxmv,
-                                &besterr, error_per_bit,
+                                &besterr,
                                 intermediate_int);
 
   best_mv = check_better_subpel(ref_frame, cur_frame,
-                                nmvcost_0, nmvcost_1, nmvjointcost, stride,
+                                stride,
                                 &up, (tr - hstep), tc,
                                 best_mv, refmv, minmv, maxmv,
-                                &besterr, error_per_bit,
+                                &besterr,
                                 intermediate_int);
 
   best_mv = check_better_subpel(ref_frame, cur_frame,
-                                nmvcost_0, nmvcost_1, nmvjointcost, stride,
+                                stride,
                                 &down, (tr + hstep), tc,
                                 best_mv, refmv, minmv, maxmv,
-                                &besterr, error_per_bit,
+                                &besterr,
                                 intermediate_int);
 
   whichdir = (left <= right ? 0 : 1) + (up <= down ? 0 : 2);
@@ -392,10 +364,10 @@ MV first_level_checks(__global uchar *ref_frame,
   }
 
   best_mv = check_better_subpel(ref_frame, cur_frame,
-                                nmvcost_0, nmvcost_1, nmvjointcost, stride,
+                                stride,
                                 &diag, tr, tc,
                                 best_mv, refmv, minmv, maxmv,
-                                &besterr, error_per_bit,
+                                &besterr,
                                 intermediate_int);
 
   *pbesterr = besterr;
@@ -446,15 +418,11 @@ void calculate_fullpel_variance(__global uchar *ref_frame,
 
 MV vp9_find_best_sub_pixel_tree(__global uchar *ref_frame,
                                 __global uchar *cur_frame,
-                                __global int *nmvcost_0,
-                                __global int *nmvcost_1,
-                                __global int *nmvjointcost,
                                 int stride,
                                 MV best_mv,
                                 MV nearest_mv,
                                 MV fcenter_mv,
                                 INIT *x,
-                                int error_per_bit,
                                 __local int *intermediate_int) {
   int sum, thismse;
   int hstep;
@@ -481,28 +449,22 @@ MV vp9_find_best_sub_pixel_tree(__global uchar *ref_frame,
   besterr = sse - (((long int)sum * sum)
       / (BLOCK_SIZE_IN_PIXELS * BLOCK_SIZE_IN_PIXELS));
 
-  besterr += mv_err_cost(&best_mv, &nearest_mv,
-                         nmvcost_0, nmvcost_1, nmvjointcost,
-                         error_per_bit);
-
   minmv.col = MAX(x->mv_col_min * 8, fcenter_mv.col - MV_MAX);
   maxmv.col = MIN(x->mv_col_max * 8, fcenter_mv.col + MV_MAX);
   minmv.row = MAX(x->mv_row_min * 8, fcenter_mv.row - MV_MAX);
   maxmv.row = MIN(x->mv_row_max * 8, fcenter_mv.row + MV_MAX);
 
   best_mv = first_level_checks(ref_frame, cur_frame,
-                               nmvcost_0, nmvcost_1, nmvjointcost,
                                stride, hstep,
                                best_mv, nearest_mv, minmv, maxmv,
-                               &besterr, error_per_bit,
+                               &besterr,
                                intermediate_int);
 
   hstep >>= 1;
   best_mv = first_level_checks(ref_frame, cur_frame,
-                               nmvcost_0, nmvcost_1, nmvjointcost,
                                stride, hstep,
                                best_mv, nearest_mv, minmv, maxmv,
-                               &besterr, error_per_bit,
+                               &besterr,
                                intermediate_int);
 
   return best_mv;
@@ -551,9 +513,6 @@ void vp9_sub_pixel_search(__global uchar *ref_frame,
     goto exit;
   }
 
-  __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
-      &rd_parameters->seg_rd_param[gpu_input->seg_id];
-
   int mi_row = (global_row * PIXEL_ROWS_PER_WORKITEM) / MI_SIZE;
   int mi_col = global_col;
   BLOCK_SIZE bsize;
@@ -572,10 +531,6 @@ void vp9_sub_pixel_search(__global uchar *ref_frame,
   MV nearest_mv = {0, 0};
   MV fcenter_mv;
   INIT x;
-  __global int *nmvcost_0 = rd_parameters->mvcost[0] + MV_MAX;
-  __global int *nmvcost_1 = rd_parameters->mvcost[1] + MV_MAX;
-  __global int *nmvjointcost = rd_parameters->nmvjointcost;
-  int error_per_bit = seg_rd_params->error_per_bit;
 
   fcenter_mv.row = nearest_mv.row >> 3;
   fcenter_mv.col = nearest_mv.col >> 3;
@@ -584,10 +539,9 @@ void vp9_sub_pixel_search(__global uchar *ref_frame,
 
   gpu_output->mv[GPU_INTER_OFFSET(NEWMV)].as_mv  =
       vp9_find_best_sub_pixel_tree(ref_frame, cur_frame,
-                                   nmvcost_0, nmvcost_1, nmvjointcost,
                                    stride,
                                    best_mv, nearest_mv, fcenter_mv,
-                                   &x, error_per_bit,
+                                   &x,
                                    intermediate_int);
 exit:
   return;

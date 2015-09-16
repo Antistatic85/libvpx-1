@@ -690,6 +690,11 @@ int vp9_find_best_sub_pixel_tree(const MACROBLOCK *x,
                                z, src_stride, y, y_stride, second_pred,
                                w, h, offset, mvjcost, mvcost,
                                sse1, distortion);
+  // MV cost is not useful in data parallel processing, as ref_mv is not
+  // accurate. So let us skip MV cost in data parallel processing, for the
+  // benefit of simpler GPU implementation
+  if (x->data_parallel_processing)
+    besterr -= mv_err_cost(bestmv, ref_mv, mvjcost, mvcost, error_per_bit);
 
   (void) cost_list;  // to silence compiler warning
 
@@ -709,8 +714,10 @@ int vp9_find_best_sub_pixel_tree(const MACROBLOCK *x,
         else
           thismse = vfp->svaf(pre_address, y_stride, sp(tc), sp(tr),
                               src_address, src_stride, &sse, second_pred);
-        cost_array[idx] = thismse +
-            mv_err_cost(&this_mv, ref_mv, mvjcost, mvcost, error_per_bit);
+        cost_array[idx] = thismse;
+        if (!x->data_parallel_processing)
+          cost_array[idx] +=
+              mv_err_cost(&this_mv, ref_mv, mvjcost, mvcost, error_per_bit);
 
         if (cost_array[idx] < besterr) {
           best_idx = idx;
@@ -738,8 +745,10 @@ int vp9_find_best_sub_pixel_tree(const MACROBLOCK *x,
       else
         thismse = vfp->svaf(pre_address, y_stride, sp(tc), sp(tr),
                             src_address, src_stride, &sse, second_pred);
-      cost_array[4] = thismse +
-          mv_err_cost(&this_mv, ref_mv, mvjcost, mvcost, error_per_bit);
+      cost_array[4] = thismse;
+      if (!x->data_parallel_processing)
+        cost_array[4] +=
+            mv_err_cost(&this_mv, ref_mv, mvjcost, mvcost, error_per_bit);
 
       if (cost_array[4] < besterr) {
         best_idx = 4;

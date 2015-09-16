@@ -146,8 +146,6 @@ static void vp9_gpu_fill_segment_rd_parameters(VP9_COMP *cpi,
   seg_rd->dc_dequant = cpi->y_dequant[qindex][0];
   seg_rd->ac_dequant = cpi->y_dequant[qindex][1];
   seg_rd->sad_per_bit = vp9_get_sad_per_bit16(cpi, qindex);
-  seg_rd->error_per_bit = rdmult >> 6;
-  seg_rd->error_per_bit += (seg_rd->error_per_bit == 0);
 }
 
 static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi) {

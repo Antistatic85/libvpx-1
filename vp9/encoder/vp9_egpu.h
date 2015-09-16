@@ -63,8 +63,6 @@ typedef struct GPU_RD_SEG_PARAMETERS {
   int ac_dequant;
 
   int sad_per_bit;
-
-  int error_per_bit;
 } GPU_RD_SEG_PARAMETERS;
 
 typedef struct GPU_RD_PARAMETERS {
@@ -72,11 +70,10 @@ typedef struct GPU_RD_PARAMETERS {
   int rd_div;
   unsigned int inter_mode_cost[GPU_INTER_MODES];
   int switchable_interp_costs[SWITCHABLE_FILTERS];
+  int mvcost[2][MV_VALS];
 
   int nmvjointcost[MV_JOINTS];
   int nmvsadcost[2][MV_VALS];
-
-  int mvcost[2][MV_VALS];
 
   // Currently supporting only 2 segments in GPU
   GPU_RD_SEG_PARAMETERS seg_rd_param[2];
