@@ -434,21 +434,6 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
   gpu_output->mv[GPU_INTER_OFFSET(NEWMV)].as_mv = best_mv;
   gpu_output->rv = 0;
 
-  if (local_col == 0 && local_row == 0) {
-    int rate_mv = ROUND_POWER_OF_TWO(mv_cost(&best_mv, rd_parameters->nmvjointcost,
-            rd_parameters->mvcost[0] + MV_MAX,
-            rd_parameters->mvcost[1] + MV_MAX) * MV_COST_WEIGHT, 7);
-
-    int rate_mode = rd_parameters->inter_mode_cost[GPU_INTER_OFFSET(NEWMV)];
-
-    int64_t best_rd_so_far = RDCOST(seg_rd_params->rd_mult,
-        rd_parameters->rd_div,
-        gpu_output->rate[GPU_INTER_OFFSET(ZEROMV)],
-        gpu_output->dist[GPU_INTER_OFFSET(ZEROMV)]);
-
-    gpu_output->rv = RDCOST(seg_rd_params->rd_mult, rd_parameters->rd_div,
-        (rate_mv + rate_mode), 0) > best_rd_so_far;
-  }
 exit:
   return;
 }

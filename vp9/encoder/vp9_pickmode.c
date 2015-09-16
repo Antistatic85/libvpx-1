@@ -181,12 +181,14 @@ static int combined_motion_search(VP9_COMP *cpi, MACROBLOCK *x,
   *rate_mv = vp9_mv_bit_cost(&mvp_full, &ref_mv,
                              x->nmvjointcost, x->mvcost, MV_COST_WEIGHT);
 
-  if (x->data_parallel_processing)
-    x->mbmi_ext->mode_context[ref] = BOTH_PREDICTED;
-  rate_mode = cpi->inter_mode_cost[x->mbmi_ext->mode_context[ref]]
-                                  [INTER_OFFSET(NEWMV)];
-  rv = !(RDCOST(x->rdmult, x->rddiv, (*rate_mv + rate_mode), 0) >
-         best_rd_sofar);
+  if (!x->data_parallel_processing) {
+    rate_mode = cpi->inter_mode_cost[x->mbmi_ext->mode_context[ref]]
+                                    [INTER_OFFSET(NEWMV)];
+    rv = !(RDCOST(x->rdmult, x->rddiv, (*rate_mv + rate_mode), 0) >
+           best_rd_sofar);
+  } else {
+    rv = 1;
+  }
 
   if (rv) {
     cpi->find_fractional_mv_step(x, &tmp_mv->as_mv, &ref_mv,
