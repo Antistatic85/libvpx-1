@@ -136,23 +136,34 @@ int vp9_egpu_init(VP9_COMP *cpi) {
 #endif
 }
 
+static void vp9_gpu_fill_segment_rd_parameters(VP9_COMP *cpi,
+                                               GPU_RD_SEG_PARAMETERS *seg_rd,
+                                               int segment_id) {
+  VP9_COMMON *const cm = &cpi->common;
+  const int qindex = vp9_get_qindex(&cm->seg, segment_id, cm->base_qindex);
+  int rdmult = vp9_compute_rd_mult(cpi, qindex + cm->y_dc_delta_q);
+  seg_rd->rd_mult = rdmult;
+  seg_rd->dc_dequant = cpi->y_dequant[qindex][0];
+  seg_rd->ac_dequant = cpi->y_dequant[qindex][1];
+  seg_rd->sad_per_bit = vp9_get_sad_per_bit16(cpi, qindex);
+  seg_rd->error_per_bit = rdmult >> 6;
+  seg_rd->error_per_bit += (seg_rd->error_per_bit == 0);
+}
+
 static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi) {
+  VP9_COMMON *const cm = &cpi->common;
   VP9_EGPU *egpu = &cpi->egpu;
   MACROBLOCK *const x = &cpi->td.mb;
-  struct macroblockd_plane *const pd = &x->e_mbd.plane[0];
   GPU_RD_PARAMETERS *rd_param_ptr;
   int i;
 
   egpu->acquire_rd_param_buffer(cpi, (void **)&rd_param_ptr);
 
   rd_param_ptr->tx_mode = cpi->common.tx_mode;
-  rd_param_ptr->dc_dequant = pd->dequant[0];
-  rd_param_ptr->ac_dequant = pd->dequant[1];
   memcpy(rd_param_ptr->nmvsadcost[0], x->nmvsadcost[0] - MV_MAX,
          sizeof(rd_param_ptr->nmvsadcost[0]));
   memcpy(rd_param_ptr->nmvsadcost[1], x->nmvsadcost[1] - MV_MAX,
          sizeof(rd_param_ptr->nmvsadcost[1]));
-  rd_param_ptr->sad_per_bit = x->sadperbit16;
   rd_param_ptr->inter_mode_cost[0] =
       cpi->inter_mode_cost[BOTH_PREDICTED][INTER_OFFSET(ZEROMV)];
   rd_param_ptr->inter_mode_cost[1] =
@@ -164,12 +175,14 @@ static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi) {
   for(i = 0; i < MV_JOINTS; i++) {
     rd_param_ptr->nmvjointcost[i] = x->nmvjointcost[i];
   }
-  rd_param_ptr->error_per_bit = x->errorperbit;
-  rd_param_ptr->rd_mult = cpi->rd.RDMULT;
   rd_param_ptr->rd_div = cpi->rd.RDDIV;
   for (i = 0; i < SWITCHABLE_FILTERS; i++)
     rd_param_ptr->switchable_interp_costs[i] =
         cpi->switchable_interp_costs[SWITCHABLE_FILTERS][i];
+
+  vp9_gpu_fill_segment_rd_parameters(cpi, &rd_param_ptr->seg_rd_param[0], 0);
+  if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ && cm->seg.enabled)
+    vp9_gpu_fill_segment_rd_parameters(cpi, &rd_param_ptr->seg_rd_param[1], 1);
 }
 
 static void vp9_gpu_fill_mv_input(VP9_COMP *cpi, const TileInfo * const tile) {

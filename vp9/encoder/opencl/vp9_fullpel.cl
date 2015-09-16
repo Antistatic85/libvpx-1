@@ -329,6 +329,7 @@ MV combined_motion_search(__global uchar *ref_frame,
                           __global uchar *cur_frame,
                           __global GPU_INPUT *gpu_input,
                           __global GPU_RD_PARAMETERS *rd_parameters,
+                          int sad_per_bit,
                           int stride,
                           int mi_rows,
                           int mi_cols,
@@ -336,7 +337,6 @@ MV combined_motion_search(__global uchar *ref_frame,
                           __local int *intermediate_int) {
   __global int *nmvsadcost_0 = rd_parameters->nmvsadcost[0] + MV_MAX;
   __global int *nmvsadcost_1 = rd_parameters->nmvsadcost[1] + MV_MAX;
-  int sad_per_bit = rd_parameters->sad_per_bit;
   int_mv zero_mv;
   int_mv pred_mv;
   MV best_mv;
@@ -421,8 +421,12 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
     goto exit;
   }
 
+  __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
+      &rd_parameters->seg_rd_param[gpu_input->seg_id];
+
   best_mv = combined_motion_search(ref_frame, cur_frame,
                                    gpu_input, rd_parameters,
+                                   seg_rd_params->sad_per_bit,
                                    stride,
                                    mi_rows, mi_cols, &pred_mv_sad,
                                    intermediate_int);
@@ -437,11 +441,12 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
 
     int rate_mode = rd_parameters->inter_mode_cost[GPU_INTER_OFFSET(NEWMV)];
 
-    int64_t best_rd_so_far = RDCOST(rd_parameters->rd_mult, rd_parameters->rd_div,
+    int64_t best_rd_so_far = RDCOST(seg_rd_params->rd_mult,
+        rd_parameters->rd_div,
         gpu_output->rate[GPU_INTER_OFFSET(ZEROMV)],
         gpu_output->dist[GPU_INTER_OFFSET(ZEROMV)]);
 
-    gpu_output->rv = RDCOST(rd_parameters->rd_mult, rd_parameters->rd_div,
+    gpu_output->rv = RDCOST(seg_rd_params->rd_mult, rd_parameters->rd_div,
         (rate_mv + rate_mode), 0) > best_rd_so_far;
   }
 exit:

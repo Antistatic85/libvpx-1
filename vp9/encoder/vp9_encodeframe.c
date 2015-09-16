@@ -1065,8 +1065,6 @@ void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) 
   GPU_BLOCK_SIZE gpu_bsize;
   int mi_row, mi_col;
 
-  assert(!(cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ && cm->seg.enabled));
-
   for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; ++gpu_bsize) {
     const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
     const int mi_row_step = num_8x8_blocks_high_lookup[bsize];
@@ -1138,7 +1136,17 @@ void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) 
           continue;
         } else {
           const int sb_index = get_sb_index(cm, mi_row, mi_col);
+          const struct segmentation *const seg = &cm->seg;
           gpu_input->pred_mv.as_mv = cpi->pred_mv_map[sb_index];
+          if (seg->enabled && cpi->oxcf.aq_mode != VARIANCE_AQ) {
+            const uint8_t *const map = seg->update_map ? cpi->segmentation_map
+                                                       : cm->last_frame_seg_map;
+            gpu_input->seg_id = get_segment_id(cm, map, bsize, mi_row, mi_col);
+            // Only 2 segments are supported in GPU
+            assert(gpu_input->seg_id <= 1);
+          } else {
+            gpu_input->seg_id = 0;
+          }
         }
       }
     }

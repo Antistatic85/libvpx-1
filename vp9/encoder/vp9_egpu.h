@@ -38,7 +38,8 @@ struct macroblockd;
 
 typedef struct GPU_INPUT {
   int_mv pred_mv;
-  int do_compute;
+  char do_compute;
+  char seg_id;
 } GPU_INPUT;
 
 struct GPU_OUTPUT {
@@ -56,22 +57,29 @@ struct GPU_OUTPUT {
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT GPU_OUTPUT;
 
-typedef struct GPU_RD_PARAMETERS {
-  TX_MODE tx_mode;
+typedef struct GPU_RD_SEG_PARAMETERS {
+  int rd_mult;
   int dc_dequant;
   int ac_dequant;
 
-  int nmvsadcost[2][MV_VALS];
   int sad_per_bit;
 
-  unsigned int inter_mode_cost[GPU_INTER_MODES];
-  int mvcost[2][MV_VALS];
-  int nmvjointcost[MV_JOINTS];
   int error_per_bit;
+} GPU_RD_SEG_PARAMETERS;
 
-  int rd_mult;
+typedef struct GPU_RD_PARAMETERS {
+  TX_MODE tx_mode;
   int rd_div;
+  unsigned int inter_mode_cost[GPU_INTER_MODES];
   int switchable_interp_costs[SWITCHABLE_FILTERS];
+
+  int nmvjointcost[MV_JOINTS];
+  int nmvsadcost[2][MV_VALS];
+
+  int mvcost[2][MV_VALS];
+
+  // Currently supporting only 2 segments in GPU
+  GPU_RD_SEG_PARAMETERS seg_rd_param[2];
 } GPU_RD_PARAMETERS;
 
 typedef struct SubFrameInfo {

@@ -133,6 +133,8 @@ void vp9_initialize_rd_consts(struct VP9_COMP *cpi);
 
 void vp9_initialize_me_consts(struct VP9_COMP *cpi, struct macroblock *x, int qindex);
 
+int vp9_get_sad_per_bit16(struct VP9_COMP *cpi, int qindex);
+
 void vp9_model_rd_from_var_lapndz(unsigned int var, unsigned int n,
                                   unsigned int qstep, int *rate,
                                   int64_t *dist);

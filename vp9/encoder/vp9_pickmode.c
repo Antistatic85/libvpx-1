@@ -343,10 +343,7 @@ static void model_rd_for_sb_y_large(VP9_COMP *cpi, BLOCK_SIZE bsize,
     else
       tx_size = TX_8X8;
 
-    if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ &&
-        cyclic_refresh_segment_id_boosted(xd->mi[0]->mbmi.segment_id))
-      tx_size = TX_8X8;
-    else if (tx_size > TX_16X16)
+    if (tx_size > TX_16X16)
       tx_size = TX_16X16;
   } else {
     tx_size = MIN(max_txsize_lookup[bsize],

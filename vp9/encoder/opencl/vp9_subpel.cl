@@ -551,6 +551,9 @@ void vp9_sub_pixel_search(__global uchar *ref_frame,
     goto exit;
   }
 
+  __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
+      &rd_parameters->seg_rd_param[gpu_input->seg_id];
+
   int mi_row = (global_row * PIXEL_ROWS_PER_WORKITEM) / MI_SIZE;
   int mi_col = global_col;
   BLOCK_SIZE bsize;
@@ -572,7 +575,7 @@ void vp9_sub_pixel_search(__global uchar *ref_frame,
   __global int *nmvcost_0 = rd_parameters->mvcost[0] + MV_MAX;
   __global int *nmvcost_1 = rd_parameters->mvcost[1] + MV_MAX;
   __global int *nmvjointcost = rd_parameters->nmvjointcost;
-  int error_per_bit = rd_parameters->error_per_bit;
+  int error_per_bit = seg_rd_params->error_per_bit;
 
   fcenter_mv.row = nearest_mv.row >> 3;
   fcenter_mv.col = nearest_mv.col >> 3;

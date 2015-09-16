@@ -731,6 +731,10 @@ void vp9_zero_motion_search(__global uchar *ref,
   if (!gpu_input->do_compute)
     goto exit;
 
+  __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
+      &rd_parameters->seg_rd_param[gpu_input->seg_id];
+
+
   frame_offset = (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
   frame_offset += (global_row * stride * BLOCK_SIZE_IN_PIXELS) + (global_col * BLOCK_SIZE_IN_PIXELS);
 
@@ -753,8 +757,8 @@ void vp9_zero_motion_search(__global uchar *ref,
     TX_SIZE tx_size;
     TX_MODE tx_mode = rd_parameters->tx_mode;
 
-    int dc_quant = rd_parameters->dc_dequant;
-    int ac_quant = rd_parameters->ac_dequant;
+    int dc_quant = seg_rd_params->dc_dequant;
+    int ac_quant = seg_rd_params->ac_dequant;
     int64_t dc_thr = dc_quant * dc_quant >> 6;
     int64_t ac_thr = ac_quant * ac_quant >> 6;
     int skip_txfm;
@@ -930,6 +934,8 @@ void vp9_rd_calculation(__global uchar *ref_frame,
   bsize = BLOCK_32X32;
 #endif
 
+  __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
+      &rd_parameters->seg_rd_param[gpu_input->seg_id];
   MV out_mv = gpu_output->mv[GPU_INTER_OFFSET(NEWMV)].as_mv;
   int mv_row = out_mv.row;
   int mv_col = out_mv.col;
@@ -960,8 +966,8 @@ void vp9_rd_calculation(__global uchar *ref_frame,
       TX_SIZE tx_size;
       TX_MODE tx_mode = rd_parameters->tx_mode;
 
-      int dc_quant = rd_parameters->dc_dequant;
-      int ac_quant = rd_parameters->ac_dequant;
+      int dc_quant = seg_rd_params->dc_dequant;
+      int ac_quant = seg_rd_params->ac_dequant;
       int64_t dc_thr = dc_quant * dc_quant >> 6;
       int64_t ac_thr = ac_quant * ac_quant >> 6;
       int skip_txfm;
@@ -974,7 +980,7 @@ void vp9_rd_calculation(__global uchar *ref_frame,
 
       if (horz_subpel || vert_subpel)
         actual_rate += rd_parameters->switchable_interp_costs[j];
-      cost = RDCOST(rd_parameters->rd_mult, rd_parameters->rd_div,
+      cost = RDCOST(seg_rd_params->rd_mult, rd_parameters->rd_div,
                     actual_rate, actual_dist);
       if (cost < best_cost) {
         best_cost = cost;

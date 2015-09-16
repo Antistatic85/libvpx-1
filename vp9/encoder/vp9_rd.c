@@ -230,6 +230,28 @@ void vp9_initialize_me_consts(VP9_COMP *cpi, MACROBLOCK *x, int qindex) {
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 }
 
+int vp9_get_sad_per_bit16(VP9_COMP *cpi, int qindex) {
+#if CONFIG_VP9_HIGHBITDEPTH
+  switch (cpi->common.bit_depth) {
+    case VPX_BITS_8:
+      return sad_per_bit16lut_8[qindex];
+      break;
+    case VPX_BITS_10:
+      return sad_per_bit16lut_10[qindex];
+      break;
+    case VPX_BITS_12:
+      return sad_per_bit16lut_12[qindex];
+      break;
+    default:
+      assert(0 && "bit_depth should be VPX_BITS_8, VPX_BITS_10 or VPX_BITS_12");
+  }
+#else
+  (void)cpi;
+  return sad_per_bit16lut_8[qindex];
+#endif  // CONFIG_VP9_HIGHBITDEPTH
+}
+
+
 static void set_block_thresholds(const VP9_COMMON *cm, RD_OPT *rd) {
   int i, bsize, segment_id;
 
