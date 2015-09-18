@@ -431,7 +431,7 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
                                    mi_rows, mi_cols, &pred_mv_sad,
                                    intermediate_int);
 
-  gpu_output->mv[GPU_INTER_OFFSET(NEWMV)].as_mv = best_mv;
+  gpu_output->mv.as_mv = best_mv;
   gpu_output->rv = 0;
 
 exit:

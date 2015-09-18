@@ -1161,8 +1161,8 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
                                        &frame_mv[NEWMV][ref_frame], &rate_mv,
                                        best_rd_sofar);
       x->gpu_output[gpu_bsize]->rv = rv;
-      x->gpu_output[gpu_bsize]->mv[GPU_INTER_OFFSET(this_mode)].as_mv =
-          frame_mv[this_mode][LAST_FRAME].as_mv;
+      x->gpu_output[gpu_bsize]->mv.as_int =
+          frame_mv[this_mode][LAST_FRAME].as_int;
       if (rv)
         continue;
       if (frame_mv[NEWMV][LAST_FRAME].as_int != INVALID_MV) {
@@ -1231,7 +1231,6 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
     x->gpu_output[gpu_bsize]->dist[gpu_mode_index] = this_rdc.dist;
     x->gpu_output[gpu_bsize]->interp_filter[gpu_mode_index] = mbmi->interp_filter;
     x->gpu_output[gpu_bsize]->tx_size[gpu_mode_index] = mbmi->tx_size;
-    x->gpu_output[gpu_bsize]->mv[gpu_mode_index].as_mv = frame_mv[this_mode][LAST_FRAME].as_mv;
     x->gpu_output[gpu_bsize]->pred_mv_sad = x->pred_mv_sad[LAST_FRAME];
     x->gpu_output[gpu_bsize]->sse_y[gpu_mode_index] = sse_y;
     x->gpu_output[gpu_bsize]->var_y[gpu_mode_index] = var_y;
@@ -1475,7 +1474,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
         best_pred_sad = x->pred_mv_sad[LAST_FRAME] =
             x->gpu_output[gpu_bsize]->pred_mv_sad;
         frame_mv[NEWMV][LAST_FRAME].as_int =
-            x->gpu_output[gpu_bsize]->mv[GPU_INTER_OFFSET(this_mode)].as_int;
+            x->gpu_output[gpu_bsize]->mv.as_int;
         rate_mv = vp9_mv_bit_cost(
             &frame_mv[NEWMV][LAST_FRAME].as_mv,
             &x->mbmi_ext->ref_mvs[mbmi->ref_frame[0]][0].as_mv, x->nmvjointcost,

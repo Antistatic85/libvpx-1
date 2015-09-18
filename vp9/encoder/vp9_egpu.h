@@ -45,13 +45,13 @@ typedef struct GPU_INPUT {
 struct GPU_OUTPUT {
   int64_t dist[GPU_INTER_MODES];
   int rate[GPU_INTER_MODES];
-  int_mv mv[GPU_INTER_MODES];
   unsigned int sse_y[GPU_INTER_MODES];
   unsigned int var_y[GPU_INTER_MODES];
   char interp_filter[GPU_INTER_MODES];
   char tx_size[GPU_INTER_MODES];
   char skip_txfm[GPU_INTER_MODES];
   char this_early_term[GPU_INTER_MODES];
+  int_mv mv;
   int pred_mv_sad;
   int rv;
 } __attribute__ ((aligned(32)));

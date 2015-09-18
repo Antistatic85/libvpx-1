@@ -527,7 +527,7 @@ void vp9_sub_pixel_search(__global uchar *ref_frame,
   bsize = BLOCK_32X32;
 #endif
 
-  MV best_mv = gpu_output->mv[GPU_INTER_OFFSET(NEWMV)].as_mv;
+  MV best_mv = gpu_output->mv.as_mv;
   MV nearest_mv = {0, 0};
   MV fcenter_mv;
   INIT x;
@@ -537,7 +537,7 @@ void vp9_sub_pixel_search(__global uchar *ref_frame,
 
   vp9_gpu_set_mv_search_range(&x, mi_row, mi_col, mi_rows, mi_cols, bsize);
 
-  gpu_output->mv[GPU_INTER_OFFSET(NEWMV)].as_mv  =
+  gpu_output->mv.as_mv  =
       vp9_find_best_sub_pixel_tree(ref_frame, cur_frame,
                                    stride,
                                    best_mv, nearest_mv, fcenter_mv,

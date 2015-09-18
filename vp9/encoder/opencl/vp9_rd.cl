@@ -814,7 +814,6 @@ void vp9_zero_motion_search(__global uchar *ref,
 
     gpu_output->rate[GPU_INTER_OFFSET(ZEROMV)] = actual_rate;
     gpu_output->dist[GPU_INTER_OFFSET(ZEROMV)] = actual_dist;
-    gpu_output->mv[GPU_INTER_OFFSET(ZEROMV)].as_int = 0;
     gpu_output->sse_y[GPU_INTER_OFFSET(ZEROMV)] = sse;
     gpu_output->var_y[GPU_INTER_OFFSET(ZEROMV)] = var;
     gpu_output->interp_filter[GPU_INTER_OFFSET(ZEROMV)] = EIGHTTAP;
@@ -866,7 +865,7 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
     filter_type = EIGHTTAP_SMOOTH;
   }
 
-  MV out_mv = gpu_output->mv[GPU_INTER_OFFSET(NEWMV)].as_mv;
+  MV out_mv = gpu_output->mv.as_mv;
   int mv_row = out_mv.row;
   int mv_col = out_mv.col;
   int mv_offset = ((mv_row >> SUBPEL_BITS) * stride) + (mv_col >> SUBPEL_BITS);
@@ -936,7 +935,7 @@ void vp9_rd_calculation(__global uchar *ref_frame,
 
   __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
       &rd_parameters->seg_rd_param[gpu_input->seg_id];
-  MV out_mv = gpu_output->mv[GPU_INTER_OFFSET(NEWMV)].as_mv;
+  MV out_mv = gpu_output->mv.as_mv;
   int mv_row = out_mv.row;
   int mv_col = out_mv.col;
   int horz_subpel = (mv_col & SUBPEL_MASK) << 1;
@@ -986,7 +985,6 @@ void vp9_rd_calculation(__global uchar *ref_frame,
         best_cost = cost;
         gpu_output->rate[GPU_INTER_OFFSET(NEWMV)] = actual_rate;
         gpu_output->dist[GPU_INTER_OFFSET(NEWMV)] = actual_dist;
-        gpu_output->mv[GPU_INTER_OFFSET(NEWMV)].as_mv = out_mv;
         gpu_output->sse_y[GPU_INTER_OFFSET(NEWMV)] = sse;
         gpu_output->var_y[GPU_INTER_OFFSET(NEWMV)] = var;
         gpu_output->interp_filter[GPU_INTER_OFFSET(NEWMV)] = j;
