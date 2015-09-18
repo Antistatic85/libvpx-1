@@ -126,18 +126,40 @@ static void vp9_opencl_set_static_kernel_args(VP9_COMP *cpi,
                            sizeof(cl_int), &mi_cols);
   assert(status == CL_SUCCESS);
 
-  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 2,
+  status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 2,
                            sizeof(cl_int), &y_stride);
-  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 3,
+  status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 3,
                            sizeof(cl_mem), gpu_ip);
-  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 4,
+  status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 4,
                            sizeof(cl_mem), gpu_op);
-  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 5,
-                           sizeof(cl_mem), rdopt_parameters);
-  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 6,
-                           sizeof(cl_int), &mi_rows);
-  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 7,
-                           sizeof(cl_int), &mi_cols);
+  status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 5,
+                           sizeof(cl_mem), gpu_scratch);
+  assert(status == CL_SUCCESS);
+
+  status |= clSetKernelArg(eopencl->hpel_select_bestmv[gpu_bsize], 0,
+                           sizeof(cl_mem), gpu_ip);
+  status |= clSetKernelArg(eopencl->hpel_select_bestmv[gpu_bsize], 1,
+                           sizeof(cl_mem), gpu_op);
+  status |= clSetKernelArg(eopencl->hpel_select_bestmv[gpu_bsize], 2,
+                           sizeof(cl_mem), gpu_scratch);
+  assert(status == CL_SUCCESS);
+
+  status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 2,
+                           sizeof(cl_int), &y_stride);
+  status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 3,
+                           sizeof(cl_mem), gpu_ip);
+  status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 4,
+                           sizeof(cl_mem), gpu_op);
+  status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 5,
+                           sizeof(cl_mem), gpu_scratch);
+  assert(status == CL_SUCCESS);
+
+  status |= clSetKernelArg(eopencl->qpel_select_bestmv[gpu_bsize], 0,
+                           sizeof(cl_mem), gpu_ip);
+  status |= clSetKernelArg(eopencl->qpel_select_bestmv[gpu_bsize], 1,
+                           sizeof(cl_mem), gpu_op);
+  status |= clSetKernelArg(eopencl->qpel_select_bestmv[gpu_bsize], 2,
+                           sizeof(cl_mem), gpu_scratch);
   assert(status == CL_SUCCESS);
 
   status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 2,
@@ -184,9 +206,15 @@ static void vp9_opencl_set_dynamic_kernel_args(VP9_COMP *cpi,
                            sizeof(cl_mem), &img_src->gpu_mem);
   assert(status == CL_SUCCESS);
 
-  status = clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 0,
+  status = clSetKernelArg(eopencl->hpel_search[gpu_bsize], 0,
                           sizeof(cl_mem), &frm_ref->gpu_mem);
-  status |= clSetKernelArg(eopencl->sub_pixel_search[gpu_bsize], 1,
+  status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 1,
+                           sizeof(cl_mem), &img_src->gpu_mem);
+  assert(status == CL_SUCCESS);
+
+  status = clSetKernelArg(eopencl->qpel_search[gpu_bsize], 0,
+                          sizeof(cl_mem), &frm_ref->gpu_mem);
+  status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 1,
                            sizeof(cl_mem), &img_src->gpu_mem);
   assert(status == CL_SUCCESS);
 
@@ -556,7 +584,7 @@ static void vp9_opencl_execute(VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
   local_size_sub_pixel[1] =
       local_size[1] >> pixel_rows_per_workitem_log2_sub_pixel[gpu_bsize];
 
-  global_size[0] = blocks_in_row * local_size_sub_pixel[0];
+  global_size[0] = blocks_in_row * local_size_sub_pixel[0] * 8;
   global_size[1] = blocks_in_col * local_size_sub_pixel[1];
 
   global_offset[0] = 0;
@@ -564,10 +592,50 @@ static void vp9_opencl_execute(VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
 
   // launch sub pixel search kernel
   status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->sub_pixel_search[gpu_bsize],
+                                  eopencl->hpel_search[gpu_bsize],
                                   2, global_offset, global_size,
                                   local_size_sub_pixel,
                                   0, NULL, event_ptr[2]);
+  assert(status == CL_SUCCESS);
+
+  global_size[0] = blocks_in_row;
+  global_size[1] = blocks_in_col;
+
+  global_offset[0] = 0;
+  global_offset[1] = block_row_offset;
+
+  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                  eopencl->hpel_select_bestmv[gpu_bsize],
+                                  2, global_offset, global_size,
+                                  NULL,
+                                  0, NULL, event_ptr[3]);
+  assert(status == CL_SUCCESS);
+
+  global_size[0] = blocks_in_row * local_size_sub_pixel[0] * 8;
+  global_size[1] = blocks_in_col * local_size_sub_pixel[1];
+
+  global_offset[0] = 0;
+  global_offset[1] = block_row_offset * local_size_sub_pixel[1];
+
+  // launch sub pixel search kernel
+  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                  eopencl->qpel_search[gpu_bsize],
+                                  2, global_offset, global_size,
+                                  local_size_sub_pixel,
+                                  0, NULL, event_ptr[4]);
+  assert(status == CL_SUCCESS);
+
+  global_size[0] = blocks_in_row;
+  global_size[1] = blocks_in_col;
+
+  global_offset[0] = 0;
+  global_offset[1] = block_row_offset;
+
+  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                  eopencl->qpel_select_bestmv[gpu_bsize],
+                                  2, global_offset, global_size,
+                                  NULL,
+                                  0, NULL, event_ptr[5]);
   assert(status == CL_SUCCESS);
 
   // launch inter prediction and sse compute kernel
@@ -585,7 +653,7 @@ static void vp9_opencl_execute(VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
                                   eopencl->inter_prediction_and_sse[gpu_bsize],
                                   2, global_offset, global_size,
                                   local_size_inter_pred,
-                                  0, NULL, event_ptr[3]);
+                                  0, NULL, event_ptr[6]);
 
   // launch rd compute kernel
   global_size[0] = blocks_in_row;
@@ -596,7 +664,7 @@ static void vp9_opencl_execute(VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
   status = clEnqueueNDRangeKernel(opencl->cmd_queue,
                                   eopencl->rd_calculation_newmv[gpu_bsize],
                                   2, global_offset, global_size, NULL,
-                                  0, NULL, event_ptr[4]);
+                                  0, NULL, event_ptr[7]);
 
 #if OPENCL_PROFILING
   for (i = 0; i < NUM_KERNELS; i++) {
@@ -663,7 +731,16 @@ void vp9_eopencl_remove(VP9_COMP *cpi) {
     status = clReleaseKernel(eopencl->full_pixel_search[gpu_bsize]);
     if (status != CL_SUCCESS)
       goto fail;
-    status = clReleaseKernel(eopencl->sub_pixel_search[gpu_bsize]);
+    status = clReleaseKernel(eopencl->hpel_search[gpu_bsize]);
+    if (status != CL_SUCCESS)
+      goto fail;
+    status = clReleaseKernel(eopencl->hpel_select_bestmv[gpu_bsize]);
+    if (status != CL_SUCCESS)
+      goto fail;
+    status = clReleaseKernel(eopencl->qpel_search[gpu_bsize]);
+    if (status != CL_SUCCESS)
+      goto fail;
+    status = clReleaseKernel(eopencl->qpel_select_bestmv[gpu_bsize]);
     if (status != CL_SUCCESS)
       goto fail;
     status = clReleaseKernel(eopencl->inter_prediction_and_sse[gpu_bsize]);
@@ -768,8 +845,23 @@ static int vp9_eopencl_build_subpel_kernel(VP9_COMP *cpi) {
       goto fail;
     }
 
-    eopencl->sub_pixel_search[gpu_bsize] = clCreateKernel(
-        program, "vp9_sub_pixel_search", &status);
+    eopencl->hpel_search[gpu_bsize] = clCreateKernel(
+        program, "vp9_sub_pixel_search_halfpel_filtering", &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    eopencl->hpel_select_bestmv[gpu_bsize] = clCreateKernel(
+        program, "vp9_sub_pixel_search_halfpel_bestmv", &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    eopencl->qpel_search[gpu_bsize] = clCreateKernel(
+        program, "vp9_sub_pixel_search_quarterpel_filtering", &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    eopencl->qpel_select_bestmv[gpu_bsize] = clCreateKernel(
+        program, "vp9_sub_pixel_search_quarterpel_bestmv", &status);
     if (status != CL_SUCCESS)
       goto fail;
 

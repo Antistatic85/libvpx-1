@@ -145,6 +145,9 @@ static int combined_motion_search(VP9_COMP *cpi, MACROBLOCK *x,
   int cost_list[5];
   const YV12_BUFFER_CONFIG *scaled_ref_frame = vp9_get_scaled_ref_frame(cpi,
                                                                         ref);
+  fractional_mv_step_fp *find_fractional_mv_step = x->data_parallel_processing ?
+      vp9_find_best_sub_pixel_tree_dp : cpi->find_fractional_mv_step;
+
   if (scaled_ref_frame) {
     int i;
     // Swap out the reference frame for a version that's been scaled to
@@ -191,15 +194,15 @@ static int combined_motion_search(VP9_COMP *cpi, MACROBLOCK *x,
   }
 
   if (rv) {
-    cpi->find_fractional_mv_step(x, &tmp_mv->as_mv, &ref_mv,
-                                 cpi->common.allow_high_precision_mv,
-                                 x->errorperbit,
-                                 &cpi->fn_ptr[bsize],
-                                 cpi->sf.mv.subpel_force_stop,
-                                 cpi->sf.mv.subpel_iters_per_step,
-                                 cond_cost_list(cpi, cost_list),
-                                 x->nmvjointcost, x->mvcost,
-                                 &dis, &x->pred_sse[ref], NULL, 0, 0);
+    find_fractional_mv_step(x, &tmp_mv->as_mv, &ref_mv,
+                            cpi->common.allow_high_precision_mv,
+                            x->errorperbit,
+                            &cpi->fn_ptr[bsize],
+                            cpi->sf.mv.subpel_force_stop,
+                            cpi->sf.mv.subpel_iters_per_step,
+                            cond_cost_list(cpi, cost_list),
+                            x->nmvjointcost, x->mvcost,
+                            &dis, &x->pred_sse[ref], NULL, 0, 0);
     *rate_mv = vp9_mv_bit_cost(&tmp_mv->as_mv, &ref_mv,
                                x->nmvjointcost, x->mvcost, MV_COST_WEIGHT);
   }
@@ -1469,12 +1472,18 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
           &x->pred_sse[ref_frame], NULL, 0, 0);
       } else if (x->use_gpu && is_gpu_block && is_gpu_inter_mode(this_mode)) {
         GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
+        MV *ref_mv = &frame_mv[NEARESTMV][ref_frame].as_mv;
+        MV *new_mv = &x->gpu_output[gpu_bsize]->mv.as_mv;
         if (x->gpu_output[gpu_bsize]->rv)
           continue;
+        if ((abs(new_mv->col - ref_mv->col) > (MAX_FULL_PEL_VAL << 3)) ||
+            (abs(new_mv->row - ref_mv->row) > (MAX_FULL_PEL_VAL << 3))) {
+          x->gpu_output[gpu_bsize]->rv = 1;
+          continue;
+        }
         best_pred_sad = x->pred_mv_sad[LAST_FRAME] =
             x->gpu_output[gpu_bsize]->pred_mv_sad;
-        frame_mv[NEWMV][LAST_FRAME].as_int =
-            x->gpu_output[gpu_bsize]->mv.as_int;
+        frame_mv[NEWMV][LAST_FRAME].as_mv = *new_mv;
         rate_mv = vp9_mv_bit_cost(
             &frame_mv[NEWMV][LAST_FRAME].as_mv,
             &x->mbmi_ext->ref_mvs[mbmi->ref_frame[0]][0].as_mv, x->nmvjointcost,
