@@ -1067,7 +1067,7 @@ static int vp9_pattern_search(const MACROBLOCK *x,
                                in_what->stride);
             CHECK_BETTER
           }
-        } else {
+        } else if (!x->data_parallel_processing) {
           for (i = 0; i < num_candidates[s]; i++) {
             const MV this_mv = {br + candidates[s][i].row,
                                 bc + candidates[s][i].col};
@@ -1105,7 +1105,7 @@ static int vp9_pattern_search(const MACROBLOCK *x,
                                in_what->stride);
             CHECK_BETTER
           }
-        } else {
+        } else if (!x->data_parallel_processing) {
           for (i = 0; i < PATTERN_CANDIDATES_REF; i++) {
             const MV this_mv = {br + candidates[s][next_chkpts_indices[i]].row,
                                 bc + candidates[s][next_chkpts_indices[i]].col};

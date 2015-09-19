@@ -117,13 +117,6 @@ inline int gpu_check_bounds(INIT *x, int row, int col, int range) {
       ((col + range) <= x->mv_col_max);
 }
 
-int is_mv_in(INIT *x, const MV *mv) {
-  return (mv->col >= x->mv_col_min) &&
-      (mv->col <= x->mv_col_max) &&
-      (mv->row >= x->mv_row_min) &&
-      (mv->row <= x->mv_row_max);
-}
-
 MV inline full_pixel_pattern_search(__global uchar *ref_frame,
                                     __global uchar *cur_frame,
                                     int stride,
@@ -156,18 +149,6 @@ MV inline full_pixel_pattern_search(__global uchar *ref_frame,
 
       CHECK_BETTER
     }
-  } else {
-    for (i = 0; i < hex_num_candidates[pattern]; i++) {
-      this_mv.row = br + hex_candidates[pattern][i].row;
-      this_mv.col = bc + hex_candidates[pattern][i].col;
-
-      if (!is_mv_in(x, &this_mv)) {
-        continue;
-      }
-
-      thissad = get_sad(ref_frame, cur_frame, stride, intermediate_sad, this_mv);
-      CHECK_BETTER
-    }
   }
 
   if (best_site == -1) {
@@ -192,18 +173,6 @@ MV inline full_pixel_pattern_search(__global uchar *ref_frame,
         thissad = get_sad(ref_frame, cur_frame, stride, intermediate_sad, this_mv);
         CHECK_BETTER
       }
-    } else {
-      for (i = 0; i < PATTERN_CANDIDATES_REF; i++) {
-        this_mv.row = br + hex_candidates[pattern][next_chkpts_indices[i]].row;
-        this_mv.col = bc + hex_candidates[pattern][next_chkpts_indices[i]].col;
-
-        if (!is_mv_in(x, &this_mv)) {
-          continue;
-        }
-
-        thissad = get_sad(ref_frame, cur_frame, stride, intermediate_sad, this_mv);
-        CHECK_BETTER
-      }
     }
 
     if (best_site != -1) {
@@ -211,7 +180,7 @@ MV inline full_pixel_pattern_search(__global uchar *ref_frame,
       br += hex_candidates[pattern][k].row;
       bc += hex_candidates[pattern][k].col;
     }
-  }while(best_site != -1);
+  } while(best_site != -1);
 exit:
   *pbestsad = bestsad;
   best_mv.row = br;
@@ -227,44 +196,6 @@ int clamp_it(int value, int low, int high) {
 void clamp_gpu_mv(MV *mv, int min_col, int max_col, int min_row, int max_row) {
   mv->col = clamp_it(mv->col, min_col, max_col);
   mv->row = clamp_it(mv->row, min_row, max_row);
-}
-
-MV full_pixel_search(__global uchar *ref_frame,
-                     __global uchar *cur_frame,
-                     int stride,
-                     __local int* intermediate_sad,
-                     MV best_mv,
-                     MV fcenter_mv,
-                     __global int *nmvsadcost_0,
-                     __global int *nmvsadcost_1,
-                     INIT *x,
-                     int sad_per_bit) {
-  int thissad, bestsad;
-
-  clamp_gpu_mv(&best_mv, x->mv_col_min, x->mv_col_max, x->mv_row_min , x->mv_row_max);
-
-  bestsad = get_sad(ref_frame, cur_frame, stride, intermediate_sad, best_mv);
-
-  bestsad += mvsad_err_cost(&best_mv, &fcenter_mv, nmvsadcost_0, nmvsadcost_1,
-      sad_per_bit);
-
-  // Search with pattern = 1
-  best_mv = full_pixel_pattern_search(ref_frame, cur_frame, stride,
-                                      intermediate_sad, best_mv, fcenter_mv,
-                                      nmvsadcost_0, nmvsadcost_1,
-                                      x, sad_per_bit,
-                                      &bestsad, 1);
-  // Search with pattern = 0
-  best_mv = full_pixel_pattern_search(ref_frame, cur_frame, stride,
-                                      intermediate_sad, best_mv, fcenter_mv,
-                                      nmvsadcost_0, nmvsadcost_1,
-                                      x, sad_per_bit,
-                                      &bestsad, 0);
-
-  best_mv.row = best_mv.row * 8;
-  best_mv.col = best_mv.col * 8;
-
-  return best_mv;
 }
 
 void vp9_set_mv_search_range_step2(INIT *x, const MV *mv) {
@@ -334,11 +265,11 @@ MV combined_motion_search(__global uchar *ref_frame,
                           int mi_rows,
                           int mi_cols,
                           int *pred_mv_sad,
-                          __local int *intermediate_int) {
+                          __local int *intermediate_sad) {
   __global int *nmvsadcost_0 = rd_parameters->nmvsadcost[0] + MV_MAX;
   __global int *nmvsadcost_1 = rd_parameters->nmvsadcost[1] + MV_MAX;
-  int_mv zero_mv;
-  int_mv pred_mv;
+  MV zero_mv = 0;
+  MV pred_mv;
   MV best_mv;
   INIT x;
   int local_col = get_local_id(0);
@@ -348,6 +279,7 @@ MV combined_motion_search(__global uchar *ref_frame,
   int mi_row = (global_row * PIXEL_ROWS_PER_WORKITEM) / MI_SIZE;
   int mi_col = global_col;
   int bsize;
+  int bestsad;
 
 #if BLOCK_SIZE_IN_PIXELS == 64
   mi_row = (mi_row >> 3) << 3;
@@ -361,18 +293,35 @@ MV combined_motion_search(__global uchar *ref_frame,
 
   vp9_gpu_set_mv_search_range(&x, mi_row, mi_col, mi_rows, mi_cols, bsize);
 
-  pred_mv = gpu_input->pred_mv;
-  zero_mv.as_int = 0;
+  pred_mv = gpu_input->pred_mv.as_mv;
 
-  vp9_set_mv_search_range_step2(&x, &zero_mv.as_mv);
+  vp9_set_mv_search_range_step2(&x, &zero_mv);
 
-  best_mv = get_best_mv(ref_frame, cur_frame, stride, intermediate_int,
-                        zero_mv.as_mv, pred_mv.as_mv, pred_mv_sad);
+  best_mv = get_best_mv(ref_frame, cur_frame, stride, intermediate_sad,
+                        zero_mv, pred_mv, pred_mv_sad);
 
-  best_mv = full_pixel_search(ref_frame, cur_frame, stride,
-                              intermediate_int, best_mv, zero_mv.as_mv,
-                              nmvsadcost_0, nmvsadcost_1,
-                              &x, sad_per_bit);
+  clamp_gpu_mv(&best_mv, x.mv_col_min, x.mv_col_max, x.mv_row_min , x.mv_row_max);
+
+  bestsad = get_sad(ref_frame, cur_frame, stride, intermediate_sad, best_mv);
+
+  bestsad += mvsad_err_cost(&best_mv, &zero_mv, nmvsadcost_0, nmvsadcost_1,
+      sad_per_bit);
+
+  // Search with pattern = 1
+  best_mv = full_pixel_pattern_search(ref_frame, cur_frame, stride,
+                                      intermediate_sad, best_mv, zero_mv,
+                                      nmvsadcost_0, nmvsadcost_1,
+                                      &x, sad_per_bit,
+                                      &bestsad, 1);
+  // Search with pattern = 0
+  best_mv = full_pixel_pattern_search(ref_frame, cur_frame, stride,
+                                      intermediate_sad, best_mv, zero_mv,
+                                      nmvsadcost_0, nmvsadcost_1,
+                                      &x, sad_per_bit,
+                                      &bestsad, 0);
+
+  best_mv.row = best_mv.row * 8;
+  best_mv.col = best_mv.col * 8;
 
   return best_mv;
 }

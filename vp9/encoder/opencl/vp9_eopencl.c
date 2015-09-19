@@ -25,7 +25,7 @@ static const int pixel_rows_per_workitem_log2_inter_pred[GPU_BLOCK_SIZES]
                                                          = {3, 3};
 
 static const int pixel_rows_per_workitem_log2_full_pixel[GPU_BLOCK_SIZES]
-                                                                = {3, 4};
+                                                                = {3, 3};
 
 static const int pixel_rows_per_workitem_log2_sub_pixel[GPU_BLOCK_SIZES]
                                                                 = {4, 5};
