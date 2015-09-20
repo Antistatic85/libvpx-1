@@ -45,14 +45,6 @@ __constant TX_SIZE max_txsize_lookup[BLOCK_SIZES] = {
   TX_32X32, TX_32X32, TX_32X32, TX_32X32
 };
 
-__constant TX_SIZE tx_mode_to_biggest_tx_size[TX_MODES] = {
-  TX_4X4,  // ONLY_4X4
-  TX_8X8,  // ALLOW_8X8
-  TX_16X16,  // ALLOW_16X16
-  TX_32X32,  // ALLOW_32X32
-  TX_32X32,  // TX_MODE_SELECT
-};
-
 __constant BLOCK_SIZE ss_size_lookup[BLOCK_SIZES] = {
 // ss_x == 1
 // ss_y == 1
@@ -192,18 +184,10 @@ __constant char8 filter[2][16] =
     *psse = sse.s0;
 
 #define MODEL_RD_FOR_SB_Y_LARGE                                             \
-  if (tx_mode == TX_MODE_SELECT) {                                          \
-    if (sse > (var << 2))                                                   \
-      tx_size = MIN(max_txsize_lookup[bsize],                               \
-                    tx_mode_to_biggest_tx_size[tx_mode]);                   \
-    else                                                                    \
-      tx_size = TX_8X8;                                                     \
-    if (tx_size > TX_16X16)                                                 \
-      tx_size = TX_16X16;                                                   \
-  } else {                                                                  \
-    tx_size = MIN(max_txsize_lookup[bsize],                                 \
-                  tx_mode_to_biggest_tx_size[tx_mode]);                     \
-  }                                                                         \
+  if (sse > (var << 2))                                                     \
+    tx_size = TX_16X16;                                                     \
+  else                                                                      \
+    tx_size = TX_8X8;                                                       \
   {                                                                         \
     int num8x8 = 1 << (bw + bh - 2);                                        \
     uint32_t sse16x16[16];                                                  \
@@ -211,28 +195,17 @@ __constant char8 filter[2][16] =
     uint32_t var16x16[16];                                                  \
     int num16x16 = num8x8 >> 2;                                             \
                                                                             \
-    uint32_t sse32x32[4];                                                   \
-    int sum32x32[4];                                                        \
-    uint32_t var32x32[4];                                                   \
-    int num32x32 = num8x8 >> 4;                                             \
-                                                                            \
     int ac_test = 1;                                                        \
     int dc_test = 1;                                                        \
     int k;                                                                  \
-    int num = ((tx_size == TX_8X8) ? num8x8 : ((tx_size == TX_16X16) ?      \
-        num16x16 : num32x32));                                              \
-    uint32_t *sse_tx = ((tx_size == TX_8X8) ? sse8x8 :                      \
-        ((tx_size == TX_16X16) ? sse16x16 : sse32x32));                     \
-    uint32_t *var_tx = ((tx_size == TX_8X8) ? var8x8 :                      \
-        ((tx_size == TX_16X16) ? var16x16 : var32x32));                     \
+    int num = (tx_size == TX_8X8) ? num8x8 : num16x16;                      \
+    uint32_t *sse_tx = (tx_size == TX_8X8) ? sse8x8 : sse16x16;             \
+    uint32_t *var_tx = (tx_size == TX_8X8) ? var8x8 : var16x16;             \
     if (tx_size >= TX_16X16) {                                              \
       calculate_variance(bw, bh, TX_8X8, sse8x8, sum8x8, var16x16, sse16x16,\
                          sum16x16);                                         \
     }                                                                       \
-    if (tx_size == TX_32X32) {                                              \
-      calculate_variance(bw, bh, TX_16X16, sse16x16, sum16x16, var32x32,    \
-                         sse32x32, sum32x32);                               \
-    }                                                                       \
+                                                                            \
     skip_txfm = SKIP_TXFM_NONE;                                             \
     for (k = 0; k < num; k++) {                                             \
       if (!(var_tx[k] < ac_thr || var == 0)) {                              \
@@ -454,10 +427,6 @@ void inter_prediction(__global uchar *ref_data,
   uchar8 out_bi;
   int i;
 
-  *psum = 0;
-  *psse = 0;
-  barrier(CLK_LOCAL_MEM_FENCE);
-
   if (!vert_subpel) {
     /* L0 only x_frac */
     char8 filt = filter[filter_type][horz_subpel];
@@ -579,8 +548,6 @@ void inter_prediction(__global uchar *ref_data,
   } else {
     char8 filt = filter[filter_type][horz_subpel];
     ref_data -= (3 * stride);
-
-    barrier(CLK_LOCAL_MEM_FENCE);
 
     for(i = 0; i < PIXEL_ROWS_PER_WORKITEM; i++) {
       inter = (short8)(-1 << 14);
@@ -755,7 +722,6 @@ void vp9_zero_motion_search(__global uchar *ref,
 
   {
     TX_SIZE tx_size;
-    TX_MODE tx_mode = rd_parameters->tx_mode;
 
     int dc_quant = seg_rd_params->dc_dequant;
     int ac_quant = seg_rd_params->ac_dequant;
@@ -963,7 +929,6 @@ void vp9_rd_calculation(__global uchar *ref_frame,
 
     {
       TX_SIZE tx_size;
-      TX_MODE tx_mode = rd_parameters->tx_mode;
 
       int dc_quant = seg_rd_params->dc_dequant;
       int ac_quant = seg_rd_params->ac_dequant;

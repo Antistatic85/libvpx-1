@@ -157,7 +157,8 @@ static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi) {
 
   egpu->acquire_rd_param_buffer(cpi, (void **)&rd_param_ptr);
 
-  rd_param_ptr->tx_mode = cpi->common.tx_mode;
+  assert(cpi->common.tx_mode == TX_MODE_SELECT);
+
   memcpy(rd_param_ptr->nmvsadcost[0], x->nmvsadcost[0] - MV_MAX,
          sizeof(rd_param_ptr->nmvsadcost[0]));
   memcpy(rd_param_ptr->nmvsadcost[1], x->nmvsadcost[1] - MV_MAX,

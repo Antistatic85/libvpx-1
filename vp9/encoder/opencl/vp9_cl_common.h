@@ -204,7 +204,6 @@ typedef struct GPU_RD_SEG_PARAMETERS {
 } GPU_RD_SEG_PARAMETERS;
 
 typedef struct GPU_RD_PARAMETERS {
-  TX_MODE tx_mode;
   int rd_div;
   unsigned int inter_mode_cost[GPU_INTER_MODES];
   int switchable_interp_costs[SWITCHABLE_FILTERS];
