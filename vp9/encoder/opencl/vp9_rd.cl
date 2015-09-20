@@ -995,47 +995,6 @@ void vp9_rd_calculation(__global uchar *ref_frame,
     }
   }
 
-  {
-    uchar8 src_load8, pred_load8;
-    ushort8 src_data8, pred_data8, e_data8, a_data8 = 0;
-    int4 b_data4;
-    int buffer_offset;
-    int row, col;
-    int width, height;
-    int frame_offset = (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
-
-    width = height = BLOCK_SIZE_IN_PIXELS;
-    buffer_offset = ((out_mv.row >> 3) * stride) + (out_mv.col >> 3);
-    frame_offset += (global_row * stride * BLOCK_SIZE_IN_PIXELS) + (global_col * BLOCK_SIZE_IN_PIXELS);
-
-    cur_frame += frame_offset;
-    ref_frame += (frame_offset + buffer_offset);
-
-    for (row = 0; row < height; row += 1) {
-      for (col = 0; col < width; col += 8) {
-        src_load8 = vload8(0, cur_frame);
-        pred_load8 = vload8(0, ref_frame);
-
-        src_data8 = convert_ushort8(src_load8);
-        pred_data8 = convert_ushort8(pred_load8);
-        e_data8 = abs_diff(src_data8, pred_data8);
-
-        a_data8 += e_data8;
-        cur_frame += 8;
-        ref_frame += 8;
-      }
-      cur_frame += stride - width;
-      ref_frame += stride - width;
-    }
-
-    b_data4.s0123 = convert_int4(a_data8.s0123) + convert_int4(a_data8.s4567);
-    b_data4.s01 = b_data4.s01 + b_data4.s23;
-
-    sum = (int)b_data4.s0 + b_data4.s1;
-
-    gpu_output->pred_mv_sad = sum;
-  }
-
   exit:
   return;
 }

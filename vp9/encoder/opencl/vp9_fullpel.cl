@@ -223,7 +223,7 @@ void vp9_set_mv_search_range_step2(INIT *x, const MV *mv) {
 
 inline MV get_best_mv(__global uchar *ref_frame, __global uchar *cur_frame,
                       int stride, __local int* intermediate_sad,
-                      MV candidate_a_mv, MV candidate_b_mv, int *pred_mv_sad) {
+                      MV candidate_a_mv, MV candidate_b_mv) {
   MV this_mv, best_mv;
   int thissad, bestsad = CL_INT_MAX;
 
@@ -251,20 +251,18 @@ inline MV get_best_mv(__global uchar *ref_frame, __global uchar *cur_frame,
     best_mv.row = candidate_b_mv.row >> 3;
   }
 
-  *pred_mv_sad = bestsad;
-
   return best_mv;
 }
 
 MV combined_motion_search(__global uchar *ref_frame,
                           __global uchar *cur_frame,
                           __global GPU_INPUT *gpu_input,
+                          __global GPU_OUTPUT *gpu_output,
                           __global GPU_RD_PARAMETERS *rd_parameters,
                           int sad_per_bit,
                           int stride,
                           int mi_rows,
                           int mi_cols,
-                          int *pred_mv_sad,
                           __local int *intermediate_sad) {
   __global int *nmvsadcost_0 = rd_parameters->nmvsadcost[0] + MV_MAX;
   __global int *nmvsadcost_1 = rd_parameters->nmvsadcost[1] + MV_MAX;
@@ -298,7 +296,7 @@ MV combined_motion_search(__global uchar *ref_frame,
   vp9_set_mv_search_range_step2(&x, &zero_mv);
 
   best_mv = get_best_mv(ref_frame, cur_frame, stride, intermediate_sad,
-                        zero_mv, pred_mv, pred_mv_sad);
+                        zero_mv, pred_mv);
 
   clamp_gpu_mv(&best_mv, x.mv_col_min, x.mv_col_max, x.mv_row_min , x.mv_row_max);
 
@@ -319,6 +317,8 @@ MV combined_motion_search(__global uchar *ref_frame,
                                       nmvsadcost_0, nmvsadcost_1,
                                       &x, sad_per_bit,
                                       &bestsad, 0);
+
+  gpu_output->pred_mv_sad = bestsad;
 
   best_mv.row = best_mv.row * 8;
   best_mv.col = best_mv.col * 8;
@@ -374,10 +374,10 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
       &rd_parameters->seg_rd_param[gpu_input->seg_id];
 
   best_mv = combined_motion_search(ref_frame, cur_frame,
-                                   gpu_input, rd_parameters,
+                                   gpu_input, gpu_output, rd_parameters,
                                    seg_rd_params->sad_per_bit,
                                    stride,
-                                   mi_rows, mi_cols, &pred_mv_sad,
+                                   mi_rows, mi_cols,
                                    intermediate_int);
 
   gpu_output->mv.as_mv = best_mv;

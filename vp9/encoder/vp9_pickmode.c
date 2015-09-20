@@ -1166,18 +1166,10 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
       x->gpu_output[gpu_bsize]->rv = rv;
       x->gpu_output[gpu_bsize]->mv.as_int =
           frame_mv[this_mode][LAST_FRAME].as_int;
+      x->gpu_output[gpu_bsize]->pred_mv_sad = x->pred_mv_sad[LAST_FRAME];
+
       if (rv)
         continue;
-      if (frame_mv[NEWMV][LAST_FRAME].as_int != INVALID_MV) {
-        const int pre_stride = xd->plane[0].pre[0].stride;
-        const uint8_t * const pre_buf = xd->plane[0].pre[0].buf +
-            (frame_mv[NEWMV][LAST_FRAME].as_mv.row >> 3) * pre_stride +
-            (frame_mv[NEWMV][LAST_FRAME].as_mv.col >> 3);
-        x->pred_mv_sad[LAST_FRAME] =
-            cpi->fn_ptr[bsize].sdf(x->plane[0].src.buf,
-                                   x->plane[0].src.stride,
-                                   pre_buf, pre_stride);
-      }
     }
 
     mbmi->mode = this_mode;
@@ -1234,7 +1226,6 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
     x->gpu_output[gpu_bsize]->dist[gpu_mode_index] = this_rdc.dist;
     x->gpu_output[gpu_bsize]->interp_filter[gpu_mode_index] = mbmi->interp_filter;
     x->gpu_output[gpu_bsize]->tx_size[gpu_mode_index] = mbmi->tx_size;
-    x->gpu_output[gpu_bsize]->pred_mv_sad = x->pred_mv_sad[LAST_FRAME];
     x->gpu_output[gpu_bsize]->sse_y[gpu_mode_index] = sse_y;
     x->gpu_output[gpu_bsize]->var_y[gpu_mode_index] = var_y;
     x->gpu_output[gpu_bsize]->skip_txfm[gpu_mode_index] = x->skip_txfm[0];

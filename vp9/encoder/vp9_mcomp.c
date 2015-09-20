@@ -2468,6 +2468,9 @@ int vp9_full_pixel_search(VP9_COMP *cpi, MACROBLOCK *x,
       assert(0 && "Invalid search method.");
   }
 
+  if (x->data_parallel_processing)
+    x->pred_mv_sad[LAST_FRAME] = var;
+
   if (method != NSTEP && rd && var < var_max)
     var = vp9_get_mvpred_var(x, tmp_mv, ref_mv, fn_ptr, 1);
 
