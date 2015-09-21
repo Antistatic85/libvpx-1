@@ -233,13 +233,8 @@ void vp9_sub_pixel_search_halfpel_filtering(__global uchar *ref_frame,
   __global int *intermediate_sum_sse = (__global int *)gpu_scratch;
 
   /* Half pel */
-
-#if !INTEL_HD_GRAPHICS
   best_mv = best_mv + hpel_offset[idx];
-#else
-  best_mv.row = best_mv.row + hpel_offset[idx].row;
-  best_mv.col = best_mv.col + hpel_offset[idx].col;
-#endif
+
   idx *= 2;
   buffer_offset = ((best_mv.row >> 3) * stride) + (best_mv.col >> 3);
   ref_frame += buffer_offset;
@@ -365,13 +360,8 @@ void vp9_sub_pixel_search_quarterpel_filtering(__global uchar *ref_frame,
   __global int *intermediate_sum_sse = (__global int *)gpu_scratch;
 
   /* Quarter pel */
-
-#if !INTEL_HD_GRAPHICS
   best_mv = best_mv + qpel_offset[idx];
-#else
-  best_mv.row = best_mv.row + qpel_offset[idx].row;
-  best_mv.col = best_mv.col + qpel_offset[idx].col;
-#endif
+
   idx *= 2;
 
   buffer_offset = ((best_mv.row >> 3) * stride) + (best_mv.col >> 3);

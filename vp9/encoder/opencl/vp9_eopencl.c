@@ -14,7 +14,6 @@
 
 #define OPENCL_DEVELOPER_MODE 1
 #define BUILD_OPTION_LENGTH 128
-#define INTEL_HD_GRAPHICS_ID 32902
 #if ARCH_ARM
 #define PREFIX_PATH "./"
 #else
@@ -36,7 +35,7 @@ static char *read_src(const char *src_file_name) {
   int32_t size;
   char *src;
 
-  fp = fopen(src_file_name, "rb");
+  fp = fopen(src_file_name, "r");
   if (fp == NULL)
     return NULL;
 
@@ -774,21 +773,12 @@ static int vp9_eopencl_build_subpel_kernel(VP9_COMP *cpi) {
   VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
   cl_int status = CL_SUCCESS;
   cl_device_id device = opencl->device;
-  cl_uint vendor_id;
   cl_program program;
   const char *kernel_file_name= PREFIX_PATH"vp9_subpel.cl";
   char build_options[BUILD_OPTION_LENGTH];
   char *kernel_src = NULL;
   GPU_BLOCK_SIZE gpu_bsize;
   BLOCK_SIZE bsize;
-
-  // vendor id
-  status = clGetDeviceInfo(device, CL_DEVICE_VENDOR_ID,
-                           sizeof(cl_uint),
-                           &vendor_id,
-                           NULL);
-  if (status != CL_SUCCESS)
-    goto fail;
 
   // Read kernel source files
   kernel_src = read_src(kernel_file_name);
@@ -805,11 +795,10 @@ static int vp9_eopencl_build_subpel_kernel(VP9_COMP *cpi) {
       goto fail;
 
     sprintf(build_options,
-            "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d -DINTEL_HD_GRAPHICS=%d",
+            "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
             PREFIX_PATH,
             num_8x8_blocks_wide_lookup[bsize] * 8,
-            1 << pixel_rows_per_workitem_log2_sub_pixel[gpu_bsize],
-            (vendor_id == INTEL_HD_GRAPHICS_ID));
+            1 << pixel_rows_per_workitem_log2_sub_pixel[gpu_bsize]);
 
     // Build the program
     status = clBuildProgram(program, 1, &device,
@@ -890,9 +879,6 @@ static int vp9_eopencl_build_fullpel_kernel(VP9_COMP *cpi) {
   char *kernel_src = NULL;
   GPU_BLOCK_SIZE gpu_bsize;
   BLOCK_SIZE bsize;
-
-  // device id
-  device = opencl->device;
 
   // Read kernel source files
   kernel_src = read_src(kernel_file_name);
@@ -977,9 +963,6 @@ static int vp9_eopencl_build_rd_kernel(VP9_COMP *cpi) {
   char *kernel_src = NULL;
   GPU_BLOCK_SIZE gpu_bsize;
   BLOCK_SIZE bsize;
-
-  // device id
-  device = opencl->device;
 
   // Read kernel source files
   kernel_src = read_src(kernel_file_name);

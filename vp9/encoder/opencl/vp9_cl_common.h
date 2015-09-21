@@ -146,21 +146,9 @@ typedef uint8_t INTERP_FILTER;
 #define SKIP_TXFM_AC_DC 1
 #define SKIP_TXFM_AC_ONLY 2
 
-// Enabling this piece of code causes a crash in Intel HD graphics. But it works
-// fine in Mali GPU. Must be an issue with Intel's driver
-#if !INTEL_HD_GRAPHICS
-
 typedef short2 MV;
 #define row s0
 #define col s1
-
-#else
-
-typedef struct mv {
-  int16_t row;
-  int16_t col;
-} MV;
-#endif
 
 typedef union int_mv {
   uint32_t as_int;
