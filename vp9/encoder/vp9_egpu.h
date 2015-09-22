@@ -86,10 +86,9 @@ typedef struct VP9_EGPU {
   GPU_INPUT *gpu_input[GPU_BLOCK_SIZES];
   void (*alloc_buffers)(struct VP9_COMP *cpi);
   void (*free_buffers)(struct VP9_COMP *cpi);
-  void (*acquire_input_buffer)(struct VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
-      void **host_ptr);
-  void (*acquire_output_buffer)(struct VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
-      void **host_ptr, int sub_frame_idx);
+  void (*acquire_input_buffer)(struct VP9_COMP *cpi, void **host_ptr);
+  void (*acquire_output_buffer)(struct VP9_COMP *cpi, void **host_ptr,
+      int sub_frame_idx);
   void (*acquire_rd_param_buffer)(struct VP9_COMP *cpi, void **host_ptr);
   void (*enc_sync_read)(struct VP9_COMP *cpi, int event_id);
   void (*execute)(struct VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
@@ -119,12 +118,11 @@ static INLINE int is_gpu_inter_mode(PREDICTION_MODE mode) {
   return (mode == ZEROMV || mode == NEWMV);
 }
 
-int vp9_get_gpu_buffer_index(struct VP9_COMP *const cpi, int mi_row, int mi_col,
-                             GPU_BLOCK_SIZE gpu_bsize);
+int vp9_get_gpu_buffer_index(struct VP9_COMP *const cpi, int mi_row, int mi_col);
 
 void vp9_gpu_set_mvinfo_offsets(struct VP9_COMP *const cpi,
                                 struct macroblock *const x,
-                                int mi_row, int mi_col, BLOCK_SIZE bsize);
+                                int mi_row, int mi_col);
 
 void vp9_subframe_init(SubFrameInfo *subframe, const VP9_COMMON *cm, int row);
 

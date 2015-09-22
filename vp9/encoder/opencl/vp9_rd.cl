@@ -692,10 +692,18 @@ void vp9_zero_motion_search(__global uchar *ref,
   BLOCK_SIZE bsize;
   int this_early_term = 0;
 
-  gpu_input += (global_row * global_stride + global_col);
-  gpu_output += (global_row * global_stride + global_col);
+#if BLOCK_SIZE_IN_PIXELS == 64
+  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
+  int group_offset = (global_row * global_stride * 4 + global_col * 2);
+#else
+  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
+  int group_offset = (global_row * global_stride + global_col);
+#endif
 
-  if (!gpu_input->do_compute)
+  gpu_input += group_offset;
+  gpu_output += group_offset;
+
+  if (gpu_input->do_compute != gpu_bsize)
     goto exit;
 
   __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
@@ -812,14 +820,21 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
   int sum;
   uint32_t sse;
   int filter_type;
+#if BLOCK_SIZE_IN_PIXELS == 64
+  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
+  int group_offset = global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
+      group_stride * 4 + (group_col >> 1) * 2;
+#else
+  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
   int group_offset = global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
       group_stride + (group_col >> 1);
+#endif
 
   gpu_input += group_offset;
   gpu_output += group_offset;
   gpu_scratch += group_offset;
 
-  if (!gpu_input->do_compute)
+  if (gpu_input->do_compute != gpu_bsize)
     goto exit;
 
   if (gpu_output->rv)
@@ -882,12 +897,18 @@ void vp9_rd_calculation(__global uchar *ref_frame,
   int filter_type = EIGHTTAP_SMOOTH;
   int bsize;
   int this_early_term = 0;
+#if BLOCK_SIZE_IN_PIXELS == 64
+  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
+  int group_offset = (global_row * global_stride * 4 + global_col * 2);
+#else
+  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
+  int group_offset = (global_row * global_stride + global_col);
+#endif
+  gpu_input += group_offset;
+  gpu_output += group_offset;
+  gpu_scratch += group_offset;
 
-  gpu_input += (global_row * global_stride + global_col);
-  gpu_output += (global_row * global_stride + global_col);
-  gpu_scratch += (global_row * global_stride + global_col);
-
-  if (!gpu_input->do_compute)
+  if (gpu_input->do_compute != gpu_bsize)
     goto exit;
 
   if (gpu_output->rv)

@@ -123,7 +123,7 @@ struct macroblock {
   int use_gpu;
 
   // pointer to MV results from GPU
-  GPU_OUTPUT *gpu_output[GPU_BLOCK_SIZES];
+  GPU_OUTPUT *gpu_output;
 
   // Indicates whether the current algorithm is processed in a data parallel
   // manner

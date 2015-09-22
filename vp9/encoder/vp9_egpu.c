@@ -22,6 +22,8 @@
 #include "vp9/encoder/opencl/vp9_eopencl.h"
 #endif
 
+// Maintain the block sizes in ascending order. All memory allocations, offset
+// calculations happens on the lowest block size.
 const BLOCK_SIZE vp9_actual_block_size_lookup[GPU_BLOCK_SIZES] = {
     BLOCK_32X32,
     BLOCK_64X64,
@@ -43,26 +45,24 @@ const BLOCK_SIZE vp9_gpu_block_size_lookup[BLOCK_SIZES] = {
     GPU_BLOCK_64X64,
 };
 
-int vp9_get_gpu_buffer_index(VP9_COMP *const cpi, int mi_row, int mi_col,
-                             GPU_BLOCK_SIZE gpu_bsize) {
+int vp9_get_gpu_buffer_index(VP9_COMP *const cpi, int mi_row, int mi_col) {
   const VP9_COMMON *const cm = &cpi->common;
-  const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
-  const int blocks_in_row = (cm->sb_cols * num_mxn_blocks_wide_lookup[bsize]);
+  const BLOCK_SIZE bsize = vp9_actual_block_size_lookup[0];
+  const int blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
   const int bsl = b_width_log2_lookup[bsize] - 1;
   return ((mi_row >> bsl) * blocks_in_row) + (mi_col >> bsl);
 }
 
 void vp9_gpu_set_mvinfo_offsets(VP9_COMP *const cpi, MACROBLOCK *const x,
-                                int mi_row, int mi_col, BLOCK_SIZE bsize) {
+                                int mi_row, int mi_col) {
   const VP9_COMMON *const cm = &cpi->common;
-  const GPU_BLOCK_SIZE gpu_bsize = get_gpu_block_size(bsize);
-  const int blocks_in_row = (cm->sb_cols * num_mxn_blocks_wide_lookup[bsize]);
+  const BLOCK_SIZE bsize = vp9_actual_block_size_lookup[0];
+  const int blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
   const int block_index_row = (mi_row >> mi_height_log2(bsize));
   const int block_index_col = (mi_col >> mi_width_log2(bsize));
 
-  if (gpu_bsize != GPU_BLOCK_INVALID)
-    x->gpu_output[gpu_bsize] = cpi->gpu_output_base[gpu_bsize] +
-      (block_index_row * blocks_in_row) + block_index_col;
+  x->gpu_output = cpi->gpu_output_base +
+    (block_index_row * blocks_in_row) + block_index_col;
 }
 
 static int get_subframe_offset(int idx, int mi_rows, int sb_rows) {
@@ -91,17 +91,14 @@ int vp9_get_subframe_index(const VP9_COMMON *cm, int mi_row) {
 void vp9_alloc_gpu_interface_buffers(VP9_COMP *cpi) {
 #if !CONFIG_GPU_COMPUTE
   VP9_COMMON *const cm = &cpi->common;
-  GPU_BLOCK_SIZE gpu_bsize;
+  const BLOCK_SIZE bsize = vp9_actual_block_size_lookup[0];
 
-  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
-    const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
-    const int blocks_in_row = (cm->sb_cols * num_mxn_blocks_wide_lookup[bsize]);
-    const int blocks_in_col = (cm->sb_rows * num_mxn_blocks_high_lookup[bsize]);
+  const int blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
+  const int blocks_in_col = cm->sb_rows * num_mxn_blocks_high_lookup[bsize];
 
-    CHECK_MEM_ERROR(cm, cpi->gpu_output_base[gpu_bsize],
-                    vpx_calloc(blocks_in_row * blocks_in_col,
-                               sizeof(*cpi->gpu_output_base[gpu_bsize])));
-  }
+  CHECK_MEM_ERROR(cm, cpi->gpu_output_base,
+                  vpx_calloc(blocks_in_row * blocks_in_col,
+                             sizeof(*cpi->gpu_output_base)));
 #else
   cpi->egpu.alloc_buffers(cpi);
 #endif
@@ -109,12 +106,8 @@ void vp9_alloc_gpu_interface_buffers(VP9_COMP *cpi) {
 
 void vp9_free_gpu_interface_buffers(VP9_COMP *cpi) {
 #if !CONFIG_GPU_COMPUTE
-  GPU_BLOCK_SIZE gpu_bsize;
-
-  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
-    vpx_free(cpi->gpu_output_base[gpu_bsize]);
-    cpi->gpu_output_base[gpu_bsize] = NULL;
-  }
+  vpx_free(cpi->gpu_output_base);
+  cpi->gpu_output_base = NULL;
 #else
   cpi->egpu.free_buffers(cpi);
 #endif

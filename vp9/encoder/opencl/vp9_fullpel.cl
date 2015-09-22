@@ -350,8 +350,15 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
                       (group_col * BLOCK_SIZE_IN_PIXELS) +
                       (local_col * NUM_PIXELS_PER_WORKITEM);
   global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
+#if BLOCK_SIZE_IN_PIXELS == 64
+  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
+  int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
+      group_stride * 4 + group_col * 2);
+#else
+  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
   int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
       group_stride + group_col);
+#endif
   MV best_mv;
   int pred_mv_sad;
 
@@ -361,9 +368,8 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
   cur_frame += global_offset;
   ref_frame += global_offset;
 
-  if (!gpu_input->do_compute) {
+  if (gpu_input->do_compute != gpu_bsize)
     goto exit;
-  }
 
   if (gpu_output->this_early_term[GPU_INTER_OFFSET(ZEROMV)]) {
     gpu_output->rv = 1;
