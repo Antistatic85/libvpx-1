@@ -19,6 +19,7 @@ typedef struct {
 
 typedef struct {
   SUM_SSE sum_sse[9];
+  char dummy[952];
 } subpel_sum_sse;
 
 //=====   GLOBAL DEFINITIONS   =====
@@ -449,7 +450,5 @@ void vp9_sub_pixel_search_quarterpel_bestmv(__global GPU_INPUT *gpu_input,
   gpu_output->mv.as_mv = best_mv;
 
 exit:
-  vstore16(0, 0, intermediate_sum_sse);
-  vstore2(0, 8, intermediate_sum_sse);
   return;
 }

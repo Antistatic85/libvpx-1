@@ -868,6 +868,7 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
   inter_prediction(ref_frame, cur_frame, stride, horz_subpel, vert_subpel,
                    filter_type, intermediate_uchar8,
                    &sum, &sse);
+
   gpu_scratch->sum_sse[filter_type].sse8x8[local_row * (BLOCK_SIZE_IN_PIXELS >> 3) +
                                            local_col] = sse;
   gpu_scratch->sum_sse[filter_type].sum8x8[local_row * (BLOCK_SIZE_IN_PIXELS >> 3) +
@@ -897,28 +898,21 @@ void vp9_rd_calculation(__global uchar *ref_frame,
   int filter_type = EIGHTTAP_SMOOTH;
   int bsize;
   int this_early_term = 0;
-#if BLOCK_SIZE_IN_PIXELS == 64
-  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
-  int group_offset = (global_row * global_stride * 4 + global_col * 2);
-#else
-  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
   int group_offset = (global_row * global_stride + global_col);
-#endif
+
   gpu_input += group_offset;
   gpu_output += group_offset;
   gpu_scratch += group_offset;
 
-  if (gpu_input->do_compute != gpu_bsize)
-    goto exit;
-
   if (gpu_output->rv)
     goto exit;
 
-#if BLOCK_SIZE_IN_PIXELS == 64
-  bsize = BLOCK_64X64;
-#elif BLOCK_SIZE_IN_PIXELS == 32
-  bsize = BLOCK_32X32;
-#endif
+  if (gpu_input->do_compute == GPU_BLOCK_32X32)
+    bsize = BLOCK_32X32;
+  else if (gpu_input->do_compute == GPU_BLOCK_64X64)
+    bsize = BLOCK_64X64;
+  else
+    goto exit;
 
   __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
       &rd_parameters->seg_rd_param[gpu_input->seg_id];
@@ -931,14 +925,15 @@ void vp9_rd_calculation(__global uchar *ref_frame,
   if (!horz_subpel && !vert_subpel)
     filter_type = EIGHTTAP;
 
-  bw = b_width_log2_lookup[bsize];
-  bh = b_height_log2_lookup[bsize];
+  // Only Square block sizes supported in GPU
+  bw = bh = b_width_log2_lookup[bsize];
 
   int64_t cost, best_cost = INT64_MAX;
   for (j = 0; j <= filter_type; j++) {
     sse = 0;
     sum = 0;
-    for (i = 0; i < (BLOCK_SIZE_IN_PIXELS >> 3) * (BLOCK_SIZE_IN_PIXELS >> 3); i++) {
+    int num8x8 = 1 << (bw + bh - 2);
+    for (i = 0; i < num8x8; i++) {
       sse8x8[i] = gpu_scratch->sum_sse[j].sse8x8[i];
       sum8x8[i] = gpu_scratch->sum_sse[j].sum8x8[i];
       var8x8[i] = sse8x8[i] - (((unsigned int)sum8x8[i] * sum8x8[i]) >> 6);

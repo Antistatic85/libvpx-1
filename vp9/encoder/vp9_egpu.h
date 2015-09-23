@@ -91,8 +91,7 @@ typedef struct VP9_EGPU {
       int sub_frame_idx);
   void (*acquire_rd_param_buffer)(struct VP9_COMP *cpi, void **host_ptr);
   void (*enc_sync_read)(struct VP9_COMP *cpi, int event_id);
-  void (*execute)(struct VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
-      int sub_frame_idx);
+  void (*execute)(struct VP9_COMP *cpi, int sub_frame_idx);
   void (*remove)(struct VP9_COMP *cpi);
 } VP9_EGPU;
 

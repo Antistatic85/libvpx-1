@@ -46,7 +46,7 @@ typedef long int64_t;
 typedef unsigned long uint64_t;
 
 #define INT32_MAX 2147483647
-#define INT64_MAX 9223372036854775807LL
+#define INT64_MAX 9223372036854775807L
 #define CL_INT_MAX 2147483647
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))

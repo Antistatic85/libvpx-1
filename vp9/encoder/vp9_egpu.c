@@ -192,7 +192,6 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi) {
   int tile_col, tile_row;
   const int tile_rows = 1 << cm->log2_tile_rows;
   VP9_EGPU * const egpu = &cpi->egpu;
-  GPU_BLOCK_SIZE gpu_bsize;
   int subframe_idx;
 
   // fill rd param info
@@ -211,9 +210,7 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi) {
   // enqueue kernels for gpu
   for (subframe_idx = CPU_SUB_FRAMES; subframe_idx < MAX_SUB_FRAMES;
        subframe_idx++) {
-    for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
-      egpu->execute(cpi, gpu_bsize, subframe_idx);
-    }
+    egpu->execute(cpi, subframe_idx);
   }
 
   // re-map source and reference pointers before starting cpu side processing

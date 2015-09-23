@@ -427,45 +427,30 @@ static void vp9_opencl_enc_sync_read(VP9_COMP *cpi, cl_int event_id) {
                        "Wait for event failed");
 }
 
-static void vp9_opencl_execute(VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
-                               int subframe_idx) {
+static void vp9_opencl_execute(VP9_COMP *cpi, int subframe_idx) {
   VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
   VP9_OPENCL *const opencl = eopencl->opencl;
 
   VP9_COMMON *const cm = &cpi->common;
-  const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
   opencl_buffer *gpu_input = &eopencl->gpu_input;
   opencl_buffer *gpu_output_sub_buffer =
       &eopencl->gpu_output_sub_buffer[subframe_idx];
   opencl_buffer *rdopt_parameters = &eopencl->rdopt_parameters;
   YV12_BUFFER_CONFIG *img_src = cpi->Source;
   YV12_BUFFER_CONFIG *frm_ref = get_ref_frame_buffer(cpi, LAST_FRAME);
-
-  const int b_width_in_pixels_log2 = b_width_log2_lookup[bsize] + 2;
-  const int b_width_in_pixels = 1 << b_width_in_pixels_log2;
-  const int b_height_in_pixels_log2 = b_height_log2_lookup[bsize] + 2;
-  const int b_height_in_pixels = 1 << b_height_in_pixels_log2;
-  const int b_height_mask = b_height_in_pixels - 1;
-
   SubFrameInfo subframe;
+  int subframe_height;
   int blocks_in_col, blocks_in_row;
   int block_row_offset;
-  int subframe_height;
-
-  const size_t workitem_size[2] = {NUM_PIXELS_PER_WORKITEM, 1};
   size_t local_size[2];
   size_t global_size[2];
   size_t global_offset[2];
-  size_t local_size_full_pixel[2], local_size_sub_pixel[2];
-  size_t local_size_inter_pred[2];
-  const int ms_pixels = (num_8x8_blocks_wide_lookup[bsize] / 2) * 8;
-
   cl_int status = CL_SUCCESS;
-
 #if OPENCL_PROFILING
   cl_event event[NUM_KERNELS];
 #endif
   cl_event *event_ptr[NUM_KERNELS];
+  GPU_BLOCK_SIZE gpu_bsize;
   int i;
 
   for (i = 0; i < NUM_KERNELS; i++) {
@@ -475,22 +460,6 @@ static void vp9_opencl_execute(VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
     event_ptr[i] = NULL;
 #endif
   }
-
-  vp9_subframe_init(&subframe, cm, subframe_idx);
-  block_row_offset = subframe.mi_row_start >> mi_height_log2(bsize);
-
-  subframe_height = (subframe.mi_row_end - subframe.mi_row_start) << MI_SIZE_LOG2;
-  blocks_in_col = subframe_height >> b_height_in_pixels_log2;
-  blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
-
-  if (subframe_idx == MAX_SUB_FRAMES - 1)
-    if ((cm->height & b_height_mask) > ms_pixels)
-      blocks_in_col++;
-
-  if (subframe_idx == 0)
-    vp9_opencl_set_dynamic_kernel_args(cpi, gpu_bsize);
-
-  (void)status;
 
   if (vp9_opencl_unmap_buffer(opencl, rdopt_parameters, CL_FALSE)) {
     assert(0);
@@ -523,167 +492,230 @@ static void vp9_opencl_execute(VP9_COMP *cpi, GPU_BLOCK_SIZE gpu_bsize,
     frm_ref->buffer_alloc = frm_ref->y_buffer = frm_ref->u_buffer =
         frm_ref->v_buffer = NULL;
   }
+  vp9_subframe_init(&subframe, cm, subframe_idx);
+  subframe_height =
+      (subframe.mi_row_end - subframe.mi_row_start) << MI_SIZE_LOG2;
 
-  // For very small resolutions, this could happen for the last few sub-frames
-  if (blocks_in_col == 0)
-    goto skip_execution;
+  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
 
-  // launch full pixel search kernel zero mv analysis
-  // total number of workitems
-  global_size[0] = blocks_in_row;
-  global_size[1] = blocks_in_col;
+    const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
 
-  // if the frame is partitioned in to sub-frames, the global work item
-  // size is scaled accordingly. the global offset determines the subframe
-  // that is being analysed by the gpu.
-  global_offset[0] = 0;
-  global_offset[1] = block_row_offset;
+    const int b_width_in_pixels_log2 = b_width_log2_lookup[bsize] + 2;
+    const int b_width_in_pixels = 1 << b_width_in_pixels_log2;
+    const int b_height_in_pixels_log2 = b_height_log2_lookup[bsize] + 2;
+    const int b_height_in_pixels = 1 << b_height_in_pixels_log2;
+    const int b_height_mask = b_height_in_pixels - 1;
 
-  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->rd_calculation_zeromv[gpu_bsize],
-                                  2, global_offset, global_size, NULL,
-                                  0, NULL, event_ptr[0]);
-  assert(status == CL_SUCCESS);
+    const size_t workitem_size[2] = {NUM_PIXELS_PER_WORKITEM, 1};
+    size_t local_size_full_pixel[2], local_size_sub_pixel[2];
+    size_t local_size_inter_pred[2];
+    const int ms_pixels = (num_8x8_blocks_wide_lookup[bsize] / 2) * 8;
 
-  // launch full pixel search new mv analysis kernel
-  // number of workitems per block
-  local_size[0] = b_width_in_pixels / workitem_size[0];
-  local_size[1] = b_height_in_pixels / workitem_size[1];
+    block_row_offset = subframe.mi_row_start >> mi_height_log2(bsize);
 
-  local_size_full_pixel[0] = local_size[0];
-  local_size_full_pixel[1] =
-      local_size[1] >> pixel_rows_per_workitem_log2_full_pixel[gpu_bsize];
+    blocks_in_col = subframe_height >> b_height_in_pixels_log2;
+    blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
 
-  // total number of workitems
-  global_size[0] = blocks_in_row * local_size_full_pixel[0];
-  global_size[1] = blocks_in_col * local_size_full_pixel[1];
+    if (subframe_idx == MAX_SUB_FRAMES - 1)
+      if ((cm->height & b_height_mask) > ms_pixels)
+        blocks_in_col++;
 
-  // if the frame is partitioned in to sub-frames, the global work item
-  // size is scaled accordingly. the global offset determines the subframe
-  // that is being analysed by the gpu.
-  global_offset[0] = 0;
-  global_offset[1] = block_row_offset * local_size_full_pixel[1];
+    if (subframe_idx == 0)
+      vp9_opencl_set_dynamic_kernel_args(cpi, gpu_bsize);
 
-  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->full_pixel_search[gpu_bsize],
-                                  2, global_offset, global_size,
-                                  local_size_full_pixel,
-                                  0, NULL, event_ptr[1]);
-  assert(status == CL_SUCCESS);
+    (void)status;
 
-  local_size_sub_pixel[0] = local_size[0];
-  local_size_sub_pixel[1] =
-      local_size[1] >> pixel_rows_per_workitem_log2_sub_pixel[gpu_bsize];
 
-  global_size[0] = blocks_in_row * local_size_sub_pixel[0] * 8;
-  global_size[1] = blocks_in_col * local_size_sub_pixel[1];
+    // For very small resolutions, this could happen for the last few sub-frames
+    if (blocks_in_col == 0)
+      goto skip_execution;
 
-  global_offset[0] = 0;
-  global_offset[1] = block_row_offset * local_size_sub_pixel[1];
+    // launch full pixel search kernel zero mv analysis
+    // total number of workitems
+    global_size[0] = blocks_in_row;
+    global_size[1] = blocks_in_col;
 
-  // launch sub pixel search kernel
-  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->hpel_search[gpu_bsize],
-                                  2, global_offset, global_size,
-                                  local_size_sub_pixel,
-                                  0, NULL, event_ptr[2]);
-  assert(status == CL_SUCCESS);
+    // if the frame is partitioned in to sub-frames, the global work item
+    // size is scaled accordingly. the global offset determines the subframe
+    // that is being analysed by the gpu.
+    global_offset[0] = 0;
+    global_offset[1] = block_row_offset;
 
-  global_size[0] = blocks_in_row;
-  global_size[1] = blocks_in_col;
+    status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                    eopencl->rd_calculation_zeromv[gpu_bsize],
+                                    2, global_offset, global_size, NULL,
+                                    0, NULL, event_ptr[0]);
+    assert(status == CL_SUCCESS);
 
-  global_offset[0] = 0;
-  global_offset[1] = block_row_offset;
+    // launch full pixel search new mv analysis kernel
+    // number of workitems per block
+    local_size[0] = b_width_in_pixels / workitem_size[0];
+    local_size[1] = b_height_in_pixels / workitem_size[1];
 
-  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->hpel_select_bestmv[gpu_bsize],
-                                  2, global_offset, global_size,
-                                  NULL,
-                                  0, NULL, event_ptr[3]);
-  assert(status == CL_SUCCESS);
+    local_size_full_pixel[0] = local_size[0];
+    local_size_full_pixel[1] =
+        local_size[1] >> pixel_rows_per_workitem_log2_full_pixel[gpu_bsize];
 
-  global_size[0] = blocks_in_row * local_size_sub_pixel[0] * 8;
-  global_size[1] = blocks_in_col * local_size_sub_pixel[1];
+    // total number of workitems
+    global_size[0] = blocks_in_row * local_size_full_pixel[0];
+    global_size[1] = blocks_in_col * local_size_full_pixel[1];
 
-  global_offset[0] = 0;
-  global_offset[1] = block_row_offset * local_size_sub_pixel[1];
+    // if the frame is partitioned in to sub-frames, the global work item
+    // size is scaled accordingly. the global offset determines the subframe
+    // that is being analysed by the gpu.
+    global_offset[0] = 0;
+    global_offset[1] = block_row_offset * local_size_full_pixel[1];
 
-  // launch sub pixel search kernel
-  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->qpel_search[gpu_bsize],
-                                  2, global_offset, global_size,
-                                  local_size_sub_pixel,
-                                  0, NULL, event_ptr[4]);
-  assert(status == CL_SUCCESS);
+    status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                    eopencl->full_pixel_search[gpu_bsize],
+                                    2, global_offset, global_size,
+                                    local_size_full_pixel,
+                                    0, NULL, event_ptr[1]);
+    assert(status == CL_SUCCESS);
 
-  global_size[0] = blocks_in_row;
-  global_size[1] = blocks_in_col;
+    local_size_sub_pixel[0] = local_size[0];
+    local_size_sub_pixel[1] =
+        local_size[1] >> pixel_rows_per_workitem_log2_sub_pixel[gpu_bsize];
 
-  global_offset[0] = 0;
-  global_offset[1] = block_row_offset;
+    global_size[0] = blocks_in_row * local_size_sub_pixel[0] * 8;
+    global_size[1] = blocks_in_col * local_size_sub_pixel[1];
 
-  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->qpel_select_bestmv[gpu_bsize],
-                                  2, global_offset, global_size,
-                                  NULL,
-                                  0, NULL, event_ptr[5]);
-  assert(status == CL_SUCCESS);
+    global_offset[0] = 0;
+    global_offset[1] = block_row_offset * local_size_sub_pixel[1];
 
-  // launch inter prediction and sse compute kernel
-  local_size_inter_pred[0] = local_size[0];
-  local_size_inter_pred[1] =
-      local_size[1] >> pixel_rows_per_workitem_log2_inter_pred[gpu_bsize];
+    // launch sub pixel search kernel
+    status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                    eopencl->hpel_search[gpu_bsize],
+                                    2, global_offset, global_size,
+                                    local_size_sub_pixel,
+                                    0, NULL, event_ptr[2]);
+    assert(status == CL_SUCCESS);
 
-  global_size[0] = blocks_in_row * local_size_inter_pred[0] * 2;
-  global_size[1] = blocks_in_col * local_size_inter_pred[1];
+    global_size[0] = blocks_in_row;
+    global_size[1] = blocks_in_col;
 
-  global_offset[0] = 0;
-  global_offset[1] = block_row_offset * local_size_inter_pred[1];
+    global_offset[0] = 0;
+    global_offset[1] = block_row_offset;
 
-  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->inter_prediction_and_sse[gpu_bsize],
-                                  2, global_offset, global_size,
-                                  local_size_inter_pred,
-                                  0, NULL, event_ptr[6]);
+    status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                    eopencl->hpel_select_bestmv[gpu_bsize],
+                                    2, global_offset, global_size,
+                                    NULL,
+                                    0, NULL, event_ptr[3]);
+    assert(status == CL_SUCCESS);
 
-  // launch rd compute kernel
-  global_size[0] = blocks_in_row;
-  global_size[1] = blocks_in_col;
-  global_offset[0] = 0;
-  global_offset[1] = block_row_offset;
+    global_size[0] = blocks_in_row * local_size_sub_pixel[0] * 8;
+    global_size[1] = blocks_in_col * local_size_sub_pixel[1];
 
-  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->rd_calculation_newmv[gpu_bsize],
-                                  2, global_offset, global_size, NULL,
-                                  0, NULL, event_ptr[7]);
+    global_offset[0] = 0;
+    global_offset[1] = block_row_offset * local_size_sub_pixel[1];
+
+    // launch sub pixel search kernel
+    status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                    eopencl->qpel_search[gpu_bsize],
+                                    2, global_offset, global_size,
+                                    local_size_sub_pixel,
+                                    0, NULL, event_ptr[4]);
+    assert(status == CL_SUCCESS);
+
+    global_size[0] = blocks_in_row;
+    global_size[1] = blocks_in_col;
+
+    global_offset[0] = 0;
+    global_offset[1] = block_row_offset;
+
+    status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                    eopencl->qpel_select_bestmv[gpu_bsize],
+                                    2, global_offset, global_size,
+                                    NULL,
+                                    0, NULL, event_ptr[5]);
+    assert(status == CL_SUCCESS);
+
+    // launch inter prediction and sse compute kernel
+    local_size_inter_pred[0] = local_size[0];
+    local_size_inter_pred[1] =
+        local_size[1] >> pixel_rows_per_workitem_log2_inter_pred[gpu_bsize];
+
+
+    global_size[0] = blocks_in_row * local_size_inter_pred[0] * 2;
+    global_size[1] = blocks_in_col * local_size_inter_pred[1];
+
+    global_offset[0] = 0;
+    global_offset[1] = block_row_offset * local_size_inter_pred[1];
+
+    status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                    eopencl->inter_prediction_and_sse[gpu_bsize],
+                                    2, global_offset, global_size,
+                                    local_size_inter_pred,
+                                    0, NULL, event_ptr[6]);
 
 #if OPENCL_PROFILING
-  for (i = 0; i < NUM_KERNELS; i++) {
-    cl_ulong time_elapsed;
-    status = clWaitForEvents(1, event_ptr[i]);
-    assert(status == CL_SUCCESS);
-    time_elapsed = get_event_time_elapsed(*event_ptr[i]);
-    eopencl->total_time_taken[gpu_bsize][i] += time_elapsed / 1000;
-    status = clReleaseEvent(*event_ptr[i]);
-    assert(status == CL_SUCCESS);
-  }
+    for (i = 0; i < NUM_KERNELS - 1; i++) {
+      cl_ulong time_elapsed;
+      status = clWaitForEvents(1, event_ptr[i]);
+      assert(status == CL_SUCCESS);
+      time_elapsed = get_event_time_elapsed(*event_ptr[i]);
+      eopencl->total_time_taken[gpu_bsize][i] += time_elapsed / 1000;
+      status = clReleaseEvent(*event_ptr[i]);
+      assert(status == CL_SUCCESS);
+    }
 #endif
+  }
+
+  // Lowest GPU Block size selected for the merged kernels
+  gpu_bsize = GPU_BLOCK_32X32;
+  {
+    const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
+    const int b_height_in_pixels_log2 = b_height_log2_lookup[bsize] + 2;
+    const int b_height_in_pixels = 1 << b_height_in_pixels_log2;
+    const int b_height_mask = b_height_in_pixels - 1;
+    const int ms_pixels = (num_8x8_blocks_wide_lookup[bsize] / 2) * 8;
+
+    block_row_offset = subframe.mi_row_start >> mi_height_log2(bsize);
+    blocks_in_col = subframe_height >> b_height_in_pixels_log2;
+    blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
+
+
+    if (subframe_idx == MAX_SUB_FRAMES - 1)
+      if ((cm->height & b_height_mask) > ms_pixels)
+        blocks_in_col++;
+
+    // launch rd compute kernel
+    global_size[0] = blocks_in_row;
+    global_size[1] = blocks_in_col;
+    global_offset[0] = 0;
+    global_offset[1] = block_row_offset;
+
+    status = clEnqueueNDRangeKernel(opencl->cmd_queue,
+                                    eopencl->rd_calculation_newmv[gpu_bsize],
+                                    2, global_offset, global_size, NULL,
+                                    0, NULL, event_ptr[7]);
+#if OPENCL_PROFILING
+    for ( ; i < NUM_KERNELS; i++) {
+      cl_ulong time_elapsed;
+      status = clWaitForEvents(1, event_ptr[i]);
+      assert(status == CL_SUCCESS);
+      time_elapsed = get_event_time_elapsed(*event_ptr[i]);
+      eopencl->total_time_taken[gpu_bsize][i] += time_elapsed / 1000;
+      status = clReleaseEvent(*event_ptr[i]);
+      assert(status == CL_SUCCESS);
+    }
+#endif
+  }
 
 skip_execution:
   status = clFlush(opencl->cmd_queue);
   assert(status == CL_SUCCESS);
 
-  if (gpu_bsize == GPU_BLOCK_SIZES - 1) {
-    if (eopencl->event[subframe_idx] != NULL) {
-      status = clReleaseEvent(eopencl->event[subframe_idx]);
-      eopencl->event[subframe_idx] = NULL;
-      assert(status == CL_SUCCESS);
-    }
-
-    status = clEnqueueMarker(opencl->cmd_queue,
-                             &eopencl->event[subframe_idx]);
+  if (eopencl->event[subframe_idx] != NULL) {
+    status = clReleaseEvent(eopencl->event[subframe_idx]);
+    eopencl->event[subframe_idx] = NULL;
     assert(status == CL_SUCCESS);
   }
+
+  status = clEnqueueMarker(opencl->cmd_queue,
+                           &eopencl->event[subframe_idx]);
+  assert(status == CL_SUCCESS);
 
   return;
 }
