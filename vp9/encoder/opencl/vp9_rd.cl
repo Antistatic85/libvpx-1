@@ -13,12 +13,12 @@
 #include "vp9_cl_common.h"
 
 typedef struct {
-  unsigned int sse8x8[64];
-  int sum8x8[64];
-}SUM_SSE;
+  unsigned int sse8x8;
+  int sum8x8;
+} SUM_SSE;
 
 typedef struct {
-  SUM_SSE sum_sse[EIGHTTAP_SMOOTH + 1];
+  SUM_SSE sum_sse[EIGHTTAP_SMOOTH + 1][64];
 }GPU_SCRATCH;
 
 //=====   GLOBAL DEFINITIONS   =====
@@ -815,27 +815,30 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
   __local int *intermediate_int = (__local int *)intermediate_uchar8;
   int global_row = get_global_id(1);
   int group_col = get_group_id(0);
-  int group_row = get_group_id(1);
   int group_stride = (get_num_groups(0) >> 1);
   int sum;
   uint32_t sse;
   int filter_type;
+  int group_row = global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM);
 #if BLOCK_SIZE_IN_PIXELS == 64
-  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
-  int group_offset = global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
-      group_stride * 4 + (group_col >> 1) * 2;
+  int group_offset = group_row * group_stride * 4 + (group_col >> 1) * 2;
 #else
-  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
-  int group_offset = global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
-      group_stride + (group_col >> 1);
+  int group_offset = group_row * group_stride + (group_col >> 1);
 #endif
 
   gpu_input += group_offset;
+  GPU_BLOCK_SIZE gpu_bsize = gpu_input->do_compute;
+  if (gpu_bsize == GPU_BLOCK_INVALID)
+    goto exit;
+
+  // Assuming a values for enum GPU_BLOCK_64X64 as 1 and GPU_BLOCK_32X32 as 0
+  int row_offset = group_row & gpu_bsize;
+  int col_offset = (group_col >> 1) & gpu_bsize;
+  group_offset -= row_offset * group_stride;
+  group_offset -= col_offset;
+
   gpu_output += group_offset;
   gpu_scratch += group_offset;
-
-  if (gpu_input->do_compute != gpu_bsize)
-    goto exit;
 
   if (gpu_output->rv)
     goto exit;
@@ -865,14 +868,16 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
   cur_frame += global_offset;
   ref_frame += global_offset + mv_offset;
 
+  // Assuming a values for enum GPU_BLOCK_64X64 as 1 and GPU_BLOCK_32X32 as 0
+  short local_offset = (local_row + row_offset * 4) * (4 << gpu_bsize) +
+      local_col + (col_offset * 4);
+
   inter_prediction(ref_frame, cur_frame, stride, horz_subpel, vert_subpel,
                    filter_type, intermediate_uchar8,
                    &sum, &sse);
 
-  gpu_scratch->sum_sse[filter_type].sse8x8[local_row * (BLOCK_SIZE_IN_PIXELS >> 3) +
-                                           local_col] = sse;
-  gpu_scratch->sum_sse[filter_type].sum8x8[local_row * (BLOCK_SIZE_IN_PIXELS >> 3) +
-                                           local_col] = sum;
+  gpu_scratch->sum_sse[filter_type][local_offset].sse8x8 = sse;
+  gpu_scratch->sum_sse[filter_type][local_offset].sum8x8 = sum;
 
 exit:
   return;
@@ -934,8 +939,8 @@ void vp9_rd_calculation(__global uchar *ref_frame,
     sum = 0;
     int num8x8 = 1 << (bw + bh - 2);
     for (i = 0; i < num8x8; i++) {
-      sse8x8[i] = gpu_scratch->sum_sse[j].sse8x8[i];
-      sum8x8[i] = gpu_scratch->sum_sse[j].sum8x8[i];
+      sse8x8[i] = gpu_scratch->sum_sse[j][i].sse8x8;
+      sum8x8[i] = gpu_scratch->sum_sse[j][i].sum8x8;
       var8x8[i] = sse8x8[i] - (((unsigned int)sum8x8[i] * sum8x8[i]) >> 6);
 
       sse += sse8x8[i];

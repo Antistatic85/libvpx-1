@@ -445,6 +445,7 @@ static void vp9_opencl_execute(VP9_COMP *cpi, int subframe_idx) {
   size_t local_size[2];
   size_t global_size[2];
   size_t global_offset[2];
+  const size_t workitem_size[2] = {NUM_PIXELS_PER_WORKITEM, 1};
   cl_int status = CL_SUCCESS;
 #if OPENCL_PROFILING
   cl_event event[NUM_KERNELS];
@@ -506,9 +507,7 @@ static void vp9_opencl_execute(VP9_COMP *cpi, int subframe_idx) {
     const int b_height_in_pixels = 1 << b_height_in_pixels_log2;
     const int b_height_mask = b_height_in_pixels - 1;
 
-    const size_t workitem_size[2] = {NUM_PIXELS_PER_WORKITEM, 1};
     size_t local_size_full_pixel[2], local_size_sub_pixel[2];
-    size_t local_size_inter_pred[2];
     const int ms_pixels = (num_8x8_blocks_wide_lookup[bsize] / 2) * 8;
 
     block_row_offset = subframe.mi_row_start >> mi_height_log2(bsize);
@@ -631,6 +630,45 @@ static void vp9_opencl_execute(VP9_COMP *cpi, int subframe_idx) {
                                     0, NULL, event_ptr[5]);
     assert(status == CL_SUCCESS);
 
+
+
+#if OPENCL_PROFILING
+    for (i = 0; i < NUM_KERNELS - 2; i++) {
+      cl_ulong time_elapsed;
+      status = clWaitForEvents(1, event_ptr[i]);
+      assert(status == CL_SUCCESS);
+      time_elapsed = get_event_time_elapsed(*event_ptr[i]);
+      eopencl->total_time_taken[gpu_bsize][i] += time_elapsed / 1000;
+      status = clReleaseEvent(*event_ptr[i]);
+      assert(status == CL_SUCCESS);
+    }
+#endif
+  }
+
+  // Lowest GPU Block size selected for the merged kernels
+  gpu_bsize = GPU_BLOCK_32X32;
+  {
+    const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
+    const int b_width_in_pixels_log2 = b_width_log2_lookup[bsize] + 2;
+    const int b_width_in_pixels = 1 << b_width_in_pixels_log2;
+    const int b_height_in_pixels_log2 = b_height_log2_lookup[bsize] + 2;
+    const int b_height_in_pixels = 1 << b_height_in_pixels_log2;
+    const int b_height_mask = b_height_in_pixels - 1;
+    const int ms_pixels = (num_8x8_blocks_wide_lookup[bsize] / 2) * 8;
+    size_t local_size_inter_pred[2];
+
+    block_row_offset = subframe.mi_row_start >> mi_height_log2(bsize);
+    blocks_in_col = subframe_height >> b_height_in_pixels_log2;
+    blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
+
+
+    if (subframe_idx == MAX_SUB_FRAMES - 1)
+      if ((cm->height & b_height_mask) > ms_pixels)
+        blocks_in_col++;
+
+    local_size[0] = b_width_in_pixels / workitem_size[0];
+    local_size[1] = b_height_in_pixels / workitem_size[1];
+
     // launch inter prediction and sse compute kernel
     local_size_inter_pred[0] = local_size[0];
     local_size_inter_pred[1] =
@@ -648,37 +686,7 @@ static void vp9_opencl_execute(VP9_COMP *cpi, int subframe_idx) {
                                     2, global_offset, global_size,
                                     local_size_inter_pred,
                                     0, NULL, event_ptr[6]);
-
-#if OPENCL_PROFILING
-    for (i = 0; i < NUM_KERNELS - 1; i++) {
-      cl_ulong time_elapsed;
-      status = clWaitForEvents(1, event_ptr[i]);
-      assert(status == CL_SUCCESS);
-      time_elapsed = get_event_time_elapsed(*event_ptr[i]);
-      eopencl->total_time_taken[gpu_bsize][i] += time_elapsed / 1000;
-      status = clReleaseEvent(*event_ptr[i]);
-      assert(status == CL_SUCCESS);
-    }
-#endif
-  }
-
-  // Lowest GPU Block size selected for the merged kernels
-  gpu_bsize = GPU_BLOCK_32X32;
-  {
-    const BLOCK_SIZE bsize = get_actual_block_size(gpu_bsize);
-    const int b_height_in_pixels_log2 = b_height_log2_lookup[bsize] + 2;
-    const int b_height_in_pixels = 1 << b_height_in_pixels_log2;
-    const int b_height_mask = b_height_in_pixels - 1;
-    const int ms_pixels = (num_8x8_blocks_wide_lookup[bsize] / 2) * 8;
-
-    block_row_offset = subframe.mi_row_start >> mi_height_log2(bsize);
-    blocks_in_col = subframe_height >> b_height_in_pixels_log2;
-    blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
-
-
-    if (subframe_idx == MAX_SUB_FRAMES - 1)
-      if ((cm->height & b_height_mask) > ms_pixels)
-        blocks_in_col++;
+    assert(status == CL_SUCCESS);
 
     // launch rd compute kernel
     global_size[0] = blocks_in_row;
@@ -690,6 +698,7 @@ static void vp9_opencl_execute(VP9_COMP *cpi, int subframe_idx) {
                                     eopencl->rd_calculation_newmv[gpu_bsize],
                                     2, global_offset, global_size, NULL,
                                     0, NULL, event_ptr[7]);
+    assert(status == CL_SUCCESS);
 #if OPENCL_PROFILING
     for ( ; i < NUM_KERNELS; i++) {
       cl_ulong time_elapsed;

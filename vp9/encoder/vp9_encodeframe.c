@@ -1009,53 +1009,6 @@ static int choose_partitioning(VP9_COMP *cpi,
 
 #if CONFIG_GPU_COMPUTE
 
-void set_partition_types(VP9_COMP *cpi, MACROBLOCK *const x,
-                         GPU_INPUT *gpu_input_base,
-                         MODE_INFO **mi, int mi_row, int mi_col,
-                         BLOCK_SIZE bsize) {
-  VP9_COMMON *const cm = &cpi->common;
-  GPU_INPUT *gpu_input = NULL;
-  const int bsl = b_width_log2_lookup[bsize], hbs = (1 << bsl) / 4;
-  const int mis = cm->mi_stride;
-  PARTITION_TYPE partition;
-  BLOCK_SIZE subsize;
-
-  if (mi_row >= cm->mi_rows || mi_col >= cm->mi_cols)
-    return;
-
-  if (bsize < get_actual_block_size(0))
-    return;
-
-  subsize = (bsize >= BLOCK_8X8) ? mi[0]->mbmi.sb_type : BLOCK_4X4;
-  partition = partition_lookup[bsl][subsize];
-  switch (partition) {
-    case PARTITION_NONE:
-      if (gpu_input_base != NULL) {
-        gpu_input = gpu_input_base
-            + vp9_get_gpu_buffer_index(cpi, mi_row, mi_col);
-        gpu_input->do_compute = get_gpu_block_size(bsize);
-      }
-      break;
-    case PARTITION_VERT:
-      break;
-    case PARTITION_HORZ:
-      break;
-    case PARTITION_SPLIT:
-      subsize = get_subsize(bsize, PARTITION_SPLIT);
-      set_partition_types(cpi, x, gpu_input_base, mi, mi_row, mi_col, subsize);
-      set_partition_types(cpi, x, gpu_input_base, mi + hbs, mi_row,
-                          mi_col + hbs, subsize);
-      set_partition_types(cpi, x, gpu_input_base, mi + hbs * mis, mi_row + hbs,
-                          mi_col, subsize);
-      set_partition_types(cpi, x, gpu_input_base, mi + hbs * mis + hbs,
-                          mi_row + hbs, mi_col + hbs, subsize);
-      break;
-    default:
-      assert(0 && "Invalid partition type.");
-      break;
-  }
-}
-
 void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) {
   VP9_COMMON *const cm = &cpi->common;
   MACROBLOCK *const x = &cpi->td.mb;
@@ -1063,27 +1016,11 @@ void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) 
   GPU_INPUT *gpu_input_base = NULL;
   int mi_row, mi_col;
 
-  const BLOCK_SIZE bsize = get_actual_block_size(0);
+  BLOCK_SIZE bsize = get_actual_block_size(0);
   const int mi_row_step = num_8x8_blocks_high_lookup[bsize];
   const int mi_col_step = num_8x8_blocks_wide_lookup[bsize];
 
   egpu->acquire_input_buffer(cpi, (void **) &gpu_input_base);
-
-  for (mi_row = tile->mi_row_start; mi_row < tile->mi_row_end; mi_row +=
-      mi_row_step) {
-    int subframe_idx;
-
-    subframe_idx = vp9_get_subframe_index(cm, mi_row);
-    if (subframe_idx < CPU_SUB_FRAMES)
-      continue;
-    for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end; mi_col +=
-        mi_col_step) {
-      GPU_INPUT *gpu_input = gpu_input_base +
-          vp9_get_gpu_buffer_index(cpi, mi_row, mi_col);
-      gpu_input->do_compute = GPU_BLOCK_INVALID;
-    }
-  }
-
 
   for (mi_row = tile->mi_row_start; mi_row < tile->mi_row_end; mi_row +=
       MI_BLOCK_SIZE) {
@@ -1098,6 +1035,9 @@ void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) 
       const int sb_index = get_sb_index(cm, mi_row, mi_col);
       const int idx_str = cm->mi_stride * mi_row + mi_col;
       MODE_INFO **mi = cm->mi_grid_visible + idx_str;
+      MACROBLOCKD *xd = &x->e_mbd;
+
+      int i, j;
 
       set_offsets(cpi, tile, x, mi_row, mi_col, BLOCK_64X64);
       choose_partitioning(cpi, tile, x, mi_row, mi_col);
@@ -1108,34 +1048,41 @@ void vp9_fill_mv_reference_partition(VP9_COMP *cpi, const TileInfo *const tile) 
       } else {
         vp9_zero(cpi->pred_mv_map[sb_index]);
       }
-      set_partition_types(cpi, x, gpu_input_base, mi, mi_row, mi_col, BLOCK_64X64);
-    }
-  }
+      for (i = 0; i < MI_BLOCK_SIZE; i += mi_row_step) {
+        for (j = 0; j < MI_BLOCK_SIZE; j += mi_col_step) {
+          GPU_INPUT *gpu_input = gpu_input_base +
+              vp9_get_gpu_buffer_index(cpi, mi_row + i, mi_col + j);
+          const int idx_str = cm->mi_stride * (mi_row + i) + (mi_col + j);
+          mi = cm->mi_grid_visible + idx_str;
 
-  for (mi_row = tile->mi_row_start; mi_row < tile->mi_row_end; mi_row +=
-      mi_row_step) {
-    int subframe_idx;
+          if (mi_row + i < cm->mi_rows && mi_col + j < cm->mi_cols) {
+            gpu_input->do_compute = get_gpu_block_size(mi[0]->mbmi.sb_type);
+          } else {
+            gpu_input->do_compute = GPU_BLOCK_INVALID;
+            continue;
+          }
 
-    subframe_idx = vp9_get_subframe_index(cm, mi_row);
-    if (subframe_idx < CPU_SUB_FRAMES)
-      continue;
-    for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end; mi_col +=
-        mi_col_step) {
-      GPU_INPUT *gpu_input = gpu_input_base +
-          vp9_get_gpu_buffer_index(cpi, mi_row, mi_col);
-
-      if (gpu_input->do_compute != GPU_BLOCK_INVALID) {
-        const int sb_index = get_sb_index(cm, mi_row, mi_col);
-        const struct segmentation *const seg = &cm->seg;
-        gpu_input->pred_mv.as_mv = cpi->pred_mv_map[sb_index];
-        if (seg->enabled && cpi->oxcf.aq_mode != VARIANCE_AQ) {
-          const uint8_t *const map = seg->update_map ? cpi->segmentation_map
-                                                     : cm->last_frame_seg_map;
-          gpu_input->seg_id = get_segment_id(cm, map, bsize, mi_row, mi_col);
-          // Only 2 segments are supported in GPU
-          assert(gpu_input->seg_id <= 1);
-        } else {
-          gpu_input->seg_id = 0;
+          if (gpu_input->do_compute != GPU_BLOCK_INVALID) {
+            const int sb_index = get_sb_index(cm, mi_row + i, mi_col + j);
+            const struct segmentation *const seg = &cm->seg;
+            gpu_input->pred_mv.as_mv = cpi->pred_mv_map[sb_index];
+            if (seg->enabled && cpi->oxcf.aq_mode != VARIANCE_AQ) {
+              const uint8_t *const map = seg->update_map ?
+                  cpi->segmentation_map : cm->last_frame_seg_map;
+              gpu_input->seg_id =
+                  get_segment_id(cm, map, bsize, mi_row + i, mi_col + j);
+              // Only 2 segments are supported in GPU
+              assert(gpu_input->seg_id <= 1);
+            } else {
+              gpu_input->seg_id = 0;
+            }
+          }
+          if ((mi[0]->mbmi.sb_type == BLOCK_64X32 && j == 0) ||
+              (mi[0]->mbmi.sb_type == BLOCK_32X64 && i == 0) ||
+              (mi[0]->mbmi.sb_type == BLOCK_64X64 && i == 0 && j == 0)) {
+            xd->mi = mi;
+            duplicate_mode_info_in_sb(cm, xd, i, j, mi[0]->mbmi.sb_type);
+          }
         }
       }
     }
