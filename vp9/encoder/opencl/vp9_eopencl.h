@@ -19,7 +19,7 @@ extern "C" {
 #include "vp9/encoder/vp9_encoder.h"
 
 #define NUM_PIXELS_PER_WORKITEM 8
-#define NUM_KERNELS 8
+#define NUM_KERNELS 6
 
 typedef struct {
   unsigned int sse8x8[64];
@@ -44,9 +44,7 @@ typedef struct VP9_EOPENCL {
   cl_kernel rd_calculation_zeromv[GPU_BLOCK_SIZES];
   cl_kernel full_pixel_search[GPU_BLOCK_SIZES];
   cl_kernel hpel_search[GPU_BLOCK_SIZES];
-  cl_kernel hpel_select_bestmv[GPU_BLOCK_SIZES];
   cl_kernel qpel_search[GPU_BLOCK_SIZES];
-  cl_kernel qpel_select_bestmv[GPU_BLOCK_SIZES];
   cl_kernel inter_prediction_and_sse[GPU_BLOCK_SIZES];
   cl_kernel rd_calculation_newmv[GPU_BLOCK_SIZES];
 

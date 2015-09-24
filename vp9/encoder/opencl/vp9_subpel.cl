@@ -186,7 +186,7 @@ void var_filter_block2d_bil_both(__global uchar *ref_data,
 }
 
 __kernel
-__attribute__((reqd_work_group_size(BLOCK_SIZE_IN_PIXELS / NUM_PIXELS_PER_WORKITEM,
+__attribute__((reqd_work_group_size((BLOCK_SIZE_IN_PIXELS * 8) / NUM_PIXELS_PER_WORKITEM,
                                     BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM,
                                     1)))
 void vp9_sub_pixel_search_halfpel_filtering(__global uchar *ref_frame,
@@ -198,22 +198,22 @@ void vp9_sub_pixel_search_halfpel_filtering(__global uchar *ref_frame,
   short global_row = get_global_id(1);
 
   short group_col = get_group_id(0);
-  int group_stride = get_num_groups(0) >> 3;
+  int group_stride = get_num_groups(0);
 
   int local_col = get_local_id(0);
   int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * stride) +
-                      ((group_col >> 3) * BLOCK_SIZE_IN_PIXELS) +
-                      (local_col * NUM_PIXELS_PER_WORKITEM);
+                      ((group_col) * BLOCK_SIZE_IN_PIXELS) +
+                      ((local_col >> 3) * NUM_PIXELS_PER_WORKITEM);
   global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
 
 #if BLOCK_SIZE_IN_PIXELS == 64
   GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
   int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
-      group_stride * 4 + (group_col >> 3) * 2);
+      group_stride * 4 + (group_col) * 2);
 #else
   GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
   int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
-      group_stride + (group_col >> 3));
+      group_stride + (group_col));
 #endif
   gpu_input += group_offset;
   gpu_scratch += group_offset;
@@ -235,7 +235,7 @@ void vp9_sub_pixel_search_halfpel_filtering(__global uchar *ref_frame,
   int buffer_offset;
   int local_offset;
 
-  int idx = (group_col & 7);
+  int idx = (local_col & 7);
 
   __global int *intermediate_sum_sse = (__global int *)gpu_scratch;
 
@@ -246,16 +246,19 @@ void vp9_sub_pixel_search_halfpel_filtering(__global uchar *ref_frame,
   buffer_offset = ((best_mv.row >> 3) * stride) + (best_mv.col >> 3);
   ref_frame += buffer_offset;
 
+  if (!(local_col >> 3) && !get_local_id(1)) {
+    vstore2(0, 0, intermediate_sum_sse + idx);
+    if (idx == 2) {
+      vstore2(0, 0, intermediate_sum_sse + 16);
+    }
+  }
+  barrier(CLK_GLOBAL_MEM_FENCE);
+
   if (idx == 2) {
-    vstore2(0, 0, intermediate_sum_sse + 16);
-    barrier(CLK_GLOBAL_MEM_FENCE);
     calculate_fullpel_variance(ref_frame, cur_frame, &sse, &sum, stride);
     atomic_add(intermediate_sum_sse + 16, sum);
     atomic_add(intermediate_sum_sse + 16 + 1, sse);
   }
-
-  vstore2(0, 0, intermediate_sum_sse + idx);
-  barrier(CLK_GLOBAL_MEM_FENCE);
 
   var_filter_block2d_bil_both(ref_frame, cur_frame, stride,
                               BILINEAR_FILTERS_2TAP(sp(best_mv.col)),
@@ -265,44 +268,15 @@ void vp9_sub_pixel_search_halfpel_filtering(__global uchar *ref_frame,
   atomic_add(intermediate_sum_sse + idx, sum);
   atomic_add(intermediate_sum_sse + idx + 1, sse);
 
-exit:
-  return;
-}
+  barrier(CLK_GLOBAL_MEM_FENCE);
 
-__kernel
-void vp9_sub_pixel_search_halfpel_bestmv(__global GPU_INPUT *gpu_input,
-    __global GPU_OUTPUT *gpu_output,
-    __global subpel_sum_sse *gpu_scratch) {
-  short global_col = get_global_id(0);
-  short global_row = get_global_id(1);
-  int global_stride = get_global_size(0);
-#if BLOCK_SIZE_IN_PIXELS == 64
-  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
-  int group_offset = (global_row * global_stride * 4 + global_col * 2);
-#else
-  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
-  int group_offset = (global_row * global_stride + global_col);
-#endif
-
-  gpu_input  += group_offset;
-  gpu_output += group_offset;
-
-  if (gpu_input->do_compute != gpu_bsize)
-    goto exit;
-
-  if (gpu_output->rv)
-    goto exit;
-
-  int sum, tr, tc;
-  unsigned int besterr, sse, thiserr;
-  const char hstep = 4;
-  __global int *intermediate_sum_sse = (__global int *)(gpu_scratch + group_offset);
-
-  MV best_mv = gpu_output->mv.as_mv;
-  MV this_mv = best_mv;
-  besterr = INT32_MAX;
-  /*Part 1*/
-  {
+  if (!get_local_id(0) && !get_local_id(1)) {
+    int sum, tr, tc;
+    unsigned int besterr, sse, thiserr;
+    MV best_mv = gpu_output->mv.as_mv;
+    MV this_mv = best_mv;
+    besterr = INT32_MAX;
+    /*Part 1*/
     tr = best_mv.row;
     tc = best_mv.col;
 
@@ -315,18 +289,18 @@ void vp9_sub_pixel_search_halfpel_bestmv(__global GPU_INPUT *gpu_input,
     CHECK_BETTER_SUBPEL(hpel_offset, 5);
     CHECK_BETTER_SUBPEL(hpel_offset, 6);
     CHECK_BETTER_SUBPEL(hpel_offset, 7);
-  }
 
-  intermediate_sum_sse[16] = besterr;
-  gpu_output->mv.as_mv = best_mv;
-  vstore16(0, 0, intermediate_sum_sse);
+    intermediate_sum_sse[16] = besterr;
+    gpu_output->mv.as_mv = best_mv;
+    vstore16(0, 0, intermediate_sum_sse);
+  }
 
 exit:
   return;
 }
 
 __kernel
-__attribute__((reqd_work_group_size(BLOCK_SIZE_IN_PIXELS / NUM_PIXELS_PER_WORKITEM,
+__attribute__((reqd_work_group_size((BLOCK_SIZE_IN_PIXELS * 8) / NUM_PIXELS_PER_WORKITEM,
                                     BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM,
                                     1)))
 void vp9_sub_pixel_search_quarterpel_filtering(__global uchar *ref_frame,
@@ -338,22 +312,22 @@ void vp9_sub_pixel_search_quarterpel_filtering(__global uchar *ref_frame,
   short global_row = get_global_id(1);
 
   short group_col = get_group_id(0);
-  int group_stride = get_num_groups(0) >> 3;
+  int group_stride = get_num_groups(0);
 
   int local_col = get_local_id(0);
   int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * stride) +
-                      ((group_col >> 3) * BLOCK_SIZE_IN_PIXELS) +
-                      (local_col * NUM_PIXELS_PER_WORKITEM);
+                      ((group_col) * BLOCK_SIZE_IN_PIXELS) +
+                      ((local_col >> 3) * NUM_PIXELS_PER_WORKITEM);
   global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
 
 #if BLOCK_SIZE_IN_PIXELS == 64
   GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
   int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
-      group_stride * 4 + (group_col >> 3) * 2);
+      group_stride * 4 + (group_col) * 2);
 #else
   GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
   int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
-      group_stride + (group_col >> 3));
+      group_stride + (group_col));
 #endif
 
   gpu_input += group_offset;
@@ -375,7 +349,7 @@ void vp9_sub_pixel_search_quarterpel_filtering(__global uchar *ref_frame,
   MV best_mv = gpu_output->mv.as_mv;
   int buffer_offset;
 
-  int idx = (group_col & 7);
+  int idx = (local_col & 7);
 
   __global int *intermediate_sum_sse = (__global int *)gpu_scratch;
 
@@ -395,45 +369,17 @@ void vp9_sub_pixel_search_quarterpel_filtering(__global uchar *ref_frame,
   atomic_add(intermediate_sum_sse + idx, sum);
   atomic_add(intermediate_sum_sse + idx + 1, sse);
 
-exit:
-  return;
-}
+  barrier(CLK_GLOBAL_MEM_FENCE);
 
-__kernel
-void vp9_sub_pixel_search_quarterpel_bestmv(__global GPU_INPUT *gpu_input,
-    __global GPU_OUTPUT *gpu_output,
-    __global subpel_sum_sse *gpu_scratch) {
-  short global_col = get_global_id(0);
-  short global_row = get_global_id(1);
-  int global_stride = get_global_size(0);
+  if (!get_local_id(0) && !get_local_id(1)) {
+    int sum, tr, tc;
+    unsigned int besterr, sse, thiserr;
 
-#if BLOCK_SIZE_IN_PIXELS == 64
-  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
-  int group_offset = (global_row * global_stride * 4 + global_col * 2);
-#else
-  GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
-  int group_offset = (global_row * global_stride + global_col);
-#endif
+    MV best_mv = gpu_output->mv.as_mv;
+    MV this_mv = best_mv;
+    besterr = intermediate_sum_sse[16];
 
-  gpu_input   += group_offset;
-  gpu_scratch += group_offset;
-  gpu_output  += group_offset;
-  __global int *intermediate_sum_sse = (__global int *)gpu_scratch;
-  if (gpu_input->do_compute != gpu_bsize)
-    goto exit;
-
-  if (gpu_output->rv)
-    goto exit;
-
-  int sum, tr, tc;
-  unsigned int besterr, sse, thiserr;
-
-  MV best_mv = gpu_output->mv.as_mv;
-  MV this_mv = best_mv;
-  besterr = intermediate_sum_sse[16];
-
-  /*Part 2*/
-  {
+    /*Part 2*/
     tr = best_mv.row;
     tc = best_mv.col;
 
@@ -445,9 +391,9 @@ void vp9_sub_pixel_search_quarterpel_bestmv(__global GPU_INPUT *gpu_input,
     CHECK_BETTER_SUBPEL(qpel_offset, 5);
     CHECK_BETTER_SUBPEL(qpel_offset, 6);
     CHECK_BETTER_SUBPEL(qpel_offset, 7);
-  }
 
-  gpu_output->mv.as_mv = best_mv;
+    gpu_output->mv.as_mv = best_mv;
+  }
 
 exit:
   return;
