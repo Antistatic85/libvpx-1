@@ -13,11 +13,6 @@
 #include "vp9_cl_common.h"
 
 typedef struct {
-  unsigned int sse8x8;
-  int sum8x8;
-} SUM_SSE;
-
-typedef struct {
   SUM_SSE sum_sse[EIGHTTAP_SMOOTH + 1][64];
 }GPU_SCRATCH;
 
@@ -876,8 +871,8 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
                    filter_type, intermediate_uchar8,
                    &sum, &sse);
 
-  gpu_scratch->sum_sse[filter_type][local_offset].sse8x8 = sse;
-  gpu_scratch->sum_sse[filter_type][local_offset].sum8x8 = sum;
+  gpu_scratch->sum_sse[filter_type][local_offset].sse = sse;
+  gpu_scratch->sum_sse[filter_type][local_offset].sum = sum;
 
 exit:
   return;
@@ -939,8 +934,9 @@ void vp9_rd_calculation(__global uchar *ref_frame,
     sum = 0;
     int num8x8 = 1 << (bw + bh - 2);
     for (i = 0; i < num8x8; i++) {
-      sse8x8[i] = gpu_scratch->sum_sse[j][i].sse8x8;
-      sum8x8[i] = gpu_scratch->sum_sse[j][i].sum8x8;
+      sse8x8[i] = gpu_scratch->sum_sse[j][i].sse;
+      sum8x8[i] = gpu_scratch->sum_sse[j][i].sum;
+
       var8x8[i] = sse8x8[i] - (((unsigned int)sum8x8[i] * sum8x8[i]) >> 6);
 
       sse += sse8x8[i];

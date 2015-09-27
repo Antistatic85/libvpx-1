@@ -63,6 +63,8 @@ typedef struct GPU_RD_SEG_PARAMETERS {
   int ac_dequant;
 
   int sad_per_bit;
+
+  int vbp_thresholds[3];
 } GPU_RD_SEG_PARAMETERS;
 
 typedef struct GPU_RD_PARAMETERS {
@@ -73,9 +75,16 @@ typedef struct GPU_RD_PARAMETERS {
   int nmvjointcost[MV_JOINTS];
   int nmvsadcost[2][MV_VALS];
 
+  int vbp_threshold_sad;
+  int vbp_threshold_minmax;
+
   // Currently supporting only 2 segments in GPU
   GPU_RD_SEG_PARAMETERS seg_rd_param[2];
 } GPU_RD_PARAMETERS;
+
+typedef struct {
+  short sum8x8[64];
+}SUM8X8;
 
 typedef struct SubFrameInfo {
   int mi_row_start, mi_row_end;
@@ -90,8 +99,13 @@ typedef struct VP9_EGPU {
   void (*acquire_output_buffer)(struct VP9_COMP *cpi, void **host_ptr,
       int sub_frame_idx);
   void (*acquire_rd_param_buffer)(struct VP9_COMP *cpi, void **host_ptr);
-  void (*enc_sync_read)(struct VP9_COMP *cpi, int event_id);
+  void (*acquire_predmv_buffer)(struct VP9_COMP *cpi, void **host_ptr);
+  void (*acquire_predmvsad_buffer)(struct VP9_COMP *cpi, void **host_ptr);
+  void (*acquire_refmap_buffer)(struct VP9_COMP *cpi, void **host_ptr);
+  void (*acquire_sum_buffer)(struct VP9_COMP *cpi, void **host_ptr);
+  void (*enc_sync_read)(struct VP9_COMP *cpi, int event_id, int offset);
   void (*execute)(struct VP9_COMP *cpi, int sub_frame_idx);
+  void (*execute_prologue)(struct VP9_COMP *cpi, int sub_frame_idx);
   void (*remove)(struct VP9_COMP *cpi);
 } VP9_EGPU;
 
@@ -136,9 +150,6 @@ void vp9_free_gpu_interface_buffers(struct VP9_COMP *cpi);
 void vp9_egpu_remove(struct VP9_COMP *cpi);
 
 int vp9_egpu_init(struct VP9_COMP *cpi);
-
-void vp9_fill_mv_reference_partition(struct VP9_COMP *cpi,
-                                     const TileInfo *const tile);
 
 void vp9_gpu_mv_compute(struct VP9_COMP *cpi);
 

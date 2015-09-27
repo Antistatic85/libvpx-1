@@ -13,36 +13,12 @@
 #include "vp9_cl_common.h"
 
 typedef struct {
-  int sum;
-  unsigned int sse;
-} SUM_SSE;
-
-typedef struct {
   SUM_SSE sum_sse[9];
   char dummy[952];
 } subpel_sum_sse;
 
 //=====   GLOBAL DEFINITIONS   =====
 //--------------------------------------
-__constant ushort2 vp9_bilinear_filters[16] = {
-  {128,   0},
-  {120,   8},
-  {112,  16},
-  {104,  24},
-  { 96,  32},
-  { 88,  40},
-  { 80,  48},
-  { 72,  56},
-  { 64,  64},
-  { 56,  72},
-  { 48,  80},
-  { 40,  88},
-  { 32,  96},
-  { 24, 104},
-  { 16, 112},
-  {  8, 120}
-};
-
 __constant MV hpel_offset[9] =
     {{0, -4}, {0, 4}, {-4, 0}, {4, 0}, {-4, -4}, {-4, 4}, {4, -4}, {4, 4}, {0, 0}};
 
@@ -51,10 +27,6 @@ __constant MV qpel_offset[8] =
 
 //=====   FUNCTION MACROS   =====
 //--------------------------------------
-
-// The VP9_BILINEAR_FILTERS_2TAP macro returns a pointer to the bilinear
-// filter kernel as a 2 tap filter.
-#define BILINEAR_FILTERS_2TAP(x)  (vp9_bilinear_filters[(x)])
 
 #define CHECK_BETTER_SUBPEL(offset, idx)                              \
       sum = intermediate_sum_sse[2 * idx];                            \
@@ -72,11 +44,6 @@ __constant MV qpel_offset[8] =
 
 //=====   FUNCTION DEFINITIONS   =====
 //-------------------------------------------
-// convert motion vector component to offset for svf calc
-inline int sp(int x) {
-  return (x & 7) << 1;
-}
-
 void calculate_fullpel_variance(__global uchar *ref_frame,
                                 __global uchar *cur_frame,
                                 unsigned int *sse,

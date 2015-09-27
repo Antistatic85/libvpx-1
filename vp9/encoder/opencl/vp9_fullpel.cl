@@ -39,54 +39,6 @@ __constant MV hex_candidates[MAX_PATTERN_SCALES][MAX_PATTERN_CANDIDATES] = {
 
 //=====   FUNCTION DEFINITIONS   =====
 //-------------------------------------------
-ushort calculate_sad(MV *currentmv,
-                     __global uchar *ref_frame,
-                     __global uchar *cur_frame,
-                     int stride) {
-  __global uchar *tmp_ref, *tmp_cur;
-  uchar8 ref, cur;
-  ushort8 sad = 0;
-  int buffer_offset;
-  int row;
-
-  buffer_offset = (currentmv->row * stride) + currentmv->col;
-  tmp_ref = ref_frame + buffer_offset;
-  tmp_cur = cur_frame;
-
-  for (row = 0; row < PIXEL_ROWS_PER_WORKITEM; row++) {
-    ref = vload8(0, tmp_ref);
-    cur = vload8(0, tmp_cur);
-
-    sad += abs_diff(convert_ushort8(ref), convert_ushort8(cur));
-
-    tmp_ref += stride;
-    tmp_cur += stride;
-  }
-
-  ushort4 final_sad = convert_ushort4(sad.s0123) + convert_ushort4(sad.s4567);
-  final_sad.s01 = final_sad.s01 + final_sad.s23;
-
-  return (final_sad.s0 + final_sad.s1);
-}
-
-int get_sad(__global uchar *ref_frame, __global uchar *cur_frame,
-            int stride, __local int* intermediate_sad, MV this_mv) {
-  int local_col = get_local_id(0);
-  int local_row = get_local_id(1);
-  int sad;
-
-  barrier(CLK_LOCAL_MEM_FENCE);
-  intermediate_sad[0] = 0;
-
-  sad = calculate_sad(&this_mv, ref_frame, cur_frame, stride);
-
-  barrier(CLK_LOCAL_MEM_FENCE);
-  atomic_add(intermediate_sad, sad);
-
-  barrier(CLK_LOCAL_MEM_FENCE);
-  return intermediate_sad[0];
-}
-
 inline int mv_cost_constant(MV *mv,
                             __constant int *joint_cost,
                             __global int *comp_cost_0,

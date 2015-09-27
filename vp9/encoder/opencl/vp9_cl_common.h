@@ -189,6 +189,8 @@ typedef struct GPU_RD_SEG_PARAMETERS {
   int ac_dequant;
 
   int sad_per_bit;
+
+  int vbp_thresholds[3];
 } GPU_RD_SEG_PARAMETERS;
 
 typedef struct GPU_RD_PARAMETERS {
@@ -199,23 +201,60 @@ typedef struct GPU_RD_PARAMETERS {
   int nmvjointcost[MV_JOINTS];
   int nmvsadcost[2][MV_VALS];
 
+  int vbp_threshold_sad;
+  int vbp_threshold_minmax;
+
   // Currently supporting only 2 segments in GPU
   GPU_RD_SEG_PARAMETERS seg_rd_param[2];
 } GPU_RD_PARAMETERS;
+
+typedef struct {
+  int sum;
+  unsigned int sse;
+} SUM_SSE;
 
 //=====   GLOBAL DEFINITIONS   =====
 //--------------------------------------
 __constant int num_8x8_blocks_wide_lookup[BLOCK_SIZES] =
   {1, 1, 1, 1, 1, 2, 2, 2, 4, 4, 4, 8, 8};
+
 __constant int num_8x8_blocks_high_lookup[BLOCK_SIZES] =
   {1, 1, 1, 1, 2, 1, 2, 4, 2, 4, 8, 4, 8};
+
+__constant ushort2 vp9_bilinear_filters[16] = {
+  {128,   0},
+  {120,   8},
+  {112,  16},
+  {104,  24},
+  { 96,  32},
+  { 88,  40},
+  { 80,  48},
+  { 72,  56},
+  { 64,  64},
+  { 56,  72},
+  { 48,  80},
+  { 40,  88},
+  { 32,  96},
+  { 24, 104},
+  { 16, 112},
+  {  8, 120}
+};
 
 //=====   FUNCTION MACROS   =====
 //--------------------------------------
 #define RDCOST(RM, DM, R, D) (((128 + ((int64_t)R) * (RM)) >> 8) + (D << DM))
 
+// The VP9_BILINEAR_FILTERS_2TAP macro returns a pointer to the bilinear
+// filter kernel as a 2 tap filter.
+#define BILINEAR_FILTERS_2TAP(x)  (vp9_bilinear_filters[(x)])
+
 //=====   FUNCTION DEFINITIONS   =====
 //-------------------------------------------
+// convert motion vector component to offset for svf calc
+inline int sp(int x) {
+  return (x & 7) << 1;
+}
+
 inline MV_JOINT_TYPE vp9_get_mv_joint(const MV *mv) {
   if (mv->row == 0) {
     return mv->col == 0 ? MV_JOINT_ZERO : MV_JOINT_HNZVZ;
@@ -236,4 +275,55 @@ void vp9_gpu_set_mv_search_range(INIT *x, int mi_row, int mi_col, int mi_rows,
   x->mv_col_min = -(((mi_col + mi_width) * MI_SIZE) + VP9_INTERP_EXTEND);
   x->mv_row_max = (mi_rows - mi_row) * MI_SIZE + VP9_INTERP_EXTEND;
   x->mv_col_max = (mi_cols - mi_col) * MI_SIZE + VP9_INTERP_EXTEND;
+}
+
+ushort calculate_sad(MV *currentmv,
+                     __global uchar *ref_frame,
+                     __global uchar *cur_frame,
+                     int stride) {
+  __global uchar *tmp_ref, *tmp_cur;
+  uchar8 ref, cur;
+  ushort8 sad = 0;
+  int buffer_offset;
+  int row;
+
+  buffer_offset = (currentmv->row * stride) + currentmv->col;
+  tmp_ref = ref_frame + buffer_offset;
+  tmp_cur = cur_frame;
+
+  for (row = 0; row < PIXEL_ROWS_PER_WORKITEM; row++) {
+    ref = vload8(0, tmp_ref);
+    cur = vload8(0, tmp_cur);
+
+    sad += abs_diff(convert_ushort8(ref), convert_ushort8(cur));
+
+    tmp_ref += stride;
+    tmp_cur += stride;
+  }
+
+  ushort4 final_sad = convert_ushort4(sad.s0123) + convert_ushort4(sad.s4567);
+  final_sad.s01 = final_sad.s01 + final_sad.s23;
+
+  return (final_sad.s0 + final_sad.s1);
+}
+
+int get_sad(__global uchar *ref_frame,
+            __global uchar *cur_frame,
+            int stride,
+            __local int* atomic_sad,
+            MV this_mv) {
+  int local_col = get_local_id(0);
+  int local_row = get_local_id(1);
+  int intermediate_sad;
+
+  barrier(CLK_LOCAL_MEM_FENCE);
+  atomic_sad[0] = 0;
+
+  intermediate_sad = calculate_sad(&this_mv, ref_frame, cur_frame, stride);
+
+  barrier(CLK_LOCAL_MEM_FENCE);
+  atomic_add(atomic_sad, intermediate_sad);
+
+  barrier(CLK_LOCAL_MEM_FENCE);
+  return atomic_sad[0];
 }

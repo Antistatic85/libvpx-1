@@ -19,21 +19,23 @@ extern "C" {
 #include "vp9/encoder/vp9_encoder.h"
 
 #define NUM_PIXELS_PER_WORKITEM 8
-#define NUM_KERNELS 6
+
+#define NUM_KERNELS_ME 6
+#define NUM_KERNELS_PRO_ME 6
 
 typedef struct {
-  unsigned int sse8x8[64];
-  int sum8x8[64];
-}SUM_SSE;
+  int sum;
+  unsigned int sse;
+} SUM_SSE;
 
 typedef struct {
-  SUM_SSE sum_sse[EIGHTTAP_SMOOTH + 1];
+  SUM_SSE sum_sse[EIGHTTAP_SMOOTH + 1][64];
 }GPU_SCRATCH;
 
 typedef struct VP9_EOPENCL {
   VP9_OPENCL *opencl;
 
-  // gpu interface buffers
+  // gpu me interface buffers
   opencl_buffer gpu_input;
   cl_mem gpu_output;
   opencl_buffer gpu_output_sub_buffer[MAX_SUB_FRAMES];
@@ -41,6 +43,7 @@ typedef struct VP9_EOPENCL {
 
   cl_mem gpu_scratch;
 
+  // gpu me kernels
   cl_kernel rd_calculation_zeromv[GPU_BLOCK_SIZES];
   cl_kernel full_pixel_search[GPU_BLOCK_SIZES];
   cl_kernel hpel_search[GPU_BLOCK_SIZES];
@@ -48,10 +51,27 @@ typedef struct VP9_EOPENCL {
   cl_kernel inter_prediction_and_sse[GPU_BLOCK_SIZES];
   cl_kernel rd_calculation_newmv[GPU_BLOCK_SIZES];
 
+  // gpu choose partitioning interface buffers
+  cl_mem pred_1d_set[2];
+  cl_mem src_1d_set[2];
+  opencl_buffer pred_mv;
+  opencl_buffer pred_mv_sad;
+  opencl_buffer ref_map;
+  opencl_buffer sum;
+
+  // gpu choose partitioning kernels
+  cl_kernel row_projection;
+  cl_kernel column_projection;
+  cl_kernel vector_match;
+  cl_kernel pro_motion_estimation;
+  cl_kernel color_sensitivity;
+  cl_kernel choose_partitions;
+
   // gpu profiling code
-  cl_event event[MAX_SUB_FRAMES];
+  cl_event event[2 * MAX_SUB_FRAMES];
 #if OPENCL_PROFILING
-  cl_ulong total_time_taken[GPU_BLOCK_SIZES][NUM_KERNELS];
+  cl_ulong total_time_taken_pro_me[NUM_KERNELS_PRO_ME];
+  cl_ulong total_time_taken_me[GPU_BLOCK_SIZES][NUM_KERNELS_ME];
 #endif
 } VP9_EOPENCL;
 

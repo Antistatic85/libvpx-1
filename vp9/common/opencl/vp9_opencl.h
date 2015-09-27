@@ -18,7 +18,7 @@ extern "C" {
 #include "vp9/common/vp9_onyxc_int.h"
 #include <vp9/common/opencl/CL/cl.h>
 
-#define OPENCL_PROFILING 1
+#define OPENCL_PROFILING 0
 
 typedef struct opencl_buffer {
   cl_mem opencl_mem;
