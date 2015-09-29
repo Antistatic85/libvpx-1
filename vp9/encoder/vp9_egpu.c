@@ -63,7 +63,7 @@ void vp9_gpu_set_mvinfo_offsets(VP9_COMP *const cpi, MACROBLOCK *const x,
   const int block_index_row = (mi_row >> mi_height_log2(bsize));
   const int block_index_col = (mi_col >> mi_width_log2(bsize));
 
-  x->gpu_output = cpi->gpu_output_base +
+  x->gpu_output_me = cpi->gpu_output_me_base +
     (block_index_row * blocks_in_row) + block_index_col;
 }
 
@@ -98,9 +98,9 @@ void vp9_alloc_gpu_interface_buffers(VP9_COMP *cpi) {
   const int blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
   const int blocks_in_col = cm->sb_rows * num_mxn_blocks_high_lookup[bsize];
 
-  CHECK_MEM_ERROR(cm, cpi->gpu_output_base,
+  CHECK_MEM_ERROR(cm, cpi->gpu_output_me_base,
                   vpx_calloc(blocks_in_row * blocks_in_col,
-                             sizeof(*cpi->gpu_output_base)));
+                             sizeof(*cpi->gpu_output_me_base)));
 #else
   cpi->egpu.alloc_buffers(cpi);
 #endif
@@ -108,8 +108,8 @@ void vp9_alloc_gpu_interface_buffers(VP9_COMP *cpi) {
 
 void vp9_free_gpu_interface_buffers(VP9_COMP *cpi) {
 #if !CONFIG_GPU_COMPUTE
-  vpx_free(cpi->gpu_output_base);
-  cpi->gpu_output_base = NULL;
+  vpx_free(cpi->gpu_output_me_base);
+  cpi->gpu_output_me_base = NULL;
 #else
   cpi->egpu.free_buffers(cpi);
 #endif
@@ -236,10 +236,9 @@ static void vp9_read_partition_info(VP9_COMP *cpi, const TileInfo *const tile,
     egpu->enc_sync_read(cpi, MAX_SUB_FRAMES - 1, 0);
 
     // acquire output buffers
-    egpu->acquire_predmv_buffer(cpi, (void **) &cpi->pred_mv_base);
-    egpu->acquire_predmvsad_buffer(cpi, (void **) &cpi->pred_mv_sad_base);
-    egpu->acquire_refmap_buffer(cpi, (void **) &cpi->ref_frame_map_base);
-    egpu->acquire_sum_buffer(cpi, (void **) &cpi->sum8x8_base);
+    egpu->acquire_output_pro_me_buffer(cpi,
+                                       (void **) &cpi->gpu_output_pro_me_base,
+                                       MAX_SUB_FRAMES - 1);
   }
 
   // fill sb info
@@ -340,8 +339,8 @@ static void vp9_gpu_fill_seg_id(VP9_COMP *cpi) {
 
   // NOTE: Although get_segment_id() operates at bsize level, currently
   // the supported segmentation feature in GPU maintains same seg_id for the
-  // entire SB. If this is not the case in the future then make seg id as an array
-  // and fill it for all GPU_BLOCK_SIZES
+  // entire SB. If this is not the case in the future then make seg id as an
+  // array and fill it for all GPU_BLOCK_SIZES
   for (mi_row = 0; mi_row < cm->mi_rows; mi_row += mi_row_step) {
     int subframe_idx;
 

@@ -358,11 +358,8 @@ typedef struct VP9_COMP {
   int encode_breakout;
 
   // pointer to GPU output Buffers
-  GPU_OUTPUT *gpu_output_base;
-  int_mv *pred_mv_base;
-  int *pred_mv_sad_base;
-  char *ref_frame_map_base;
-  SUM8X8 *sum8x8_base;
+  GPU_OUTPUT_ME *gpu_output_me_base;
+  GPU_OUTPUT_PRO_ME *gpu_output_pro_me_base;
 
   uint8_t *color_sensitivity[2];
   MV *pred_mv_map;

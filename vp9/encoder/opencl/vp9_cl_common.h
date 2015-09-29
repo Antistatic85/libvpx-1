@@ -168,7 +168,7 @@ typedef struct GPU_INPUT {
   char seg_id;
 } GPU_INPUT;
 
-struct GPU_OUTPUT {
+struct GPU_OUTPUT_ME {
   int64_t dist[GPU_INTER_MODES];
   int rate[GPU_INTER_MODES];
   unsigned int sse_y[GPU_INTER_MODES];
@@ -181,7 +181,7 @@ struct GPU_OUTPUT {
   int pred_mv_sad;
   int rv;
 } __attribute__ ((aligned(32)));
-typedef struct GPU_OUTPUT GPU_OUTPUT;
+typedef struct GPU_OUTPUT_ME GPU_OUTPUT_ME;
 
 typedef struct GPU_RD_SEG_PARAMETERS {
   int rd_mult;

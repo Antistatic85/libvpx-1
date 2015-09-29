@@ -42,7 +42,7 @@ typedef struct GPU_INPUT {
   char seg_id;
 } GPU_INPUT;
 
-struct GPU_OUTPUT {
+struct GPU_OUTPUT_ME {
   int64_t dist[GPU_INTER_MODES];
   int rate[GPU_INTER_MODES];
   unsigned int sse_y[GPU_INTER_MODES];
@@ -55,7 +55,19 @@ struct GPU_OUTPUT {
   int pred_mv_sad;
   int rv;
 } __attribute__ ((aligned(32)));
-typedef struct GPU_OUTPUT GPU_OUTPUT;
+typedef struct GPU_OUTPUT_ME GPU_OUTPUT_ME;
+
+typedef struct {
+  short sum8x8[64];
+}SUM8X8;
+
+struct GPU_OUTPUT_PRO_ME {
+  SUM8X8 sum8x8;
+  int_mv pred_mv;
+  int pred_mv_sad;
+  char ref_map;
+} __attribute__ ((aligned(32)));
+typedef struct GPU_OUTPUT_PRO_ME GPU_OUTPUT_PRO_ME;
 
 typedef struct GPU_RD_SEG_PARAMETERS {
   int rd_mult;
@@ -82,10 +94,6 @@ typedef struct GPU_RD_PARAMETERS {
   GPU_RD_SEG_PARAMETERS seg_rd_param[2];
 } GPU_RD_PARAMETERS;
 
-typedef struct {
-  short sum8x8[64];
-}SUM8X8;
-
 typedef struct SubFrameInfo {
   int mi_row_start, mi_row_end;
 } SubFrameInfo;
@@ -96,13 +104,11 @@ typedef struct VP9_EGPU {
   void (*alloc_buffers)(struct VP9_COMP *cpi);
   void (*free_buffers)(struct VP9_COMP *cpi);
   void (*acquire_input_buffer)(struct VP9_COMP *cpi, void **host_ptr);
-  void (*acquire_output_buffer)(struct VP9_COMP *cpi, void **host_ptr,
+  void (*acquire_output_me_buffer)(struct VP9_COMP *cpi, void **host_ptr,
+      int sub_frame_idx);
+  void (*acquire_output_pro_me_buffer)(struct VP9_COMP *cpi, void **host_ptr,
       int sub_frame_idx);
   void (*acquire_rd_param_buffer)(struct VP9_COMP *cpi, void **host_ptr);
-  void (*acquire_predmv_buffer)(struct VP9_COMP *cpi, void **host_ptr);
-  void (*acquire_predmvsad_buffer)(struct VP9_COMP *cpi, void **host_ptr);
-  void (*acquire_refmap_buffer)(struct VP9_COMP *cpi, void **host_ptr);
-  void (*acquire_sum_buffer)(struct VP9_COMP *cpi, void **host_ptr);
   void (*enc_sync_read)(struct VP9_COMP *cpi, int event_id, int offset);
   void (*execute)(struct VP9_COMP *cpi, int sub_frame_idx);
   void (*execute_prologue)(struct VP9_COMP *cpi, int sub_frame_idx);

@@ -770,15 +770,17 @@ int choose_partitioning(VP9_COMP *cpi,
       const int index = ((cm->mi_cols >> MI_BLOCK_SIZE_LOG2) * sb_row_index +
           sb_col_index);
 
-      mbmi->ref_frame[0] = cpi->ref_frame_map_base[index] & 15;
+      mbmi->ref_frame[0] = cpi->gpu_output_pro_me_base[index].ref_map & 15;
       mbmi->ref_frame[1] = NONE;
       mbmi->sb_type = BLOCK_64X64;
-      mbmi->mv[0].as_int = cpi->pred_mv_base[index].as_int;
+      mbmi->mv[0].as_int = cpi->gpu_output_pro_me_base[index].pred_mv.as_int;
       mbmi->interp_filter = BILINEAR;
-      x->color_sensitivity[0] = (cpi->ref_frame_map_base[index] >> 4) & 1;
-      x->color_sensitivity[1] = (cpi->ref_frame_map_base[index] >> 5) & 1;
-      y_sad = cpi->pred_mv_sad_base[index];
-      sum8x8 = &cpi->sum8x8_base[index];
+      x->color_sensitivity[0] =
+          (cpi->gpu_output_pro_me_base[index].ref_map >> 4) & 1;
+      x->color_sensitivity[1] =
+          (cpi->gpu_output_pro_me_base[index].ref_map >> 5) & 1;
+      y_sad = cpi->gpu_output_pro_me_base[index].pred_mv_sad;
+      sum8x8 = &cpi->gpu_output_pro_me_base[index].sum8x8;
 
       if (mbmi->ref_frame[0] == LAST_FRAME)
         vp9_setup_pre_planes(xd, 0, yv12, mi_row, mi_col,
@@ -3024,10 +3026,10 @@ static void hybrid_intra_mode_search(VP9_COMP *cpi, MACROBLOCK *const x,
     vp9_pick_intra_mode(cpi, x, rd_cost, bsize, ctx);
 }
 
-static void nonrd_pick_sb_modes(VP9_COMP *cpi,
-                                const TileInfo *const tile_info, MACROBLOCK *const x,
-                                int mi_row, int mi_col, RD_COST *rd_cost,
-                                BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx) {
+static void nonrd_pick_sb_modes(VP9_COMP *cpi, const TileInfo *const tile_info,
+                                MACROBLOCK *const x, int mi_row, int mi_col,
+                                RD_COST *rd_cost, BLOCK_SIZE bsize,
+                                PICK_MODE_CONTEXT *ctx) {
   VP9_COMMON *const cm = &cpi->common;
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *mbmi;
@@ -3222,7 +3224,8 @@ static void nonrd_pick_partition(VP9_COMP *cpi, ThreadData *td,
         this_rdc.rate += cpi->partition_cost[pl][PARTITION_NONE];
       } else {
         const int bsl = mi_width_log2_lookup[bsize];
-        this_rdc.rate += cpi->partition_cost[bsl * PARTITION_PLOFFSET][PARTITION_NONE];
+        this_rdc.rate += cpi->partition_cost[bsl * PARTITION_PLOFFSET]
+                                             [PARTITION_NONE];
       }
       this_rdc.rdcost = RDCOST(x->rdmult, x->rddiv,
                               this_rdc.rate, this_rdc.dist);
@@ -3717,15 +3720,16 @@ static void encode_nonrd_sb_row(VP9_COMP *cpi,
 #if CONFIG_GPU_COMPUTE
     if (!x->data_parallel_processing && x->use_gpu) {
       VP9_EGPU *egpu = &cpi->egpu;
+
       egpu->enc_sync_read(cpi, subframe_idx, MAX_SUB_FRAMES);
       if (mi_row == subframe.mi_row_start) {
-        GPU_OUTPUT *gpu_output_subframe;
-        egpu->acquire_output_buffer(cpi,
-                                    (void **)&gpu_output_subframe,
-                                    subframe_idx);
+        GPU_OUTPUT_ME *gpu_output_me_subframe;
 
+        // acquire GPU output buffers
+        egpu->acquire_output_me_buffer(cpi, (void **) &gpu_output_me_subframe,
+                                       subframe_idx);
         if (subframe_idx == 0) {
-          cpi->gpu_output_base = gpu_output_subframe;
+          cpi->gpu_output_me_base = gpu_output_me_subframe;
         } else {
           // Check if the acquired memory pointer for the given subframe is
           // contiguous with respect to the previous subframes
@@ -3733,8 +3737,8 @@ static void encode_nonrd_sb_row(VP9_COMP *cpi,
               vp9_get_gpu_buffer_index(cpi, subframe.mi_row_start, 0);
 
           (void)buffer_offset;
-
-          assert(gpu_output_subframe - cpi->gpu_output_base == buffer_offset);
+          assert(gpu_output_me_subframe - cpi->gpu_output_me_base ==
+              buffer_offset);
         }
       }
     }
@@ -3829,7 +3833,8 @@ static void encode_nonrd_sb_row(VP9_COMP *cpi,
                                 BLOCK_64X64, do_recon, &dummy_rdc, td->pc_root);
           else
             nonrd_select_partition(cpi, td, tile_info, mi, tp, mi_row, mi_col,
-                                   BLOCK_64X64, do_recon, &dummy_rdc, td->pc_root);
+                                   BLOCK_64X64, do_recon, &dummy_rdc,
+                                   td->pc_root);
         }
 
         break;
@@ -4091,7 +4096,8 @@ static void encode_tiles_mt(VP9_COMP *cpi) {
   }
 }
 
-int vp9_encoding_thread_process(thread_context *const thread_ctxt, void* data2) {
+int vp9_encoding_thread_process(thread_context *const thread_ctxt,
+                                void* data2) {
   VP9_COMP *cpi = thread_ctxt->cpi;
   VP9_COMMON *cm = &cpi->common;
   ThreadData *const td = &thread_ctxt->td;

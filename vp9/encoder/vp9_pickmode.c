@@ -1161,9 +1161,9 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
       int rv = !combined_motion_search(cpi, x, bsize, mi_row, mi_col,
                                        &frame_mv[NEWMV][ref_frame], &rate_mv,
                                        best_rd_sofar);
-      x->gpu_output->rv = rv;
-      x->gpu_output->mv.as_int = frame_mv[this_mode][LAST_FRAME].as_int;
-      x->gpu_output->pred_mv_sad = x->pred_mv_sad[LAST_FRAME];
+      x->gpu_output_me->rv = rv;
+      x->gpu_output_me->mv.as_int = frame_mv[this_mode][LAST_FRAME].as_int;
+      x->gpu_output_me->pred_mv_sad = x->pred_mv_sad[LAST_FRAME];
 
       if (rv)
         continue;
@@ -1219,17 +1219,17 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
       check_for_uv_skip(cpi, bsize, x, xd, mi_row, mi_col, &this_early_term);
     }
 
-    x->gpu_output->rate[gpu_mode_index] = this_rdc.rate;
-    x->gpu_output->dist[gpu_mode_index] = this_rdc.dist;
-    x->gpu_output->interp_filter[gpu_mode_index] = mbmi->interp_filter;
-    x->gpu_output->tx_size[gpu_mode_index] = mbmi->tx_size;
-    x->gpu_output->sse_y[gpu_mode_index] = sse_y;
-    x->gpu_output->var_y[gpu_mode_index] = var_y;
-    x->gpu_output->skip_txfm[gpu_mode_index] = x->skip_txfm[0];
-    x->gpu_output->this_early_term[gpu_mode_index] = this_early_term;
+    x->gpu_output_me->rate[gpu_mode_index] = this_rdc.rate;
+    x->gpu_output_me->dist[gpu_mode_index] = this_rdc.dist;
+    x->gpu_output_me->interp_filter[gpu_mode_index] = mbmi->interp_filter;
+    x->gpu_output_me->tx_size[gpu_mode_index] = mbmi->tx_size;
+    x->gpu_output_me->sse_y[gpu_mode_index] = sse_y;
+    x->gpu_output_me->var_y[gpu_mode_index] = var_y;
+    x->gpu_output_me->skip_txfm[gpu_mode_index] = x->skip_txfm[0];
+    x->gpu_output_me->this_early_term[gpu_mode_index] = this_early_term;
 
     if (this_early_term && this_mode == ZEROMV) {
-      x->gpu_output->rv = 1;
+      x->gpu_output_me->rv = 1;
       break;
     }
   }
@@ -1460,15 +1460,16 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
           &x->pred_sse[ref_frame], NULL, 0, 0);
       } else if (x->use_gpu && is_gpu_block && is_gpu_inter_mode(this_mode)) {
         MV *ref_mv = &frame_mv[NEARESTMV][ref_frame].as_mv;
-        MV *new_mv = &x->gpu_output->mv.as_mv;
-        if (x->gpu_output->rv)
+        MV *new_mv = &x->gpu_output_me->mv.as_mv;
+        if (x->gpu_output_me->rv)
           continue;
         if ((abs(new_mv->col - ref_mv->col) > (MAX_FULL_PEL_VAL << 3)) ||
             (abs(new_mv->row - ref_mv->row) > (MAX_FULL_PEL_VAL << 3))) {
-          x->gpu_output->rv = 1;
+          x->gpu_output_me->rv = 1;
           continue;
         }
-        best_pred_sad = x->pred_mv_sad[LAST_FRAME] = x->gpu_output->pred_mv_sad;
+        best_pred_sad = x->pred_mv_sad[LAST_FRAME] =
+            x->gpu_output_me->pred_mv_sad;
         frame_mv[NEWMV][LAST_FRAME].as_mv = *new_mv;
         rate_mv = vp9_mv_bit_cost(
             &frame_mv[NEWMV][LAST_FRAME].as_mv,
@@ -1541,15 +1542,15 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
             (filter_ref == SWITCHABLE) ? EIGHTTAP : filter_ref;
       } else {
         mbmi->interp_filter =
-            x->gpu_output->interp_filter[gpu_mode_index];
+            x->gpu_output_me->interp_filter[gpu_mode_index];
       }
-      mbmi->tx_size = x->gpu_output->tx_size[gpu_mode_index];
-      this_rdc.rate = x->gpu_output->rate[gpu_mode_index];
-      this_rdc.dist = x->gpu_output->dist[gpu_mode_index];
-      sse_y = x->gpu_output->sse_y[gpu_mode_index];
-      var_y = x->gpu_output->var_y[gpu_mode_index];
-      this_early_term = x->gpu_output->this_early_term[gpu_mode_index];
-      x->skip_txfm[0] = x->gpu_output->skip_txfm[gpu_mode_index];
+      mbmi->tx_size = x->gpu_output_me->tx_size[gpu_mode_index];
+      this_rdc.rate = x->gpu_output_me->rate[gpu_mode_index];
+      this_rdc.dist = x->gpu_output_me->dist[gpu_mode_index];
+      sse_y = x->gpu_output_me->sse_y[gpu_mode_index];
+      var_y = x->gpu_output_me->var_y[gpu_mode_index];
+      this_early_term = x->gpu_output_me->this_early_term[gpu_mode_index];
+      x->skip_txfm[0] = x->gpu_output_me->skip_txfm[gpu_mode_index];
 
       vp9_build_inter_predictors_sby(xd, mi_row, mi_col, bsize);
 

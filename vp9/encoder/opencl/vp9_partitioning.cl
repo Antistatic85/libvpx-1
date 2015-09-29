@@ -18,6 +18,14 @@ typedef struct {
   short sum8x8[64];
 }SUM8X8;
 
+struct GPU_OUTPUT_PRO_ME {
+  SUM8X8 sum8x8;
+  int_mv pred_mv;
+  int pred_mv_sad;
+  char ref_map;
+} __attribute__ ((aligned(32)));
+typedef struct GPU_OUTPUT_PRO_ME GPU_OUTPUT_PRO_ME;
+
 //=====   GLOBAL DEFINITIONS   =====
 //--------------------------------------
 __constant MV search_pos[4] = {
@@ -360,7 +368,8 @@ int vector_match(__global ushort *proj_ref,
     // check limit
     if (this_pos < 0 || this_pos > bw)
       continue;
-    this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl, intermediate_int);
+    this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl,
+                              intermediate_int);
     if (this_sad < best_sad) {
       best_sad = this_sad;
       center = this_pos;
@@ -373,7 +382,8 @@ int vector_match(__global ushort *proj_ref,
     // check limit
     if (this_pos < 0 || this_pos > bw)
       continue;
-    this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl, intermediate_int);
+    this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl,
+                              intermediate_int);
     if (this_sad < best_sad) {
       best_sad = this_sad;
       center = this_pos;
@@ -386,7 +396,8 @@ int vector_match(__global ushort *proj_ref,
     // check limit
     if (this_pos < 0 || this_pos > bw)
       continue;
-    this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl, intermediate_int);
+    this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl,
+                              intermediate_int);
     if (this_sad < best_sad) {
       best_sad = this_sad;
       center = this_pos;
@@ -399,7 +410,8 @@ int vector_match(__global ushort *proj_ref,
     // check limit
     if (this_pos < 0 || this_pos > bw)
       continue;
-    this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl, intermediate_int);
+    this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl,
+                              intermediate_int);
     if (this_sad < best_sad) {
       best_sad = this_sad;
       center = this_pos;
@@ -500,7 +512,7 @@ void vp9_vector_match(__global ushort *proj_src_h,
                       __global ushort *proj_ref_h,
                       __global ushort *proj_src_v,
                       __global ushort *proj_ref_v,
-                      __global int_mv *pred_mv,
+                      __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me,
                       int stride_src_v) {
   __local int intermediate_int[2];
   int group_col = get_group_id(0);
@@ -510,7 +522,7 @@ void vp9_vector_match(__global ushort *proj_src_h,
   int local_row = get_local_id(1);
   MV thismv;
 
-  pred_mv += global_row * group_stride + group_col;
+  gpu_output_pro_me += global_row * group_stride + group_col;
 
   {
     int stride_src_h = get_num_groups(0) * BLOCK_SIZE_IN_PIXELS;
@@ -538,7 +550,7 @@ void vp9_vector_match(__global ushort *proj_src_h,
 
     thismv.row = vector_match(proj_ref_v, proj_src_v, intermediate_int);
   }
-  pred_mv->as_mv = thismv;
+  gpu_output_pro_me->pred_mv.as_mv = thismv;
 }
 
 __kernel
@@ -547,9 +559,7 @@ void vp9_pro_motion_estimation(__global uchar *src,
                                __global uchar *golden_ref,
                                int analyse_golden,
                                int stride,
-                               __global int_mv *pred_mv,
-                               __global int *pred_mv_sad,
-                               __global int8_t *ref_map) {
+                               __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me) {
   __local int intermediate_int[4];
   int group_col = get_group_id(0);
   int group_row = get_group_id(1);
@@ -570,15 +580,11 @@ void vp9_pro_motion_estimation(__global uchar *src,
   src += global_offset;
   ref += global_offset;
 
-  pred_mv += (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM)) *
-      group_stride + group_col;
-  pred_mv_sad += (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM)) *
-        group_stride + group_col;
-  ref_map += (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM)) *
+  gpu_output_pro_me += (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM)) *
       group_stride + group_col;
 
   // best sad at init mv
-  bestmv = thismv = pred_mv->as_mv;
+  bestmv = thismv = gpu_output_pro_me->pred_mv.as_mv;
   bestsad = get_sad(ref, src, stride, intermediate_int, thismv);
 
   // diamond search at 1 pixel distance around init
@@ -586,20 +592,20 @@ void vp9_pro_motion_estimation(__global uchar *src,
   for (i = 0; i < 4; i++) {
     if (thissad[i] < bestsad) {
       bestsad = thissad[i];
-      bestmv = pred_mv->as_mv + search_pos[i];
+      bestmv = gpu_output_pro_me->pred_mv.as_mv + search_pos[i];
     }
   }
 
   // best sad at diagonal
   if (thissad[0] < thissad[3]) {
-    thismv.row = pred_mv->as_mv.row - 1;
+    thismv.row = gpu_output_pro_me->pred_mv.as_mv.row - 1;
   } else {
-    thismv.row = pred_mv->as_mv.row + 1;
+    thismv.row = gpu_output_pro_me->pred_mv.as_mv.row + 1;
   }
   if (thissad[1] < thissad[2]) {
-    thismv.col = pred_mv->as_mv.col - 1;
+    thismv.col = gpu_output_pro_me->pred_mv.as_mv.col - 1;
   } else {
-    thismv.col = pred_mv->as_mv.col + 1;
+    thismv.col = gpu_output_pro_me->pred_mv.as_mv.col + 1;
   }
   thissad[4] = get_sad(ref, src, stride, intermediate_int, thismv);
   if (thissad[4] < bestsad) {
@@ -617,14 +623,14 @@ void vp9_pro_motion_estimation(__global uchar *src,
 
   // best mv & best sad
   if (bestsad_g < bestsad ) {
-    pred_mv->as_mv = zeromv;
-    *pred_mv_sad = bestsad_g;
-    *ref_map = GOLDEN_FRAME;
+    gpu_output_pro_me->pred_mv.as_mv = zeromv;
+    gpu_output_pro_me->pred_mv_sad = bestsad_g;
+    gpu_output_pro_me->ref_map = GOLDEN_FRAME;
   } else {
-    pred_mv->as_mv.col = bestmv.col << 3;
-    pred_mv->as_mv.row = bestmv.row << 3;
-    *pred_mv_sad = bestsad;
-    *ref_map = LAST_FRAME;
+    gpu_output_pro_me->pred_mv.as_mv.col = bestmv.col << 3;
+    gpu_output_pro_me->pred_mv.as_mv.row = bestmv.row << 3;
+    gpu_output_pro_me->pred_mv_sad = bestsad;
+    gpu_output_pro_me->ref_map = LAST_FRAME;
   }
 }
 
@@ -633,10 +639,9 @@ void vp9_color_sensitivity(__global uchar *src,
                            __global uchar *ref_lf,
                            __global uchar *ref_gf,
                            int stride,
-                           __global int_mv *pred_mv,
-                           __global int *pred_mv_sad,
-                           __global int8_t *ref_map,
-                           int64_t yplane_size, int64_t uvplane_size) {
+                           __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me,
+                           int64_t yplane_size,
+                           int64_t uvplane_size) {
   __local int intermediate_int[1];
   __global uchar *ref;
   int group_col = get_group_id(0);
@@ -655,17 +660,13 @@ void vp9_color_sensitivity(__global uchar *src,
   global_offset += ((VP9_ENC_BORDER_IN_PIXELS >> 1) * (stride >> 1)) +
       (VP9_ENC_BORDER_IN_PIXELS >> 1);
 
-  pred_mv += (global_row / ((BLOCK_SIZE_IN_PIXELS >> 1) / PIXEL_ROWS_PER_WORKITEM)) *
-      group_stride + group_col;
-  pred_mv_sad += (global_row / ((BLOCK_SIZE_IN_PIXELS >> 1) / PIXEL_ROWS_PER_WORKITEM)) *
-      group_stride + group_col;
-  ref_map += (global_row / ((BLOCK_SIZE_IN_PIXELS >> 1) / PIXEL_ROWS_PER_WORKITEM)) *
+  gpu_output_pro_me += (global_row / ((BLOCK_SIZE_IN_PIXELS >> 1) / PIXEL_ROWS_PER_WORKITEM)) *
       group_stride + group_col;
 
-  thismv = pred_mv->as_mv;
-  y_sad = *pred_mv_sad;
+  thismv = gpu_output_pro_me->pred_mv.as_mv;
+  y_sad = gpu_output_pro_me->pred_mv_sad;
 
-  if (*ref_map == GOLDEN_FRAME)
+  if (gpu_output_pro_me->ref_map == GOLDEN_FRAME)
     ref = ref_gf;
   else
     ref = ref_lf;
@@ -685,7 +686,7 @@ void vp9_color_sensitivity(__global uchar *src,
 
       color_sensitivity |= ((uv_sad > (y_sad >> 2)) << i);
     }
-    *ref_map |= (color_sensitivity << 4);
+    gpu_output_pro_me->ref_map |= (color_sensitivity << 4);
   } else {
 
     for (i = 0; i < 2; i++) {
@@ -700,7 +701,7 @@ void vp9_color_sensitivity(__global uchar *src,
 
       color_sensitivity |= ((uv_sad > (y_sad >> 2)) << i);
     }
-    *ref_map |= (color_sensitivity << 4);
+    gpu_output_pro_me->ref_map |= (color_sensitivity << 4);
   }
 }
 
@@ -709,10 +710,7 @@ void vp9_choose_partitions(__global uchar *src,
                            __global uchar *ref_lf,
                            __global uchar *ref_gf,
                            int stride,
-                           __global int_mv *pred_mv,
-                           __global int8_t *ref_map,
-                           __global SUM8X8 *sum8x8,
-                           __global int *pred_mv_sad,
+                           __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me,
                            __global GPU_RD_PARAMETERS *rd_parameters,
                            __global GPU_INPUT *gpu_input,
                            int gpu_input_stride) {
@@ -735,26 +733,24 @@ void vp9_choose_partitions(__global uchar *src,
       (group_col * BLOCK_SIZE_IN_PIXELS) + (local_col * NUM_PIXELS_PER_WORKITEM);
   global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
 
-  pred_mv += (global_row / (BLOCK_SIZE_IN_PIXELS / 8)) * group_stride + group_col;
-  ref_map += (global_row / (BLOCK_SIZE_IN_PIXELS / 8)) * group_stride + group_col;
-  sum8x8 += (global_row / (BLOCK_SIZE_IN_PIXELS / 8)) * group_stride + group_col;
-  pred_mv_sad += (global_row / (BLOCK_SIZE_IN_PIXELS / 8)) * group_stride + group_col;
+  gpu_output_pro_me += (global_row / (BLOCK_SIZE_IN_PIXELS / 8)) * group_stride + group_col;
 
   gpu_input += (global_row / (BLOCK_SIZE_IN_PIXELS / 8)) * (gpu_input_stride * 2) + (group_col * 2);
 
   src += global_offset;
 
-  if ((*ref_map & 15) == GOLDEN_FRAME)
+  if ((gpu_output_pro_me->ref_map & 15) == GOLDEN_FRAME)
     ref = ref_gf + global_offset;
   else
     ref = ref_lf + global_offset;
 
-  ref += ((pred_mv->as_mv.row >> 3) * stride) + (pred_mv->as_mv.col >> 3);
+  ref += ((gpu_output_pro_me->pred_mv.as_mv.row >> 3) * stride) +
+      (gpu_output_pro_me->pred_mv.as_mv.col >> 3);
 
   segment_id = gpu_input->seg_id;
 
   if (segment_id == CR_SEGMENT_ID_BASE &&
-      *pred_mv_sad < rd_parameters->vbp_threshold_sad) {
+      gpu_output_pro_me->pred_mv_sad < rd_parameters->vbp_threshold_sad) {
     force_split[0] = 0;
     goto end;
   }
@@ -772,7 +768,7 @@ void vp9_choose_partitions(__global uchar *src,
   s_avg = vp9_avg_8x8(src, stride);
   d_avg = vp9_avg_8x8(ref, stride);
 
-  sum8x8->sum8x8[local_row * 8 + local_col] = s_avg - d_avg;
+  gpu_output_pro_me->sum8x8.sum8x8[local_row * 8 + local_col] = s_avg - d_avg;
   sum_array[0][local_row * 8 + local_col] = s_avg - d_avg;
   sse_array[0][local_row * 8 + local_col] = (s_avg - d_avg) * (s_avg - d_avg);
 
@@ -838,41 +834,41 @@ end:
   if (local_col == 0 && local_row == 0) {
     if (force_split[0] == 0) {
       gpu_input[0].do_compute = GPU_BLOCK_64X64;
-      gpu_input[0].pred_mv.as_int = pred_mv->as_int;
+      gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
 
       gpu_input[1].do_compute = GPU_BLOCK_64X64;
-      gpu_input[1].pred_mv.as_int = pred_mv->as_int;
+      gpu_input[1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
 
       gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_64X64;
-      gpu_input[gpu_input_stride].pred_mv.as_int = pred_mv->as_int;
+      gpu_input[gpu_input_stride].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
 
       gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_64X64;
-      gpu_input[gpu_input_stride + 1].pred_mv.as_int = pred_mv->as_int;
+      gpu_input[gpu_input_stride + 1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
     } else {
       if (force_split[1] == 0) {
         gpu_input[0].do_compute = GPU_BLOCK_32X32;
-        gpu_input[0].pred_mv.as_int = pred_mv->as_int;
+        gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
       } else {
         gpu_input[0].do_compute = GPU_BLOCK_INVALID;
       }
 
       if (force_split[2] == 0) {
         gpu_input[1].do_compute = GPU_BLOCK_32X32;
-        gpu_input[1].pred_mv.as_int = pred_mv->as_int;
+        gpu_input[1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
       } else {
         gpu_input[1].do_compute = GPU_BLOCK_INVALID;
       }
 
       if (force_split[3] == 0) {
         gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_32X32;
-        gpu_input[gpu_input_stride].pred_mv.as_int = pred_mv->as_int;
+        gpu_input[gpu_input_stride].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
       } else {
         gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_INVALID;
       }
 
       if (force_split[4] == 0) {
         gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_32X32;
-        gpu_input[gpu_input_stride + 1].pred_mv.as_int = pred_mv->as_int;
+        gpu_input[gpu_input_stride + 1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
       } else {
         gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_INVALID;
       }

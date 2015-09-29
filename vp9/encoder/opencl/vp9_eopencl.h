@@ -37,8 +37,8 @@ typedef struct VP9_EOPENCL {
 
   // gpu me interface buffers
   opencl_buffer gpu_input;
-  cl_mem gpu_output;
-  opencl_buffer gpu_output_sub_buffer[MAX_SUB_FRAMES];
+  cl_mem gpu_output_me;
+  opencl_buffer gpu_output_me_sub_buffer[MAX_SUB_FRAMES];
   opencl_buffer rdopt_parameters;
 
   cl_mem gpu_scratch;
@@ -54,10 +54,8 @@ typedef struct VP9_EOPENCL {
   // gpu choose partitioning interface buffers
   cl_mem pred_1d_set[2];
   cl_mem src_1d_set[2];
-  opencl_buffer pred_mv;
-  opencl_buffer pred_mv_sad;
-  opencl_buffer ref_map;
-  opencl_buffer sum;
+  cl_mem gpu_output_pro_me;
+  opencl_buffer gpu_output_pro_me_sub_buffer[MAX_SUB_FRAMES];
 
   // gpu choose partitioning kernels
   cl_kernel row_projection;

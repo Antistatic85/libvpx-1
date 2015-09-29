@@ -670,7 +670,7 @@ void vp9_zero_motion_search(__global uchar *ref,
                             __global uchar *cur,
                             int stride,
                             __global GPU_INPUT *gpu_input,
-                            __global GPU_OUTPUT *gpu_output,
+                            __global GPU_OUTPUT_ME *gpu_output_me,
                             __global GPU_RD_PARAMETERS *rd_parameters,
                             int64_t yplane_size, int64_t uvplane_size) {
   __global uchar *ref_frame = ref;
@@ -696,14 +696,13 @@ void vp9_zero_motion_search(__global uchar *ref,
 #endif
 
   gpu_input += group_offset;
-  gpu_output += group_offset;
+  gpu_output_me += group_offset;
 
   if (gpu_input->do_compute != gpu_bsize)
     goto exit;
 
   __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
       &rd_parameters->seg_rd_param[gpu_input->seg_id];
-
 
   frame_offset = (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
   frame_offset += (global_row * stride * BLOCK_SIZE_IN_PIXELS) + (global_col * BLOCK_SIZE_IN_PIXELS);
@@ -781,14 +780,14 @@ void vp9_zero_motion_search(__global uchar *ref,
       }
     }
 
-    gpu_output->rate[GPU_INTER_OFFSET(ZEROMV)] = actual_rate;
-    gpu_output->dist[GPU_INTER_OFFSET(ZEROMV)] = actual_dist;
-    gpu_output->sse_y[GPU_INTER_OFFSET(ZEROMV)] = sse;
-    gpu_output->var_y[GPU_INTER_OFFSET(ZEROMV)] = var;
-    gpu_output->interp_filter[GPU_INTER_OFFSET(ZEROMV)] = EIGHTTAP;
-    gpu_output->tx_size[GPU_INTER_OFFSET(ZEROMV)] = tx_size;
-    gpu_output->skip_txfm[GPU_INTER_OFFSET(ZEROMV)] = skip_txfm;
-    gpu_output->this_early_term[GPU_INTER_OFFSET(ZEROMV)] = this_early_term;
+    gpu_output_me->rate[GPU_INTER_OFFSET(ZEROMV)] = actual_rate;
+    gpu_output_me->dist[GPU_INTER_OFFSET(ZEROMV)] = actual_dist;
+    gpu_output_me->sse_y[GPU_INTER_OFFSET(ZEROMV)] = sse;
+    gpu_output_me->var_y[GPU_INTER_OFFSET(ZEROMV)] = var;
+    gpu_output_me->interp_filter[GPU_INTER_OFFSET(ZEROMV)] = EIGHTTAP;
+    gpu_output_me->tx_size[GPU_INTER_OFFSET(ZEROMV)] = tx_size;
+    gpu_output_me->skip_txfm[GPU_INTER_OFFSET(ZEROMV)] = skip_txfm;
+    gpu_output_me->this_early_term[GPU_INTER_OFFSET(ZEROMV)] = this_early_term;
   }
 
   exit:
@@ -803,7 +802,7 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
                                   __global uchar *cur_frame,
                                   int stride,
                                   __global GPU_INPUT *gpu_input,
-                                  __global GPU_OUTPUT *gpu_output,
+                                  __global GPU_OUTPUT_ME *gpu_output_me,
                                   __global GPU_RD_PARAMETERS *rd_parameters,
                                   __global GPU_SCRATCH *gpu_scratch) {
   __local uchar8 intermediate_uchar8[(BLOCK_SIZE_IN_PIXELS * (BLOCK_SIZE_IN_PIXELS + 8)) / NUM_PIXELS_PER_WORKITEM];
@@ -832,10 +831,10 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
   group_offset -= row_offset * group_stride;
   group_offset -= col_offset;
 
-  gpu_output += group_offset;
+  gpu_output_me += group_offset;
   gpu_scratch += group_offset;
 
-  if (gpu_output->rv)
+  if (gpu_output_me->rv)
     goto exit;
 
   if (group_col % 2 == 0) {
@@ -844,7 +843,7 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
     filter_type = EIGHTTAP_SMOOTH;
   }
 
-  MV out_mv = gpu_output->mv.as_mv;
+  MV out_mv = gpu_output_me->mv.as_mv;
   int mv_row = out_mv.row;
   int mv_col = out_mv.col;
   int mv_offset = ((mv_row >> SUBPEL_BITS) * stride) + (mv_col >> SUBPEL_BITS);
@@ -883,7 +882,7 @@ void vp9_rd_calculation(__global uchar *ref_frame,
                         __global uchar *cur_frame,
                         int stride,
                         __global GPU_INPUT *gpu_input,
-                        __global GPU_OUTPUT *gpu_output,
+                        __global GPU_OUTPUT_ME *gpu_output_me,
                         __global GPU_RD_PARAMETERS *rd_parameters,
                         __global GPU_SCRATCH *gpu_scratch) {
   uint32_t sse8x8[64], var8x8[64];
@@ -901,10 +900,10 @@ void vp9_rd_calculation(__global uchar *ref_frame,
   int group_offset = (global_row * global_stride + global_col);
 
   gpu_input += group_offset;
-  gpu_output += group_offset;
+  gpu_output_me += group_offset;
   gpu_scratch += group_offset;
 
-  if (gpu_output->rv)
+  if (gpu_output_me->rv)
     goto exit;
 
   if (gpu_input->do_compute == GPU_BLOCK_32X32)
@@ -916,7 +915,7 @@ void vp9_rd_calculation(__global uchar *ref_frame,
 
   __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
       &rd_parameters->seg_rd_param[gpu_input->seg_id];
-  MV out_mv = gpu_output->mv.as_mv;
+  MV out_mv = gpu_output_me->mv.as_mv;
   int mv_row = out_mv.row;
   int mv_col = out_mv.col;
   int horz_subpel = (mv_col & SUBPEL_MASK) << 1;
@@ -965,14 +964,14 @@ void vp9_rd_calculation(__global uchar *ref_frame,
                     actual_rate, actual_dist);
       if (cost < best_cost) {
         best_cost = cost;
-        gpu_output->rate[GPU_INTER_OFFSET(NEWMV)] = actual_rate;
-        gpu_output->dist[GPU_INTER_OFFSET(NEWMV)] = actual_dist;
-        gpu_output->sse_y[GPU_INTER_OFFSET(NEWMV)] = sse;
-        gpu_output->var_y[GPU_INTER_OFFSET(NEWMV)] = var;
-        gpu_output->interp_filter[GPU_INTER_OFFSET(NEWMV)] = j;
-        gpu_output->tx_size[GPU_INTER_OFFSET(NEWMV)] = tx_size;
-        gpu_output->skip_txfm[GPU_INTER_OFFSET(NEWMV)] = skip_txfm;
-        gpu_output->this_early_term[GPU_INTER_OFFSET(NEWMV)] = this_early_term;
+        gpu_output_me->rate[GPU_INTER_OFFSET(NEWMV)] = actual_rate;
+        gpu_output_me->dist[GPU_INTER_OFFSET(NEWMV)] = actual_dist;
+        gpu_output_me->sse_y[GPU_INTER_OFFSET(NEWMV)] = sse;
+        gpu_output_me->var_y[GPU_INTER_OFFSET(NEWMV)] = var;
+        gpu_output_me->interp_filter[GPU_INTER_OFFSET(NEWMV)] = j;
+        gpu_output_me->tx_size[GPU_INTER_OFFSET(NEWMV)] = tx_size;
+        gpu_output_me->skip_txfm[GPU_INTER_OFFSET(NEWMV)] = skip_txfm;
+        gpu_output_me->this_early_term[GPU_INTER_OFFSET(NEWMV)] = this_early_term;
       }
     }
   }

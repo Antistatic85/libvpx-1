@@ -209,7 +209,7 @@ inline MV get_best_mv(__global uchar *ref_frame, __global uchar *cur_frame,
 MV combined_motion_search(__global uchar *ref_frame,
                           __global uchar *cur_frame,
                           __global GPU_INPUT *gpu_input,
-                          __global GPU_OUTPUT *gpu_output,
+                          __global GPU_OUTPUT_ME *gpu_output_me,
                           __global GPU_RD_PARAMETERS *rd_parameters,
                           int sad_per_bit,
                           int stride,
@@ -270,7 +270,7 @@ MV combined_motion_search(__global uchar *ref_frame,
                                       &x, sad_per_bit,
                                       &bestsad, 0);
 
-  gpu_output->pred_mv_sad = bestsad;
+  gpu_output_me->pred_mv_sad = bestsad;
 
   best_mv.row = best_mv.row * 8;
   best_mv.col = best_mv.col * 8;
@@ -288,7 +288,7 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
                            __global uchar *cur_frame,
                            int stride,
                            __global GPU_INPUT *gpu_input,
-                           __global GPU_OUTPUT *gpu_output,
+                           __global GPU_OUTPUT_ME *gpu_output_me,
                            __global GPU_RD_PARAMETERS *rd_parameters,
                            int mi_rows,
                            int mi_cols) {
@@ -315,7 +315,7 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
   int pred_mv_sad;
 
   gpu_input += group_offset;
-  gpu_output += group_offset;
+  gpu_output_me += group_offset;
 
   cur_frame += global_offset;
   ref_frame += global_offset;
@@ -323,8 +323,8 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
   if (gpu_input->do_compute != gpu_bsize)
     goto exit;
 
-  if (gpu_output->this_early_term[GPU_INTER_OFFSET(ZEROMV)]) {
-    gpu_output->rv = 1;
+  if (gpu_output_me->this_early_term[GPU_INTER_OFFSET(ZEROMV)]) {
+    gpu_output_me->rv = 1;
     goto exit;
   }
 
@@ -332,14 +332,14 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
       &rd_parameters->seg_rd_param[gpu_input->seg_id];
 
   best_mv = combined_motion_search(ref_frame, cur_frame,
-                                   gpu_input, gpu_output, rd_parameters,
+                                   gpu_input, gpu_output_me, rd_parameters,
                                    seg_rd_params->sad_per_bit,
                                    stride,
                                    mi_rows, mi_cols,
                                    intermediate_int);
 
-  gpu_output->mv.as_mv = best_mv;
-  gpu_output->rv = 0;
+  gpu_output_me->mv.as_mv = best_mv;
+  gpu_output_me->rv = 0;
 
 exit:
   return;
