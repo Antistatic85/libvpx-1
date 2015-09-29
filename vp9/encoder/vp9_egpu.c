@@ -47,125 +47,6 @@ const BLOCK_SIZE vp9_gpu_block_size_lookup[BLOCK_SIZES] = {
     GPU_BLOCK_64X64,
 };
 
-int vp9_get_gpu_buffer_index(VP9_COMP *const cpi, int mi_row, int mi_col) {
-  const VP9_COMMON *const cm = &cpi->common;
-  const BLOCK_SIZE bsize = vp9_actual_block_size_lookup[0];
-  const int blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
-  const int bsl = b_width_log2_lookup[bsize] - 1;
-  return ((mi_row >> bsl) * blocks_in_row) + (mi_col >> bsl);
-}
-
-void vp9_gpu_set_mvinfo_offsets(VP9_COMP *const cpi, MACROBLOCK *const x,
-                                int mi_row, int mi_col) {
-  const VP9_COMMON *const cm = &cpi->common;
-  const BLOCK_SIZE bsize = vp9_actual_block_size_lookup[0];
-  const int blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
-  const int block_index_row = (mi_row >> mi_height_log2(bsize));
-  const int block_index_col = (mi_col >> mi_width_log2(bsize));
-
-  x->gpu_output_me = cpi->gpu_output_me_base +
-    (block_index_row * blocks_in_row) + block_index_col;
-}
-
-static int get_subframe_offset(int idx, int mi_rows, int sb_rows) {
-  const int offset = ((idx * sb_rows) / MAX_SUB_FRAMES) << MI_BLOCK_SIZE_LOG2;
-  return MIN(offset, mi_rows);
-}
-
-void vp9_subframe_init(SubFrameInfo *subframe, const VP9_COMMON *cm, int idx) {
-  subframe->mi_row_start = get_subframe_offset(idx, cm->mi_rows, cm->sb_rows);
-  subframe->mi_row_end = get_subframe_offset(idx + 1, cm->mi_rows, cm->sb_rows);
-}
-
-int vp9_get_subframe_index(const VP9_COMMON *cm, int mi_row) {
-  int idx;
-
-  for (idx = 0; idx < MAX_SUB_FRAMES; ++idx) {
-    int mi_row_end = get_subframe_offset(idx + 1, cm->mi_rows, cm->sb_rows);
-    if (mi_row < mi_row_end) {
-      break;
-    }
-  }
-  assert(idx < MAX_SUB_FRAMES);
-  return idx;
-}
-
-void vp9_alloc_gpu_interface_buffers(VP9_COMP *cpi) {
-#if !CONFIG_GPU_COMPUTE
-  VP9_COMMON *const cm = &cpi->common;
-  const BLOCK_SIZE bsize = vp9_actual_block_size_lookup[0];
-
-  const int blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
-  const int blocks_in_col = cm->sb_rows * num_mxn_blocks_high_lookup[bsize];
-
-  CHECK_MEM_ERROR(cm, cpi->gpu_output_me_base,
-                  vpx_calloc(blocks_in_row * blocks_in_col,
-                             sizeof(*cpi->gpu_output_me_base)));
-#else
-  cpi->egpu.alloc_buffers(cpi);
-#endif
-}
-
-void vp9_free_gpu_interface_buffers(VP9_COMP *cpi) {
-#if !CONFIG_GPU_COMPUTE
-  vpx_free(cpi->gpu_output_me_base);
-  cpi->gpu_output_me_base = NULL;
-#else
-  cpi->egpu.free_buffers(cpi);
-#endif
-}
-
-void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
-  VP9_COMMON *const cm = &cpi->common;
-  MACROBLOCK *const x = &td->mb;
-
-  // when gpu is enabled, before encoding the frame make sure all the
-  // dependencies are met
-  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode && !frame_is_intra_only(cm)) {
-    SubFrameInfo subframe;
-    int subframe_idx;
-
-    subframe_idx = vp9_get_subframe_index(cm, mi_row);
-    vp9_subframe_init(&subframe, cm, subframe_idx);
-
-    if (subframe_idx < CPU_SUB_FRAMES) {
-      x->use_gpu = 0;
-    } else {
-      x->use_gpu = cm->use_gpu;
-    }
-
-#if CONFIG_GPU_COMPUTE
-    if (!x->data_parallel_processing && x->use_gpu) {
-      VP9_EGPU *egpu = &cpi->egpu;
-
-      egpu->enc_sync_read(cpi, subframe_idx, MAX_SUB_FRAMES);
-      if (mi_row == subframe.mi_row_start) {
-        GPU_OUTPUT_ME *gpu_output_me_subframe;
-
-        // acquire GPU output buffers
-        egpu->acquire_output_me_buffer(cpi, (void **) &gpu_output_me_subframe,
-                                       subframe_idx);
-        if (subframe_idx == 0) {
-          cpi->gpu_output_me_base = gpu_output_me_subframe;
-        } else {
-          // Check if the acquired memory pointer for the given subframe is
-          // contiguous with respect to the previous subframes
-          const int buffer_offset =
-              vp9_get_gpu_buffer_index(cpi, subframe.mi_row_start, 0);
-
-          (void)buffer_offset;
-          assert(gpu_output_me_subframe - cpi->gpu_output_me_base ==
-              buffer_offset);
-        }
-      }
-    }
-#else
-    if (x->data_parallel_processing && !x->use_gpu)
-      return;
-#endif
-  }
-}
-
 #if CONFIG_GPU_COMPUTE
 
 void vp9_egpu_remove(VP9_COMP *cpi) {
@@ -265,40 +146,24 @@ static void vp9_read_partition_info(VP9_COMP *cpi, const TileInfo *const tile,
                                     int mi_row) {
   VP9_COMMON *const cm = &cpi->common;
   MACROBLOCK *const x = &cpi->td.mb;
-  VP9_EGPU *egpu = &cpi->egpu;
   int mi_col;
   int subframe_idx;
 
+  x->data_parallel_processing = 1;
   subframe_idx = vp9_get_subframe_index(cm, mi_row);
   if (subframe_idx < CPU_SUB_FRAMES)
     return ;
-
-  if (mi_row == 0) {
-    GPU_OUTPUT_PRO_ME *gpu_output_pro_me_subframe;
-    int i;
-    // wait for prologue kernels to finish their task
-    egpu->enc_sync_read(cpi, MAX_SUB_FRAMES - 1, 0);
-
-    // acquire output buffers
-    egpu->acquire_output_pro_me_buffer(cpi,
-                                       (void **) &cpi->gpu_output_pro_me_base,
-                                       0);
-    for (i = 1; i < MAX_SUB_FRAMES; i++) {
-      egpu->acquire_output_pro_me_buffer(cpi,
-                                         (void **) &gpu_output_pro_me_subframe,
-                                         i);
-    }
-  }
 
   // fill sb info
   for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end;
       mi_col += MI_BLOCK_SIZE) {
     choose_partitioning(cpi, tile, x, mi_row, mi_col);
   }
+  x->data_parallel_processing = 0;
 }
 
 static void vp9_gpu_write_input_buffers(VP9_COMP *cpi,
-                                        const TileInfo * const tile,
+                                        const TileInfo *const tile,
                                         int mi_row) {
   SPEED_FEATURES * const sf = &cpi->sf;
 
@@ -313,7 +178,7 @@ static void vp9_gpu_write_input_buffers(VP9_COMP *cpi,
 }
 
 static void vp9_gpu_read_output_buffers(VP9_COMP *cpi,
-                                        const TileInfo * const tile,
+                                        const TileInfo *const tile,
                                         int mi_row) {
   SPEED_FEATURES * const sf = &cpi->sf;
 
@@ -435,31 +300,161 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi) {
   // fill rd param info
   vp9_gpu_fill_rd_parameters(cpi);
 
-  // enqueue prologue kernels for gpu
   for (subframe_idx = CPU_SUB_FRAMES; subframe_idx < MAX_SUB_FRAMES;
       subframe_idx++) {
+    // enqueue prologue kernels for gpu
     egpu->execute_prologue(cpi, subframe_idx);
-  }
 
-  // enqueue kernels for gpu
-  for (subframe_idx = CPU_SUB_FRAMES; subframe_idx < MAX_SUB_FRAMES;
-       subframe_idx++) {
+    // enqueue kernels for gpu
     egpu->execute(cpi, subframe_idx);
   }
 
   // re-map source and reference pointers before starting cpu side processing
   vp9_acquire_frame_buffer(cm, cpi->Source);
   vp9_acquire_frame_buffer(cm, get_ref_frame_buffer(cpi, LAST_FRAME));
-
-  // fill SB info from gpu output
-  for (mi_row = 0; mi_row < cm->mi_rows; mi_row += MI_BLOCK_SIZE) {
-    tile_row = vp9_get_tile_row_index(&tile, cm, mi_row);
-    for (tile_col = 0; tile_col < tile_cols; ++tile_col) {
-      vp9_tile_set_col(&tile, cm, tile_col);
-
-      vp9_gpu_read_output_buffers(cpi, &tile, mi_row);
-    }
-  }
 }
 
 #endif
+
+int vp9_get_gpu_buffer_index(VP9_COMP *const cpi, int mi_row, int mi_col) {
+  const VP9_COMMON *const cm = &cpi->common;
+  const BLOCK_SIZE bsize = vp9_actual_block_size_lookup[0];
+  const int blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
+  const int bsl = b_width_log2_lookup[bsize] - 1;
+  return ((mi_row >> bsl) * blocks_in_row) + (mi_col >> bsl);
+}
+
+void vp9_gpu_set_mvinfo_offsets(VP9_COMP *const cpi, MACROBLOCK *const x,
+                                int mi_row, int mi_col) {
+  const VP9_COMMON *const cm = &cpi->common;
+  const BLOCK_SIZE bsize = vp9_actual_block_size_lookup[0];
+  const int blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
+  const int block_index_row = (mi_row >> mi_height_log2(bsize));
+  const int block_index_col = (mi_col >> mi_width_log2(bsize));
+
+  x->gpu_output_me = cpi->gpu_output_me_base +
+    (block_index_row * blocks_in_row) + block_index_col;
+}
+
+static int get_subframe_offset(int idx, int mi_rows, int sb_rows) {
+  const int offset = ((idx * sb_rows) / MAX_SUB_FRAMES) << MI_BLOCK_SIZE_LOG2;
+  return MIN(offset, mi_rows);
+}
+
+void vp9_subframe_init(SubFrameInfo *subframe, const VP9_COMMON *cm, int idx) {
+  subframe->mi_row_start = get_subframe_offset(idx, cm->mi_rows, cm->sb_rows);
+  subframe->mi_row_end = get_subframe_offset(idx + 1, cm->mi_rows, cm->sb_rows);
+}
+
+int vp9_get_subframe_index(const VP9_COMMON *cm, int mi_row) {
+  int idx;
+
+  for (idx = 0; idx < MAX_SUB_FRAMES; ++idx) {
+    int mi_row_end = get_subframe_offset(idx + 1, cm->mi_rows, cm->sb_rows);
+    if (mi_row < mi_row_end) {
+      break;
+    }
+  }
+  assert(idx < MAX_SUB_FRAMES);
+  return idx;
+}
+
+void vp9_alloc_gpu_interface_buffers(VP9_COMP *cpi) {
+#if !CONFIG_GPU_COMPUTE
+  VP9_COMMON *const cm = &cpi->common;
+  const BLOCK_SIZE bsize = vp9_actual_block_size_lookup[0];
+
+  const int blocks_in_row = cm->sb_cols * num_mxn_blocks_wide_lookup[bsize];
+  const int blocks_in_col = cm->sb_rows * num_mxn_blocks_high_lookup[bsize];
+
+  CHECK_MEM_ERROR(cm, cpi->gpu_output_me_base,
+                  vpx_calloc(blocks_in_row * blocks_in_col,
+                             sizeof(*cpi->gpu_output_me_base)));
+#else
+  cpi->egpu.alloc_buffers(cpi);
+#endif
+}
+
+void vp9_free_gpu_interface_buffers(VP9_COMP *cpi) {
+#if !CONFIG_GPU_COMPUTE
+  vpx_free(cpi->gpu_output_me_base);
+  cpi->gpu_output_me_base = NULL;
+#else
+  cpi->egpu.free_buffers(cpi);
+#endif
+}
+
+void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
+  VP9_COMMON *const cm = &cpi->common;
+  MACROBLOCK *const x = &td->mb;
+
+  // when gpu is enabled, before encoding the frame make sure all the
+  // dependencies are met
+  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode && !frame_is_intra_only(cm)) {
+    SubFrameInfo subframe;
+    int subframe_idx;
+
+    subframe_idx = vp9_get_subframe_index(cm, mi_row);
+    vp9_subframe_init(&subframe, cm, subframe_idx);
+
+    if (subframe_idx < CPU_SUB_FRAMES) {
+      x->use_gpu = 0;
+    } else {
+      x->use_gpu = cm->use_gpu;
+    }
+
+#if CONFIG_GPU_COMPUTE
+    if (!x->data_parallel_processing && x->use_gpu) {
+      VP9_EGPU *egpu = &cpi->egpu;
+      TileInfo tile;
+
+      egpu->enc_sync_read(cpi, subframe_idx, 0);
+      if (mi_row == subframe.mi_row_start) {
+        GPU_OUTPUT_PRO_ME *gpu_output_pro_me_subframe;
+
+        egpu->acquire_output_pro_me_buffer(
+            cpi, (void **) &gpu_output_pro_me_subframe, subframe_idx);
+        if (subframe_idx == 0) {
+          cpi->gpu_output_pro_me_base = gpu_output_pro_me_subframe;
+        } else {
+          const int sb_row_index = mi_row >> MI_BLOCK_SIZE_LOG2;
+          const int buffer_offset = (cm->mi_cols >> MI_BLOCK_SIZE_LOG2)
+                                                   * sb_row_index;
+
+          (void) buffer_offset;
+          assert(gpu_output_pro_me_subframe - cpi->gpu_output_pro_me_base ==
+              buffer_offset);
+        }
+      }
+      tile.mi_row_end = tile.mi_row_start = mi_row;
+      tile.mi_col_start = 0;
+      tile.mi_col_end = cm->mi_cols;
+      vp9_gpu_read_output_buffers(cpi, &tile, mi_row);
+
+      egpu->enc_sync_read(cpi, subframe_idx, MAX_SUB_FRAMES);
+      if (mi_row == subframe.mi_row_start) {
+        GPU_OUTPUT_ME *gpu_output_me_subframe;
+
+        // acquire GPU output buffers
+        egpu->acquire_output_me_buffer(cpi, (void **) &gpu_output_me_subframe,
+                                       subframe_idx);
+        if (subframe_idx == 0) {
+          cpi->gpu_output_me_base = gpu_output_me_subframe;
+        } else {
+          // Check if the acquired memory pointer for the given subframe is
+          // contiguous with respect to the previous subframes
+          const int buffer_offset =
+              vp9_get_gpu_buffer_index(cpi, subframe.mi_row_start, 0);
+
+          (void)buffer_offset;
+          assert(gpu_output_me_subframe - cpi->gpu_output_me_base ==
+              buffer_offset);
+        }
+      }
+    }
+#else
+    if (x->data_parallel_processing && !x->use_gpu)
+      return;
+#endif
+  }
+}
