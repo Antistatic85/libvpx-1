@@ -3695,59 +3695,6 @@ static void encode_nonrd_sb_row(VP9_COMP *cpi,
   memset(&xd->left_context, 0, sizeof(xd->left_context));
   memset(xd->left_seg_context, 0, sizeof(xd->left_seg_context));
 
-  // when gpu is enabled, before encoding the frame make sure all the
-  // dependencies are met
-  if (cm->use_gpu) {
-    SubFrameInfo subframe;
-    int subframe_idx = vp9_get_subframe_index(cm, mi_row);
-
-    // GPU ME compute analysis of the input image is done in parts.
-
-    // The input image is divided in to sub-frames, and GPU computes ME one
-    // sub-frame after another. After the completion of the sub-frame, the GPU
-    // returns its output so that CPU can start encoding. Hence for the first
-    // sub-frame of the image the CPU has to wait and does nothing.
-
-    // To avoid this, the first/first-few sub frames are run directly on CPU.
-    // While CPU is encoding first few sub frames, GPU can process the
-    // remaining sections and send the output in time for CPU.
-    vp9_subframe_init(&subframe, cm, subframe_idx);
-    if (subframe_idx < CPU_SUB_FRAMES) {
-      x->use_gpu = 0;
-    } else {
-      x->use_gpu = cm->use_gpu;
-    }
-#if CONFIG_GPU_COMPUTE
-    if (!x->data_parallel_processing && x->use_gpu) {
-      VP9_EGPU *egpu = &cpi->egpu;
-
-      egpu->enc_sync_read(cpi, subframe_idx, MAX_SUB_FRAMES);
-      if (mi_row == subframe.mi_row_start) {
-        GPU_OUTPUT_ME *gpu_output_me_subframe;
-
-        // acquire GPU output buffers
-        egpu->acquire_output_me_buffer(cpi, (void **) &gpu_output_me_subframe,
-                                       subframe_idx);
-        if (subframe_idx == 0) {
-          cpi->gpu_output_me_base = gpu_output_me_subframe;
-        } else {
-          // Check if the acquired memory pointer for the given subframe is
-          // contiguous with respect to the previous subframes
-          const int buffer_offset =
-              vp9_get_gpu_buffer_index(cpi, subframe.mi_row_start, 0);
-
-          (void)buffer_offset;
-          assert(gpu_output_me_subframe - cpi->gpu_output_me_base ==
-              buffer_offset);
-        }
-      }
-    }
-#else
-    if (x->data_parallel_processing && !x->use_gpu)
-      return;
-#endif
-  }
-
   // Code each SB in the row
   for (mi_col = tile_info->mi_col_start; mi_col < tile_info->mi_col_end;
        mi_col += MI_BLOCK_SIZE) {
@@ -3991,6 +3938,7 @@ static void encode_sb_rows(VP9_COMP *cpi, ThreadData *const td,
   for (mi_row = mi_row_start; mi_row < mi_row_end; mi_row += mi_row_step) {
     const int sb_row = mi_row >> MI_BLOCK_SIZE_LOG2;
     tile_row = vp9_get_tile_row_index(&tile, cm, mi_row);
+    vp9_enc_sync_gpu(cpi, td, mi_row);
     for (tile_col = 0; tile_col < tile_cols; ++tile_col) {
       vp9_tile_set_col(&tile, cm, tile_col);
       get_start_tok(cpi, tile_row, tile_col, mi_row, &tok);

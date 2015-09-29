@@ -115,6 +115,57 @@ void vp9_free_gpu_interface_buffers(VP9_COMP *cpi) {
 #endif
 }
 
+void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
+  VP9_COMMON *const cm = &cpi->common;
+  MACROBLOCK *const x = &td->mb;
+
+  // when gpu is enabled, before encoding the frame make sure all the
+  // dependencies are met
+  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode && !frame_is_intra_only(cm)) {
+    SubFrameInfo subframe;
+    int subframe_idx;
+
+    subframe_idx = vp9_get_subframe_index(cm, mi_row);
+    vp9_subframe_init(&subframe, cm, subframe_idx);
+
+    if (subframe_idx < CPU_SUB_FRAMES) {
+      x->use_gpu = 0;
+    } else {
+      x->use_gpu = cm->use_gpu;
+    }
+
+#if CONFIG_GPU_COMPUTE
+    if (!x->data_parallel_processing && x->use_gpu) {
+      VP9_EGPU *egpu = &cpi->egpu;
+
+      egpu->enc_sync_read(cpi, subframe_idx, MAX_SUB_FRAMES);
+      if (mi_row == subframe.mi_row_start) {
+        GPU_OUTPUT_ME *gpu_output_me_subframe;
+
+        // acquire GPU output buffers
+        egpu->acquire_output_me_buffer(cpi, (void **) &gpu_output_me_subframe,
+                                       subframe_idx);
+        if (subframe_idx == 0) {
+          cpi->gpu_output_me_base = gpu_output_me_subframe;
+        } else {
+          // Check if the acquired memory pointer for the given subframe is
+          // contiguous with respect to the previous subframes
+          const int buffer_offset =
+              vp9_get_gpu_buffer_index(cpi, subframe.mi_row_start, 0);
+
+          (void)buffer_offset;
+          assert(gpu_output_me_subframe - cpi->gpu_output_me_base ==
+              buffer_offset);
+        }
+      }
+    }
+#else
+    if (x->data_parallel_processing && !x->use_gpu)
+      return;
+#endif
+  }
+}
+
 #if CONFIG_GPU_COMPUTE
 
 void vp9_egpu_remove(VP9_COMP *cpi) {
@@ -172,21 +223,12 @@ static void vp9_write_partition_info(VP9_COMP *cpi, const TileInfo *const tile,
 
   for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end;
        mi_col += MI_BLOCK_SIZE) {
-    const int sb_index = get_sb_index(cm, mi_row, mi_col);
     const int idx_str = cm->mi_stride * mi_row + mi_col;
     MODE_INFO **mi = cm->mi_grid_visible + idx_str;
     MACROBLOCKD *xd = &x->e_mbd;
     int i, j;
 
-    set_offsets(cpi, tile, x, mi_row, mi_col, BLOCK_64X64);
     choose_partitioning(cpi, tile, x, mi_row, mi_col);
-    cpi->color_sensitivity[0][sb_index] = x->color_sensitivity[0];
-    cpi->color_sensitivity[1][sb_index] = x->color_sensitivity[1];
-    if (mi[0]->mbmi.ref_frame[0] == LAST_FRAME) {
-      cpi->pred_mv_map[sb_index] = mi[0]->mbmi.mv[0].as_mv;
-    } else {
-      vp9_zero(cpi->pred_mv_map[sb_index]);
-    }
 
     for (i = 0; i < MI_BLOCK_SIZE; i += mi_row_step) {
       for (j = 0; j < MI_BLOCK_SIZE; j += mi_col_step) {
@@ -232,31 +274,26 @@ static void vp9_read_partition_info(VP9_COMP *cpi, const TileInfo *const tile,
     return ;
 
   if (mi_row == 0) {
+    GPU_OUTPUT_PRO_ME *gpu_output_pro_me_subframe;
+    int i;
     // wait for prologue kernels to finish their task
     egpu->enc_sync_read(cpi, MAX_SUB_FRAMES - 1, 0);
 
     // acquire output buffers
     egpu->acquire_output_pro_me_buffer(cpi,
                                        (void **) &cpi->gpu_output_pro_me_base,
-                                       MAX_SUB_FRAMES - 1);
+                                       0);
+    for (i = 1; i < MAX_SUB_FRAMES; i++) {
+      egpu->acquire_output_pro_me_buffer(cpi,
+                                         (void **) &gpu_output_pro_me_subframe,
+                                         i);
+    }
   }
 
   // fill sb info
   for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end;
       mi_col += MI_BLOCK_SIZE) {
-    const int sb_index = get_sb_index(cm, mi_row, mi_col);
-    const int idx_str = cm->mi_stride * mi_row + mi_col;
-    MODE_INFO **mi = cm->mi_grid_visible + idx_str;
-
-    set_offsets(cpi, tile, x, mi_row, mi_col, BLOCK_64X64);
     choose_partitioning(cpi, tile, x, mi_row, mi_col);
-    cpi->color_sensitivity[0][sb_index] = x->color_sensitivity[0];
-    cpi->color_sensitivity[1][sb_index] = x->color_sensitivity[1];
-    if (mi[0]->mbmi.ref_frame[0] == LAST_FRAME) {
-      cpi->pred_mv_map[sb_index] = mi[0]->mbmi.mv[0].as_mv;
-    } else {
-      vp9_zero(cpi->pred_mv_map[sb_index]);
-    }
   }
 }
 

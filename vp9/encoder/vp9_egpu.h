@@ -35,6 +35,7 @@ typedef enum GPU_BLOCK_SIZE {
 
 struct VP9_COMP;
 struct macroblockd;
+struct ThreadData;
 
 typedef struct GPU_INPUT {
   int_mv pred_mv;
@@ -150,6 +151,8 @@ int vp9_get_subframe_index(const VP9_COMMON *cm, int mi_row);
 void vp9_alloc_gpu_interface_buffers(struct VP9_COMP *cpi);
 
 void vp9_free_gpu_interface_buffers(struct VP9_COMP *cpi);
+
+void vp9_enc_sync_gpu(struct VP9_COMP *cpi, struct ThreadData *td, int mi_row);
 
 #if CONFIG_GPU_COMPUTE
 
