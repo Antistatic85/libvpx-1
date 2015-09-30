@@ -323,11 +323,6 @@ void vp9_full_pixel_search(__global uchar *ref_frame,
   if (gpu_input->do_compute != gpu_bsize)
     goto exit;
 
-  if (gpu_output_me->this_early_term[GPU_INTER_OFFSET(ZEROMV)]) {
-    gpu_output_me->rv = 1;
-    goto exit;
-  }
-
   __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
       &rd_parameters->seg_rd_param[gpu_input->seg_id];
 

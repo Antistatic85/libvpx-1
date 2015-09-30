@@ -788,6 +788,16 @@ void vp9_zero_motion_search(__global uchar *ref,
     gpu_output_me->tx_size[GPU_INTER_OFFSET(ZEROMV)] = tx_size;
     gpu_output_me->skip_txfm[GPU_INTER_OFFSET(ZEROMV)] = skip_txfm;
     gpu_output_me->this_early_term[GPU_INTER_OFFSET(ZEROMV)] = this_early_term;
+    if (this_early_term) {
+      gpu_input->do_compute = GPU_BLOCK_INVALID;
+      gpu_output_me->rv = 1;
+#if BLOCK_SIZE_IN_PIXELS == 64
+      (gpu_input + 1)->do_compute = GPU_BLOCK_INVALID;
+      (gpu_input + (global_stride * 2))->do_compute = GPU_BLOCK_INVALID;
+      (gpu_input + (global_stride * 2) + 1)->do_compute = GPU_BLOCK_INVALID;
+#endif
+      goto exit;
+    }
   }
 
   exit:
@@ -833,9 +843,6 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
 
   gpu_output_me += group_offset;
   gpu_scratch += group_offset;
-
-  if (gpu_output_me->rv)
-    goto exit;
 
   if (group_col % 2 == 0) {
     filter_type = EIGHTTAP;
@@ -902,9 +909,6 @@ void vp9_rd_calculation(__global uchar *ref_frame,
   gpu_input += group_offset;
   gpu_output_me += group_offset;
   gpu_scratch += group_offset;
-
-  if (gpu_output_me->rv)
-    goto exit;
 
   if (gpu_input->do_compute == GPU_BLOCK_32X32)
     bsize = BLOCK_32X32;
