@@ -730,7 +730,7 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
   assert(status == CL_SUCCESS);
 
   // Pro Motion Estimation
-  local_size[0] = 8;
+  local_size[0] = 8 * 4;
   local_size[1] = 64 >> pixel_rows_per_workitem_log2_pro_me;
 
   global_size[0] = (blocks_in_row * local_size[0]);
@@ -1514,7 +1514,7 @@ static int vp9_eopencl_build_choose_partitioning_kernel(VP9_COMP *cpi) {
   vpx_free(kernel_src);
   return 0;
 
-  fail:
+fail:
   if (kernel_src != NULL)
     vpx_free(kernel_src);
   return 1;

@@ -1901,7 +1901,10 @@ static int vector_match(int16_t *ref, int16_t *src, int bwl) {
 }
 
 static const MV search_pos[4] = {
-    {-1, 0}, {0, -1}, {0, 1}, {1, 0},
+  {-1,  0},  // Top
+  { 1,  0},  // Bottom
+  { 0, -1},  // Left
+  { 0,  1}   // Right
 };
 
 unsigned int vp9_int_pro_motion_estimation(const VP9_COMP *cpi, MACROBLOCK *x,
@@ -1990,12 +1993,22 @@ unsigned int vp9_int_pro_motion_estimation(const VP9_COMP *cpi, MACROBLOCK *x,
   ref_buf = xd->plane[0].pre[0].buf + this_mv.row * ref_stride + this_mv.col;
   best_sad = cpi->fn_ptr[bsize].sdf(src_buf, src_stride, ref_buf, ref_stride);
 
+  // Test for (0, 0) MV
+  tmp_sad = cpi->fn_ptr[bsize].sdf(src_buf, src_stride, xd->plane[0].pre[0].buf,
+                                   ref_stride);
+  if (tmp_sad <= best_sad) {
+    tmp_mv->col = tmp_mv->row = 0;
+    this_mv = *tmp_mv;
+    ref_buf = xd->plane[0].pre[0].buf;
+    best_sad = tmp_sad;
+  }
+
   {
     const uint8_t * const pos[4] = {
         ref_buf - ref_stride,
+        ref_buf + ref_stride,
         ref_buf - 1,
         ref_buf + 1,
-        ref_buf + ref_stride,
     };
 
     cpi->fn_ptr[bsize].sdx4df(src_buf, src_stride, pos, ref_stride, this_sad);
@@ -2009,29 +2022,17 @@ unsigned int vp9_int_pro_motion_estimation(const VP9_COMP *cpi, MACROBLOCK *x,
     }
   }
 
-  if (this_sad[0] < this_sad[3])
+  if (this_sad[0] < this_sad[1])
     this_mv.row -= 1;
   else
     this_mv.row += 1;
 
-  if (this_sad[1] < this_sad[2])
+  if (this_sad[2] < this_sad[3])
     this_mv.col -= 1;
   else
     this_mv.col += 1;
 
   ref_buf = xd->plane[0].pre[0].buf + this_mv.row * ref_stride + this_mv.col;
-
-  tmp_sad = cpi->fn_ptr[bsize].sdf(src_buf, src_stride,
-                                   ref_buf, ref_stride);
-  if (best_sad > tmp_sad) {
-    *tmp_mv = this_mv;
-    best_sad = tmp_sad;
-  }
-
-  // Test for (0, 0) MV
-  ref_buf = xd->plane[0].pre[0].buf;
-  this_mv.row = 0;
-  this_mv.col = 0;
 
   tmp_sad = cpi->fn_ptr[bsize].sdf(src_buf, src_stride,
                                    ref_buf, ref_stride);

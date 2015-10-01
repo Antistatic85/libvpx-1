@@ -29,8 +29,21 @@ typedef struct GPU_OUTPUT_PRO_ME GPU_OUTPUT_PRO_ME;
 //=====   GLOBAL DEFINITIONS   =====
 //--------------------------------------
 __constant MV search_pos[4] = {
-    {-1, 0}, {0, -1}, {0, 1}, {1, 0},
+  {-1,  0},  // Top
+  { 1,  0},  // Bottom
+  { 0, -1},  // Left
+  { 0,  1}   // Right
 };
+
+//=====   FUNCTION MACROS   =====
+//--------------------------------------
+#define CHECK_BETTER(sad, idx)                                    \
+      sad = intermediate_sad[idx];                                \
+                                                                  \
+      if (sad < bestsad) {                                        \
+        bestsad = sad;                                            \
+        best_mv = this_mv + search_pos[idx];                      \
+      }
 
 //=====   FUNCTION DEFINITIONS   =====
 //-------------------------------------------
@@ -201,94 +214,35 @@ int get_uv_filtered_sad(__global uchar *ref_frame,
   return atomic_sad[0];
 }
 
-void calculate_sad_4d(MV *currentmv,
-                      __global uchar *ref_frame,
-                      __global uchar *cur_frame,
-                      int stride,
-                      int *sad_array) {
-  __global uchar *tmp_cur;
-  __global uchar *tmp_ref_l, *tmp_ref_r, *tmp_ref_t, *tmp_ref_b;
+inline ushort calculate_sad_rows(MV *currentmv,
+                                 __global uchar *ref_frame,
+                                 __global uchar *cur_frame,
+                                 int stride,
+                                 int rows) {
+  __global uchar *tmp_ref, *tmp_cur;
   uchar8 ref, cur;
-  ushort8 sad[4] = {0};
-  ushort4 final_sad[4];
+  ushort8 sad = 0;
+  int buffer_offset;
   int row;
 
-  tmp_ref_l = ref_frame + (currentmv->row * stride) + currentmv->col - 1;
-  tmp_ref_r = ref_frame + (currentmv->row * stride) + currentmv->col + 1;
-  tmp_ref_t = ref_frame + ((currentmv->row - 1) * stride) + currentmv->col;
-  tmp_ref_b = ref_frame + ((currentmv->row + 1) * stride) + currentmv->col;
+  buffer_offset = (currentmv->row * stride) + currentmv->col;
+  tmp_ref = ref_frame + buffer_offset;
   tmp_cur = cur_frame;
 
-  for (row = 0; row < PIXEL_ROWS_PER_WORKITEM; row++) {
+  for (row = 0; row < rows; row++) {
+    ref = vload8(0, tmp_ref);
     cur = vload8(0, tmp_cur);
 
-    ref = vload8(0, tmp_ref_l);
-    sad[0] += abs_diff(convert_ushort8(ref), convert_ushort8(cur));
+    sad += abs_diff(convert_ushort8(ref), convert_ushort8(cur));
 
-    ref = vload8(0, tmp_ref_r);
-    sad[1] += abs_diff(convert_ushort8(ref), convert_ushort8(cur));
-
-    ref = vload8(0, tmp_ref_t);
-    sad[2] += abs_diff(convert_ushort8(ref), convert_ushort8(cur));
-
-    ref = vload8(0, tmp_ref_b);
-    sad[3] += abs_diff(convert_ushort8(ref), convert_ushort8(cur));
-
-    tmp_ref_l += stride;
-    tmp_ref_r += stride;
-    tmp_ref_t += stride;
-    tmp_ref_b += stride;
+    tmp_ref += stride;
     tmp_cur += stride;
   }
 
-  final_sad[0] = convert_ushort4(sad[0].s0123) + convert_ushort4(sad[0].s4567);
-  final_sad[1] = convert_ushort4(sad[1].s0123) + convert_ushort4(sad[1].s4567);
-  final_sad[2] = convert_ushort4(sad[2].s0123) + convert_ushort4(sad[2].s4567);
-  final_sad[3] = convert_ushort4(sad[3].s0123) + convert_ushort4(sad[3].s4567);
+  ushort4 final_sad = convert_ushort4(sad.s0123) + convert_ushort4(sad.s4567);
+  final_sad.s01 = final_sad.s01 + final_sad.s23;
 
-  final_sad[0].s01 = final_sad[0].s01 + final_sad[0].s23;
-  final_sad[1].s01 = final_sad[1].s01 + final_sad[1].s23;
-  final_sad[2].s01 = final_sad[2].s01 + final_sad[2].s23;
-  final_sad[3].s01 = final_sad[3].s01 + final_sad[3].s23;
-
-  sad_array[0] = final_sad[2].s0 + final_sad[2].s1;
-  sad_array[1] = final_sad[0].s0 + final_sad[0].s1;
-  sad_array[2] = final_sad[1].s0 + final_sad[1].s1;
-  sad_array[3] = final_sad[3].s0 + final_sad[3].s1;
-}
-
-void get_sad_4d(__global uchar *ref_frame,
-                __global uchar *cur_frame,
-                int stride,
-                int* sad_array,
-                MV this_mv,
-                __local int* atomic_sad) {
-  int intermediate_sad[4];
-  int local_col = get_local_id(0);
-  int local_row = get_local_id(1);
-
-  barrier(CLK_LOCAL_MEM_FENCE);
-
-  atomic_sad[0] = 0;
-  atomic_sad[1] = 0;
-  atomic_sad[2] = 0;
-  atomic_sad[3] = 0;
-
-  calculate_sad_4d(&this_mv, ref_frame, cur_frame, stride, intermediate_sad);
-
-  barrier(CLK_LOCAL_MEM_FENCE);
-
-  atomic_add(&atomic_sad[0], intermediate_sad[0]);
-  atomic_add(&atomic_sad[1], intermediate_sad[1]);
-  atomic_add(&atomic_sad[2], intermediate_sad[2]);
-  atomic_add(&atomic_sad[3], intermediate_sad[3]);
-
-  barrier(CLK_LOCAL_MEM_FENCE);
-
-  sad_array[0] = atomic_sad[0];
-  sad_array[1] = atomic_sad[1];
-  sad_array[2] = atomic_sad[2];
-  sad_array[3] = atomic_sad[3];
+  return (final_sad.s0 + final_sad.s1);
 }
 
 void calculate_vector_var(__global ushort *ref_vector,
@@ -324,29 +278,29 @@ void calculate_vector_var(__global ushort *ref_vector,
 int get_vector_var(__global ushort *ref_vector,
                    __global ushort *src_vector,
                    int bwl,
-                   __local int* intermediate_sad) {
+                   __global int* intermediate_sad) {
   int sum, sse;
 
-  barrier(CLK_LOCAL_MEM_FENCE);
+  barrier(CLK_GLOBAL_MEM_FENCE);
 
   intermediate_sad[0] = 0;
   intermediate_sad[1] = 0;
 
   calculate_vector_var(ref_vector, src_vector, &sum, &sse);
 
-  barrier(CLK_LOCAL_MEM_FENCE);
+  barrier(CLK_GLOBAL_MEM_FENCE);
 
   atomic_add(&intermediate_sad[0], sum);
   atomic_add(&intermediate_sad[1], sse);
 
-  barrier(CLK_LOCAL_MEM_FENCE);
+  barrier(CLK_GLOBAL_MEM_FENCE);
 
   return intermediate_sad[1] - ((intermediate_sad[0] * intermediate_sad[0]) >> (bwl + 2));
 }
 
 int vector_match(__global ushort *proj_ref,
                  __global ushort *proj_src,
-                 __local int* intermediate_int) {
+                 __global int* intermediate_int) {
   int best_sad = INT_MAX;
   int this_sad;
   int d;
@@ -524,15 +478,14 @@ void vp9_vector_match(__global ushort *proj_src_h,
                       __global ushort *proj_src_v,
                       __global ushort *proj_ref_v,
                       __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me) {
-  __local int intermediate_int[2];
   int group_col = get_group_id(0);
   int group_stride = get_num_groups(0);
   int global_row = get_global_id(1);
   int local_col = get_local_id(0);
-  int local_row = get_local_id(1);
   MV thismv;
 
   gpu_output_pro_me += global_row * group_stride + group_col;
+  __global int *intermediate_int = (__global int *)&gpu_output_pro_me->sum8x8;
 
   {
     int stride_h = (get_num_groups(0) + 1) * BLOCK_SIZE_IN_PIXELS;
@@ -555,79 +508,113 @@ void vp9_vector_match(__global ushort *proj_src_h,
 
     thismv.row = vector_match(proj_ref_v, proj_src_v, intermediate_int);
   }
+  intermediate_int[local_col] = 0;
   gpu_output_pro_me->pred_mv.as_mv = thismv;
 }
 
 __kernel
-void vp9_pro_motion_estimation(__global uchar *src,
+void vp9_pro_motion_estimation(__global uchar *cur,
                                __global uchar *ref,
                                int stride,
                                __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me) {
-  __local int intermediate_int[4];
-  int group_col = get_group_id(0);
-  int group_row = get_group_id(1);
+  short global_row = get_global_id(1);
+
+  short group_col = get_group_id(0);
   int group_stride = get_num_groups(0);
-  int global_row = get_global_id(1);
+
   int local_col = get_local_id(0);
-  int local_row = get_local_id(1);
-  MV thismv, bestmv;
-  int i;
-  int thissad[5], bestsad = INT_MAX;
-  MV zeromv = 0;
-  int bestsad_g = INT_MAX;
   int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * stride) +
                       (group_col * BLOCK_SIZE_IN_PIXELS) +
-                      (local_col * NUM_PIXELS_PER_WORKITEM);
+                      ((local_col >> 2) * NUM_PIXELS_PER_WORKITEM);
+
   global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
 
-  src += global_offset;
-  ref += global_offset;
+  int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
+      group_stride + (group_col));
 
-  gpu_output_pro_me += (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM)) *
-      group_stride + group_col;
+  gpu_output_pro_me += group_offset;
 
-  // best sad at init mv
-  bestmv = thismv = gpu_output_pro_me->pred_mv.as_mv;
-  bestsad = get_sad(ref, src, stride, intermediate_int, thismv);
+  int sad;
 
-  // diamond search at 1 pixel distance around init
-  get_sad_4d(ref, src, stride, thissad, thismv, intermediate_int);
-  for (i = 0; i < 4; i++) {
-    if (thissad[i] < bestsad) {
-      bestsad = thissad[i];
-      bestmv = gpu_output_pro_me->pred_mv.as_mv + search_pos[i];
-    }
+  MV best_mv, this_mv;
+  best_mv = this_mv = gpu_output_pro_me->pred_mv.as_mv;
+  int buffer_offset;
+  unsigned int bestsad;
+
+  __global int *intermediate_sad = (__global int *)&gpu_output_pro_me->sum8x8;
+
+  // Compute sad for pred MV and zero MV
+  int idx = (local_col & 3);
+  int tmp_idx = (local_col & 1);
+  int local_offset = (idx >> 1) * (PIXEL_ROWS_PER_WORKITEM / 2) * stride;
+  __global uchar *cur_frame = cur + (global_offset + local_offset);
+  __global uchar *ref_frame = ref + (global_offset + local_offset);
+  if (tmp_idx)
+    this_mv = 0;
+
+  sad = calculate_sad_rows(&this_mv, ref_frame, cur_frame, stride,
+                           PIXEL_ROWS_PER_WORKITEM / 2);
+  atomic_add(intermediate_sad + tmp_idx, sad);
+  barrier(CLK_GLOBAL_MEM_FENCE);
+
+  bestsad = intermediate_sad[0];
+
+  if (bestsad >= intermediate_sad[1]) {
+    best_mv = 0;
+    bestsad = intermediate_sad[1];
+  }
+  intermediate_sad += 2;
+
+  // Compute sad for 4 diamond points
+  cur_frame = cur + global_offset;
+  ref_frame = ref + global_offset;
+
+  this_mv = best_mv + search_pos[idx];
+
+  sad = calculate_sad(&this_mv, ref_frame, cur_frame, stride);
+  atomic_add(intermediate_sad + idx, sad);
+  barrier(CLK_GLOBAL_MEM_FENCE);
+
+  // Check which among the 4 diamond points are best
+  this_mv = best_mv;
+  MV next_mv = best_mv;
+
+  int top, bottom;
+  CHECK_BETTER(top, 0);
+  CHECK_BETTER(bottom, 1);
+  if (top < bottom)
+    next_mv.row -= 1;
+  else
+    next_mv.row += 1;
+
+  int left, right;
+  CHECK_BETTER(left, 2);
+  CHECK_BETTER(right, 3);
+  if (left < right)
+    next_mv.col -= 1;
+  else
+    next_mv.col += 1;
+
+  // Compute SAD for diagonal point
+  local_offset = idx * (PIXEL_ROWS_PER_WORKITEM / 4) * stride;
+  cur_frame = cur + global_offset + local_offset;
+  ref_frame = ref + global_offset + local_offset;
+  sad = calculate_sad_rows(&next_mv, ref_frame, cur_frame, stride,
+                           PIXEL_ROWS_PER_WORKITEM / 4);
+  atomic_add(intermediate_sad + 4, sad);
+  barrier(CLK_GLOBAL_MEM_FENCE);
+
+  if (intermediate_sad[4] < bestsad) {
+    best_mv = next_mv;
+    bestsad = intermediate_sad[4];
   }
 
-  // best sad at diagonal
-  if (thissad[0] < thissad[3]) {
-    thismv.row = gpu_output_pro_me->pred_mv.as_mv.row - 1;
-  } else {
-    thismv.row = gpu_output_pro_me->pred_mv.as_mv.row + 1;
-  }
-  if (thissad[1] < thissad[2]) {
-    thismv.col = gpu_output_pro_me->pred_mv.as_mv.col - 1;
-  } else {
-    thismv.col = gpu_output_pro_me->pred_mv.as_mv.col + 1;
-  }
-  thissad[4] = get_sad(ref, src, stride, intermediate_int, thismv);
-  if (thissad[4] < bestsad) {
-    bestsad = thissad[4];
-    bestmv = thismv;
+  if (get_local_id(0) == 0 && get_local_id(1) == 0) {
+    gpu_output_pro_me->pred_mv.as_mv.col = best_mv.col << 3;
+    gpu_output_pro_me->pred_mv.as_mv.row = best_mv.row << 3;
+    gpu_output_pro_me->pred_mv_sad = bestsad;
   }
 
-  thismv = 0;
-
-  thissad[4] = get_sad(ref, src, stride, intermediate_int, thismv);
-  if (thissad[4] < bestsad) {
-    bestsad = thissad[4];
-    bestmv = thismv;
-  }
-
-  // best mv & best sad
-  gpu_output_pro_me->pred_mv.as_mv.col = bestmv.col << 3;
-  gpu_output_pro_me->pred_mv.as_mv.row = bestmv.row << 3;
-  gpu_output_pro_me->pred_mv_sad = bestsad;
 }
 
 __kernel

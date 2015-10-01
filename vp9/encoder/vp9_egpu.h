@@ -100,7 +100,6 @@ typedef struct SubFrameInfo {
 
 typedef struct VP9_EGPU {
   void *compute_framework;
-  GPU_INPUT *gpu_input[GPU_BLOCK_SIZES];
   void (*alloc_buffers)(struct VP9_COMP *cpi);
   void (*free_buffers)(struct VP9_COMP *cpi);
   void (*acquire_input_buffer)(struct VP9_COMP *cpi, void **host_ptr);
