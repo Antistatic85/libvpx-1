@@ -141,34 +141,34 @@ static void vp9_opencl_set_static_kernel_args(VP9_COMP *cpi) {
   assert(status == CL_SUCCESS);
 
   // Pro Motion Estimation
-  status = clSetKernelArg(eopencl->pro_motion_estimation, 4, sizeof(cl_int),
+  status = clSetKernelArg(eopencl->pro_motion_estimation, 2, sizeof(cl_int),
                           &y_stride);
-  status |= clSetKernelArg(eopencl->pro_motion_estimation, 5, sizeof(cl_mem),
+  status |= clSetKernelArg(eopencl->pro_motion_estimation, 3, sizeof(cl_mem),
                            gpu_op_pro_me);
   assert(status == CL_SUCCESS);
 
   // color sensitivity
-  status = clSetKernelArg(eopencl->color_sensitivity, 3, sizeof(cl_int),
+  status = clSetKernelArg(eopencl->color_sensitivity, 2, sizeof(cl_int),
                           &y_stride);
-  status |= clSetKernelArg(eopencl->color_sensitivity, 4, sizeof(cl_mem),
+  status |= clSetKernelArg(eopencl->color_sensitivity, 3, sizeof(cl_mem),
                            gpu_op_pro_me);
-  status |= clSetKernelArg(eopencl->color_sensitivity, 5, sizeof(cl_long),
+  status |= clSetKernelArg(eopencl->color_sensitivity, 4, sizeof(cl_long),
                            &yplane_size);
-  status |= clSetKernelArg(eopencl->color_sensitivity, 6, sizeof(cl_long),
+  status |= clSetKernelArg(eopencl->color_sensitivity, 5, sizeof(cl_long),
                            &uvplane_size);
   assert(status == CL_SUCCESS);
 
   // choose partitions
-  status = clSetKernelArg(eopencl->choose_partitions, 3, sizeof(cl_int),
+  status = clSetKernelArg(eopencl->choose_partitions, 2, sizeof(cl_int),
                           &y_stride);
-  status |= clSetKernelArg(eopencl->choose_partitions, 4, sizeof(cl_mem),
+  status |= clSetKernelArg(eopencl->choose_partitions, 3, sizeof(cl_mem),
                            gpu_op_pro_me);
-  status |= clSetKernelArg(eopencl->choose_partitions, 5, sizeof(cl_mem),
+  status |= clSetKernelArg(eopencl->choose_partitions, 4, sizeof(cl_mem),
                            rdopt_parameters);
-  status |= clSetKernelArg(eopencl->choose_partitions, 6, sizeof(cl_mem),
+  status |= clSetKernelArg(eopencl->choose_partitions, 5, sizeof(cl_mem),
                            gpu_ip);
   op_stride = cm->sb_cols * num_mxn_blocks_high_lookup[BLOCK_32X32];
-  status |= clSetKernelArg(eopencl->choose_partitions, 7, sizeof(cl_int),
+  status |= clSetKernelArg(eopencl->choose_partitions, 6, sizeof(cl_int),
                            &op_stride);
   assert(status == CL_SUCCESS);
 
@@ -252,8 +252,6 @@ static void vp9_opencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
   VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
   YV12_BUFFER_CONFIG *img_src = cpi->Source;
   YV12_BUFFER_CONFIG *frm_ref = get_ref_frame_buffer(cpi, LAST_FRAME);
-  YV12_BUFFER_CONFIG *frm_ref_g = get_ref_frame_buffer(cpi, GOLDEN_FRAME);
-  cl_int analyse_golden = 0;
   cl_int status;
 
   // project Source SB Cols of each SB on to a horizontal plane
@@ -275,12 +273,6 @@ static void vp9_opencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
                           &img_src->gpu_mem);
   status |= clSetKernelArg(eopencl->pro_motion_estimation, 1, sizeof(cl_mem),
                            &frm_ref->gpu_mem);
-  if (frm_ref_g && (frm_ref != frm_ref_g))
-    analyse_golden = 1;
-  status |= clSetKernelArg(eopencl->pro_motion_estimation, 2, sizeof(cl_mem),
-                           analyse_golden ? &frm_ref_g->gpu_mem : NULL);
-  status |= clSetKernelArg(eopencl->pro_motion_estimation, 3, sizeof(cl_int),
-                           &analyse_golden);
   assert(status == CL_SUCCESS);
 
   // color sensitivity
@@ -288,8 +280,6 @@ static void vp9_opencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
                           &img_src->gpu_mem);
   status |= clSetKernelArg(eopencl->color_sensitivity, 1, sizeof(cl_mem),
                            &frm_ref->gpu_mem);
-  status |= clSetKernelArg(eopencl->color_sensitivity, 2, sizeof(cl_mem),
-                           analyse_golden ? &frm_ref_g->gpu_mem : NULL);
   assert(status == CL_SUCCESS);
 
   // choose partitions
@@ -297,8 +287,6 @@ static void vp9_opencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
                           &img_src->gpu_mem);
   status |= clSetKernelArg(eopencl->choose_partitions, 1, sizeof(cl_mem),
                            &frm_ref->gpu_mem);
-  status |= clSetKernelArg(eopencl->choose_partitions, 2, sizeof(cl_mem),
-                           analyse_golden ? &frm_ref_g->gpu_mem : NULL);
   assert(status == CL_SUCCESS);
 }
 

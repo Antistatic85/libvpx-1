@@ -22,7 +22,7 @@ struct GPU_OUTPUT_PRO_ME {
   SUM8X8 sum8x8;
   int_mv pred_mv;
   int pred_mv_sad;
-  char ref_map;
+  char color_sensitivity;
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT_PRO_ME GPU_OUTPUT_PRO_ME;
 
@@ -556,8 +556,6 @@ void vp9_vector_match(__global ushort *proj_src_h,
 __kernel
 void vp9_pro_motion_estimation(__global uchar *src,
                                __global uchar *ref,
-                               __global uchar *golden_ref,
-                               int analyse_golden,
                                int stride,
                                __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me) {
   __local int intermediate_int[4];
@@ -613,37 +611,28 @@ void vp9_pro_motion_estimation(__global uchar *src,
     bestmv = thismv;
   }
 
-  // analyse golden frame
-  if (analyse_golden) {
-    golden_ref += global_offset;
-    bestsad_g = get_sad(golden_ref, src, stride, intermediate_int, zeromv);
-  } else {
-    barrier(CLK_LOCAL_MEM_FENCE);
+  thismv = 0;
+
+  thissad[4] = get_sad(ref, src, stride, intermediate_int, thismv);
+  if (thissad[4] < bestsad) {
+    bestsad = thissad[4];
+    bestmv = thismv;
   }
 
   // best mv & best sad
-  if (bestsad_g < bestsad ) {
-    gpu_output_pro_me->pred_mv.as_mv = zeromv;
-    gpu_output_pro_me->pred_mv_sad = bestsad_g;
-    gpu_output_pro_me->ref_map = GOLDEN_FRAME;
-  } else {
-    gpu_output_pro_me->pred_mv.as_mv.col = bestmv.col << 3;
-    gpu_output_pro_me->pred_mv.as_mv.row = bestmv.row << 3;
-    gpu_output_pro_me->pred_mv_sad = bestsad;
-    gpu_output_pro_me->ref_map = LAST_FRAME;
-  }
+  gpu_output_pro_me->pred_mv.as_mv.col = bestmv.col << 3;
+  gpu_output_pro_me->pred_mv.as_mv.row = bestmv.row << 3;
+  gpu_output_pro_me->pred_mv_sad = bestsad;
 }
 
 __kernel
 void vp9_color_sensitivity(__global uchar *src,
-                           __global uchar *ref_lf,
-                           __global uchar *ref_gf,
+                           __global uchar *ref,
                            int stride,
                            __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me,
                            int64_t yplane_size,
                            int64_t uvplane_size) {
   __local int intermediate_int[1];
-  __global uchar *ref;
   int group_col = get_group_id(0);
   int group_row = get_group_id(1);
   int group_stride = get_num_groups(0);
@@ -666,11 +655,6 @@ void vp9_color_sensitivity(__global uchar *src,
   thismv = gpu_output_pro_me->pred_mv.as_mv;
   y_sad = gpu_output_pro_me->pred_mv_sad;
 
-  if (gpu_output_pro_me->ref_map == GOLDEN_FRAME)
-    ref = ref_gf;
-  else
-    ref = ref_lf;
-
   if (((thismv.col & 15) == 0) && ((thismv.row & 15) == 0)) {
     thismv.col = thismv.col >> 4;
     thismv.row = thismv.row >> 4;
@@ -686,7 +670,7 @@ void vp9_color_sensitivity(__global uchar *src,
 
       color_sensitivity |= ((uv_sad > (y_sad >> 2)) << i);
     }
-    gpu_output_pro_me->ref_map |= (color_sensitivity << 4);
+    gpu_output_pro_me->color_sensitivity = color_sensitivity;
   } else {
 
     for (i = 0; i < 2; i++) {
@@ -701,20 +685,18 @@ void vp9_color_sensitivity(__global uchar *src,
 
       color_sensitivity |= ((uv_sad > (y_sad >> 2)) << i);
     }
-    gpu_output_pro_me->ref_map |= (color_sensitivity << 4);
+    gpu_output_pro_me->color_sensitivity = color_sensitivity;
   }
 }
 
 __kernel
 void vp9_choose_partitions(__global uchar *src,
-                           __global uchar *ref_lf,
-                           __global uchar *ref_gf,
+                           __global uchar *ref,
                            int stride,
                            __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me,
                            __global GPU_RD_PARAMETERS *rd_parameters,
                            __global GPU_INPUT *gpu_input,
                            int gpu_input_stride) {
-  __global uchar *ref;
   __local int sum[64 + 16 + 4 + 1];
   __local uint32_t sse[64 + 16 + 4 + 1];
   __local int *sum_array[4];
@@ -738,11 +720,7 @@ void vp9_choose_partitions(__global uchar *src,
   gpu_input += (global_row / (BLOCK_SIZE_IN_PIXELS / 8)) * (gpu_input_stride * 2) + (group_col * 2);
 
   src += global_offset;
-
-  if ((gpu_output_pro_me->ref_map & 15) == GOLDEN_FRAME)
-    ref = ref_gf + global_offset;
-  else
-    ref = ref_lf + global_offset;
+  ref += global_offset;
 
   ref += ((gpu_output_pro_me->pred_mv.as_mv.row >> 3) * stride) +
       (gpu_output_pro_me->pred_mv.as_mv.col >> 3);

@@ -66,7 +66,7 @@ struct GPU_OUTPUT_PRO_ME {
   SUM8X8 sum8x8;
   int_mv pred_mv;
   int pred_mv_sad;
-  char ref_map;
+  char color_sensitivity;
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT_PRO_ME GPU_OUTPUT_PRO_ME;
 

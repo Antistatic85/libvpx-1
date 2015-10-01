@@ -741,8 +741,7 @@ int choose_partitioning(VP9_COMP *cpi,
     unsigned int uv_sad;
     const YV12_BUFFER_CONFIG *yv12 = get_ref_frame_buffer(cpi, LAST_FRAME);
 
-    const YV12_BUFFER_CONFIG *yv12_g = NULL;
-    unsigned int y_sad, y_sad_g;
+    unsigned int y_sad;
     const BLOCK_SIZE bsize = BLOCK_32X32
         + (mi_col + 4 < cm->mi_cols) * 2 + (mi_row + 4 < cm->mi_rows);
 
@@ -757,12 +756,6 @@ int choose_partitioning(VP9_COMP *cpi,
       return 0;
     }
 
-    if (!(is_one_pass_cbr_svc(cpi) && cpi->svc.spatial_layer_id)) {
-      // For now, GOLDEN will not be used for non-zero spatial layers, since
-      // it may not be a temporal reference.
-      yv12_g = get_ref_frame_buffer(cpi, GOLDEN_FRAME);
-    }
-
 #if CONFIG_GPU_COMPUTE
     if (x->use_gpu && x->data_parallel_processing && bsize == BLOCK_64X64) {
       const int sb_row_index = mi_row / MI_SIZE;
@@ -770,41 +763,26 @@ int choose_partitioning(VP9_COMP *cpi,
       const int index = ((cm->mi_cols >> MI_BLOCK_SIZE_LOG2) * sb_row_index +
           sb_col_index);
 
-      mbmi->ref_frame[0] = cpi->gpu_output_pro_me_base[index].ref_map & 15;
+      mbmi->ref_frame[0] = LAST_FRAME;
       mbmi->ref_frame[1] = NONE;
       mbmi->sb_type = BLOCK_64X64;
       mbmi->mv[0].as_int = cpi->gpu_output_pro_me_base[index].pred_mv.as_int;
       mbmi->interp_filter = BILINEAR;
       x->color_sensitivity[0] =
-          (cpi->gpu_output_pro_me_base[index].ref_map >> 4) & 1;
+          (cpi->gpu_output_pro_me_base[index].color_sensitivity) & 1;
       x->color_sensitivity[1] =
-          (cpi->gpu_output_pro_me_base[index].ref_map >> 5) & 1;
+          (cpi->gpu_output_pro_me_base[index].color_sensitivity >> 1) & 1;
       y_sad = cpi->gpu_output_pro_me_base[index].pred_mv_sad;
       sum8x8 = &cpi->gpu_output_pro_me_base[index].sum8x8;
 
-      if (mbmi->ref_frame[0] == LAST_FRAME)
-        vp9_setup_pre_planes(xd, 0, yv12, mi_row, mi_col,
-                             &cm->frame_refs[LAST_FRAME - 1].sf);
-      else
-        vp9_setup_pre_planes(xd, 0, yv12_g, mi_row, mi_col,
-                             &cm->frame_refs[GOLDEN_FRAME - 1].sf);
+      vp9_setup_pre_planes(xd, 0, yv12, mi_row, mi_col,
+                           &cm->frame_refs[LAST_FRAME - 1].sf);
 
       vp9_build_inter_predictors_sby(xd, mi_row, mi_col, BLOCK_64X64);
 
       goto gpu_marker;
     }
 #endif
-
-    if (yv12_g && yv12_g != yv12) {
-      vp9_setup_pre_planes(xd, 0, yv12_g, mi_row, mi_col,
-                           &cm->frame_refs[GOLDEN_FRAME - 1].sf);
-      y_sad_g = cpi->fn_ptr[bsize].sdf(x->plane[0].src.buf,
-                                       x->plane[0].src.stride,
-                                       xd->plane[0].pre[0].buf,
-                                       xd->plane[0].pre[0].stride);
-    } else {
-      y_sad_g = UINT_MAX;
-    }
 
     vp9_setup_pre_planes(xd, 0, yv12, mi_row, mi_col,
                          &cm->frame_refs[LAST_FRAME - 1].sf);
@@ -815,15 +793,7 @@ int choose_partitioning(VP9_COMP *cpi,
     mbmi->interp_filter = BILINEAR;
 
     y_sad = vp9_int_pro_motion_estimation(cpi, x, bsize, mi_row, mi_col);
-    if (y_sad_g < y_sad) {
-      vp9_setup_pre_planes(xd, 0, yv12_g, mi_row, mi_col,
-                           &cm->frame_refs[GOLDEN_FRAME - 1].sf);
-      mbmi->ref_frame[0] = GOLDEN_FRAME;
-      mbmi->mv[0].as_int = 0;
-      y_sad = y_sad_g;
-    } else {
-      x->pred_mv[LAST_FRAME] = mbmi->mv[0].as_mv;
-    }
+    x->pred_mv[LAST_FRAME] = mbmi->mv[0].as_mv;
 
     vp9_build_inter_predictors_sb(xd, mi_row, mi_col, BLOCK_64X64);
 

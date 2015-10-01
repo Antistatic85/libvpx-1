@@ -2028,6 +2028,18 @@ unsigned int vp9_int_pro_motion_estimation(const VP9_COMP *cpi, MACROBLOCK *x,
     best_sad = tmp_sad;
   }
 
+  // Test for (0, 0) MV
+  ref_buf = xd->plane[0].pre[0].buf;
+  this_mv.row = 0;
+  this_mv.col = 0;
+
+  tmp_sad = cpi->fn_ptr[bsize].sdf(src_buf, src_stride,
+                                   ref_buf, ref_stride);
+  if (best_sad > tmp_sad) {
+    *tmp_mv = this_mv;
+    best_sad = tmp_sad;
+  }
+
   tmp_mv->row *= 8;
   tmp_mv->col *= 8;
 
