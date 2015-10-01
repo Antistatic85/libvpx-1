@@ -752,7 +752,7 @@ void vp9_choose_partitions(__global uchar *src,
   if (segment_id == CR_SEGMENT_ID_BASE &&
       gpu_output_pro_me->pred_mv_sad < rd_parameters->vbp_threshold_sad) {
     force_split[0] = 0;
-    goto end;
+    goto select_partitions;
   }
 
   sum_array[0] = sum;
@@ -785,11 +785,9 @@ void vp9_choose_partitions(__global uchar *src,
   int log2_count = 2;
   int blk_stride = 8;
   int blk_index = 0;
-  while (i < 16) {
+  while (i < 8) {
     barrier(CLK_LOCAL_MEM_FENCE);
-    if (local_col % i == 0 && local_row % i == 0 &&
-        force_split[0] != 1 &&
-        force_split[5 + ((local_row / 2) * 4 + (local_col / 2))] != 1) {
+    if (local_col % i == 0 && local_row % i == 0) {
       int j, k;
       int sum = 0;
       uint32_t sse = 0;
@@ -806,14 +804,13 @@ void vp9_choose_partitions(__global uchar *src,
       sse_array[blk_index + 1][(local_row / i) * (blk_stride >> 1) +
                                (local_col / i)] = sse;
       variance = get_variance(sse, sum, log2_count);
-      if (variance > rd_parameters->seg_rd_param[segment_id].vbp_thresholds[i >> 2]) {
+      if (variance >= rd_parameters->seg_rd_param[segment_id].vbp_thresholds[i >> 2]) {
         if (i < 4)
           force_split[5 + ((local_row / 2) * 4 + (local_col / 2))] = 1; // 16X16
-        if (i < 8)
-          force_split[1 + ((local_row / 4) * 2 + (local_col / 4))] = 1; // 32X32
+        force_split[1 + ((local_row / 4) * 2 + (local_col / 4))] = 1; // 32X32
         force_split[0] = 1; // 64X64
       } else if (i == 2 && segment_id == 0 &&
-          variance > rd_parameters->seg_rd_param[segment_id].vbp_thresholds[1]) {
+          variance >= rd_parameters->seg_rd_param[segment_id].vbp_thresholds[1]) {
         int minmax = compute_minmax_8x8(src, ref, stride);
 
         if (minmax > rd_parameters->vbp_threshold_minmax) {
@@ -829,22 +826,63 @@ void vp9_choose_partitions(__global uchar *src,
     i <<= 1;
   }
 
-end:
-
+select_partitions:
+  barrier(CLK_LOCAL_MEM_FENCE);
   if (local_col == 0 && local_row == 0) {
     if (force_split[0] == 0) {
-      gpu_input[0].do_compute = GPU_BLOCK_64X64;
-      gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+      int sum_1, sum_2;
+      uint32_t sse_1, sse_2;
 
-      gpu_input[1].do_compute = GPU_BLOCK_64X64;
-      gpu_input[1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+      // check for 64X64 partitions
+      sse_1 = sse_array[2][0] + sse_array[2][2];
+      sum_1 = sum_array[2][0] + sum_array[2][2];
+      sse_2 = sse_array[2][1] + sse_array[2][3];
+      sum_2 = sum_array[2][1] + sum_array[2][3];
+      variance = get_variance(sse_1 + sse_2, sum_1 + sum_2, 6);
+      if (variance < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2]) {
+        gpu_input[0].do_compute = GPU_BLOCK_64X64;
+        gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+        gpu_input[1].do_compute = GPU_BLOCK_64X64;
+        gpu_input[1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+        gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_64X64;
+        gpu_input[gpu_input_stride].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+        gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_64X64;
+        gpu_input[gpu_input_stride + 1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+      }
+      else {
+        int var1, var2;
 
-      gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_64X64;
-      gpu_input[gpu_input_stride].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+        force_split[0] = 1;
+        var1 = get_variance(sse_1, sum_1, 5);
+        var2 = get_variance(sse_2, sum_2, 5);
+        if (var1 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2] &&
+            var2 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2]) {
+          gpu_input[0].do_compute = GPU_BLOCK_INVALID;
+          gpu_input[1].do_compute = GPU_BLOCK_INVALID;
+          gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_INVALID;
+          gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_INVALID;
+          force_split[0] = 0;
+        } else {
+          sse_1 = sse_array[2][0] + sse_array[2][1];
+          sum_1 = sum_array[2][0] + sum_array[2][1];
+          sse_2 = sse_array[2][2] + sse_array[2][3];
+          sum_2 = sum_array[2][2] + sum_array[2][3];
+          var1 = get_variance(sse_1, sum_1, 5);
+          var2 = get_variance(sse_2, sum_2, 5);
+          if (var1 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2] &&
+              var2 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2]) {
+            gpu_input[0].do_compute = GPU_BLOCK_INVALID;
+            gpu_input[1].do_compute = GPU_BLOCK_INVALID;
+            gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_INVALID;
+            gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_INVALID;
+            force_split[0] = 0;
+          }
+        }
+      }
+    }
 
-      gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_64X64;
-      gpu_input[gpu_input_stride + 1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
-    } else {
+    if (force_split[0] == 1) {
+      // check for 32X32 partitions
       if (force_split[1] == 0) {
         gpu_input[0].do_compute = GPU_BLOCK_32X32;
         gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;

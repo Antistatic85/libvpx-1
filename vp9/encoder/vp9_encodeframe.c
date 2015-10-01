@@ -922,14 +922,14 @@ gpu_marker:
                             sum8x8);
         fill_variance_tree(&vt.split[i].split[j], BLOCK_16X16);
         get_variance(&vt.split[i].split[j].part_variances.none);
-        if (vt.split[i].split[j].part_variances.none.variance >
+        if (vt.split[i].split[j].part_variances.none.variance >=
             thresholds[2]) {
           // 16X16 variance is above threshold for split, so force split to 8x8
           // for this 16x16 block (this also forces splits for upper levels).
           force_split[split_index] = 1;
           force_split[i + 1] = 1;
           force_split[0] = 1;
-        } else if (vt.split[i].split[j].part_variances.none.variance >
+        } else if (vt.split[i].split[j].part_variances.none.variance >=
                    thresholds[1] &&
                    !cyclic_refresh_segment_id_boosted(segment_id)) {
           // We have some nominal amount of 16x16 variance (based on average),
@@ -989,7 +989,7 @@ gpu_marker:
     // to split. This also forces a split on the upper (64x64) level.
     if (!force_split[i + 1]) {
       get_variance(&vt.split[i].part_variances.none);
-      if (vt.split[i].part_variances.none.variance > thresholds[1]) {
+      if (vt.split[i].part_variances.none.variance >= thresholds[1]) {
         force_split[i + 1] = 1;
         force_split[0] = 1;
       }

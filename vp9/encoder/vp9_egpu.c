@@ -81,7 +81,7 @@ static void vp9_gpu_fill_segment_rd_parameters(VP9_COMP *cpi,
   }
   seg_rd->vbp_thresholds[0] = thresholds[2];
   seg_rd->vbp_thresholds[1] = thresholds[1];
-  seg_rd->vbp_thresholds[2] = thresholds[0] - 1;
+  seg_rd->vbp_thresholds[2] = thresholds[0];
 }
 
 static void vp9_write_partition_info(VP9_COMP *cpi, const TileInfo *const tile,
