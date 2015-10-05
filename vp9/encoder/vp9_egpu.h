@@ -21,7 +21,6 @@ extern "C" {
 #define GPU_INTER_MODES 2 // ZEROMV and NEWMV
 
 #define MAX_SUB_FRAMES 1
-#define CPU_SUB_FRAMES 0
 
 #define GPU_INTER_OFFSET(mode) ((mode) - ZEROMV)
 

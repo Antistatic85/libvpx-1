@@ -35,7 +35,7 @@ void vp9_enc_sync_read(VP9_COMP *cpi, int sb_row, int sb_col) {
 }
 
 // synchronize encoder threads
-void vp9_enc_sync_write(struct VP9_COMP *cpi, int sb_row) {
+void vp9_enc_sync_write(VP9_COMP *cpi, int sb_row) {
   int *const cur_sb_col = cpi->cur_sb_col + sb_row;
 
   // update the cur sb col

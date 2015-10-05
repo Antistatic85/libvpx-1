@@ -729,8 +729,16 @@ void vp9_choose_partitions(__global uchar *src,
 
   if (segment_id == CR_SEGMENT_ID_BASE &&
       gpu_output_pro_me->pred_mv_sad < rd_parameters->vbp_threshold_sad) {
-    force_split[0] = 0;
-    goto select_partitions;
+    gpu_input[0].do_compute = GPU_BLOCK_64X64;
+    gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+    gpu_input[1].do_compute = GPU_BLOCK_64X64;
+    gpu_input[1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+    gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_64X64;
+    gpu_input[gpu_input_stride].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+    gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_64X64;
+    gpu_input[gpu_input_stride + 1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+
+    return;
   }
 
   sum_array[0] = sum;

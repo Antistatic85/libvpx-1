@@ -385,8 +385,7 @@ static void vp9_opencl_alloc_buffers(VP9_COMP *cpi) {
   if (status != CL_SUCCESS)
     goto fail;
   // create output sub buffers for pro motion estimation
-  for (subframe_idx = CPU_SUB_FRAMES; subframe_idx < MAX_SUB_FRAMES;
-      ++subframe_idx) {
+  for (subframe_idx = 0; subframe_idx < MAX_SUB_FRAMES; ++subframe_idx) {
     cl_buffer_region sf_region;
     SubFrameInfo subframe;
     int block_row_offset;
@@ -447,8 +446,7 @@ static void vp9_opencl_alloc_buffers(VP9_COMP *cpi) {
     goto fail;
 
   // create output sub buffers
-  for (subframe_idx = CPU_SUB_FRAMES; subframe_idx < MAX_SUB_FRAMES;
-      ++subframe_idx) {
+  for (subframe_idx = 0; subframe_idx < MAX_SUB_FRAMES; ++subframe_idx) {
     cl_buffer_region sf_region;
     SubFrameInfo subframe;
     int block_row_offset;
@@ -504,8 +502,7 @@ static void vp9_opencl_free_buffers(VP9_COMP *cpi) {
       goto fail;
   }
 
-  for (subframe_id = CPU_SUB_FRAMES; subframe_id < MAX_SUB_FRAMES;
-      ++subframe_id) {
+  for (subframe_id = 0; subframe_id < MAX_SUB_FRAMES; ++subframe_id) {
     opencl_buffer *gpu_output_pro_me_sub_buffer =
         &eopencl->gpu_output_pro_me_sub_buffer[subframe_id];
 
@@ -528,8 +525,7 @@ static void vp9_opencl_free_buffers(VP9_COMP *cpi) {
   if (status != CL_SUCCESS)
     goto fail;
 
-  for (subframe_id = CPU_SUB_FRAMES; subframe_id < MAX_SUB_FRAMES;
-      ++subframe_id) {
+  for (subframe_id = 0; subframe_id < MAX_SUB_FRAMES; ++subframe_id) {
     opencl_buffer *gpu_output_me_sub_buffer =
         &eopencl->gpu_output_me_sub_buffer[subframe_id];
 
@@ -647,6 +643,8 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
   VP9_COMMON *const cm = &cpi->common;
   YV12_BUFFER_CONFIG *img_src = cpi->Source;
   YV12_BUFFER_CONFIG *frm_ref = get_ref_frame_buffer(cpi, LAST_FRAME);
+  opencl_buffer *gpu_output_pro_me_sub_buffer =
+        &eopencl->gpu_output_pro_me_sub_buffer[sub_frame_idx];
   int blocks_in_col, blocks_in_row;
   int block_row_offset;
   size_t local_size[2];
@@ -702,9 +700,7 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
   // before launching pro motion estimation kernels unmap the output buffers
 
   // release pro me gpu output buffer
-  if (vp9_opencl_unmap_buffer(
-      opencl, &eopencl->gpu_output_pro_me_sub_buffer[sub_frame_idx],
-      CL_FALSE)) {
+  if (vp9_opencl_unmap_buffer(opencl, gpu_output_pro_me_sub_buffer, CL_FALSE)) {
     assert(0);
   }
 
@@ -824,8 +820,6 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
     assert(status == CL_SUCCESS);
   }
 #endif
-  status = clFlush(opencl->cmd_queue);
-  assert(status == CL_SUCCESS);
 
   if (eopencl->event[sub_frame_idx] != NULL) {
     status = clReleaseEvent(eopencl->event[sub_frame_idx]);
@@ -833,8 +827,13 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
     assert(status == CL_SUCCESS);
   }
 
-  status = clEnqueueMarker(opencl->cmd_queue,
-                           &eopencl->event[sub_frame_idx]);
+  gpu_output_pro_me_sub_buffer->mapped_pointer =
+      clEnqueueMapBuffer(opencl->cmd_queue,
+                         gpu_output_pro_me_sub_buffer->opencl_mem,
+                         CL_FALSE,
+                         CL_MAP_READ,
+                         0, gpu_output_pro_me_sub_buffer->size, 0,
+                         NULL, &eopencl->event[sub_frame_idx], &status);
   assert(status == CL_SUCCESS);
 
   return;
