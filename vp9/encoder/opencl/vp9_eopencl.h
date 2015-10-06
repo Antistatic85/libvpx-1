@@ -21,7 +21,7 @@ extern "C" {
 #define NUM_PIXELS_PER_WORKITEM 8
 
 #define NUM_KERNELS_ME 6
-#define NUM_KERNELS_PRO_ME 6
+#define NUM_KERNELS_PRO_ME 5
 
 typedef struct {
   int sum;
@@ -58,8 +58,7 @@ typedef struct VP9_EOPENCL {
   opencl_buffer gpu_output_pro_me_sub_buffer[MAX_SUB_FRAMES];
 
   // gpu choose partitioning kernels
-  cl_kernel row_projection;
-  cl_kernel column_projection;
+  cl_kernel col_row_projection;
   cl_kernel vector_match;
   cl_kernel pro_motion_estimation;
   cl_kernel color_sensitivity;

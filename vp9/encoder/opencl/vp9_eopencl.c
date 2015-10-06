@@ -104,24 +104,16 @@ static void vp9_opencl_set_static_kernel_args(VP9_COMP *cpi) {
   // PRO ME KERNELS
 
   // project Source SB Cols of each SB on to a horizontal plane
-  status = clSetKernelArg(eopencl->row_projection, 2, sizeof(cl_int),
+  status = clSetKernelArg(eopencl->col_row_projection, 2, sizeof(cl_int),
                           &y_stride);
-  status |= clSetKernelArg(eopencl->row_projection, 3, sizeof(cl_mem),
+  status |= clSetKernelArg(eopencl->col_row_projection, 3, sizeof(cl_mem),
                            &eopencl->src_1d_set[0]);
-  status |= clSetKernelArg(eopencl->row_projection, 4, sizeof(cl_mem),
+  status |= clSetKernelArg(eopencl->col_row_projection, 4, sizeof(cl_mem),
                            &eopencl->pred_1d_set[0]);
-  assert(status == CL_SUCCESS);
-
-  // project Source SB Rows of each SB on to a vertical plane
-  status = clSetKernelArg(eopencl->column_projection, 2, sizeof(cl_int),
-                          &y_stride);
-  status |= clSetKernelArg(eopencl->column_projection, 3, sizeof(cl_mem),
+  status |= clSetKernelArg(eopencl->col_row_projection, 5, sizeof(cl_mem),
                            &eopencl->src_1d_set[1]);
-  status |= clSetKernelArg(eopencl->column_projection, 4, sizeof(cl_mem),
+  status |= clSetKernelArg(eopencl->col_row_projection, 6, sizeof(cl_mem),
                            &eopencl->pred_1d_set[1]);
-  op_stride = ((mi_rows >> MI_BLOCK_SIZE_LOG2) + 1) * 64;
-  status |= clSetKernelArg(eopencl->column_projection, 5, sizeof(cl_int),
-                           &op_stride);
   assert(status == CL_SUCCESS);
 
   // vector match x, y
@@ -135,9 +127,6 @@ static void vp9_opencl_set_static_kernel_args(VP9_COMP *cpi) {
                            &eopencl->pred_1d_set[1]);
   status |= clSetKernelArg(eopencl->vector_match, 4, sizeof(cl_mem),
                            gpu_op_pro_me);
-  op_stride = (mi_rows >> MI_BLOCK_SIZE_LOG2) * 64;
-  status |= clSetKernelArg(eopencl->vector_match, 5, sizeof(cl_int),
-                           &op_stride);
   assert(status == CL_SUCCESS);
 
   // Pro Motion Estimation
@@ -255,16 +244,9 @@ static void vp9_opencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
   cl_int status;
 
   // project Source SB Cols of each SB on to a horizontal plane
-  status = clSetKernelArg(eopencl->row_projection, 0, sizeof(cl_mem),
+  status = clSetKernelArg(eopencl->col_row_projection, 0, sizeof(cl_mem),
                           &img_src->gpu_mem);
-  status |= clSetKernelArg(eopencl->row_projection, 1, sizeof(cl_mem),
-                           &frm_ref->gpu_mem);
-  assert(status == CL_SUCCESS);
-
-  // project Source SB Rows of each SB on to a vertical plane
-  status = clSetKernelArg(eopencl->column_projection, 0, sizeof(cl_mem),
-                          &img_src->gpu_mem);
-  status |= clSetKernelArg(eopencl->column_projection, 1, sizeof(cl_mem),
+  status |= clSetKernelArg(eopencl->col_row_projection, 1, sizeof(cl_mem),
                            &frm_ref->gpu_mem);
   assert(status == CL_SUCCESS);
 
@@ -348,33 +330,35 @@ static void vp9_opencl_alloc_buffers(VP9_COMP *cpi) {
   int blocks_in_row;
   int alloc_size;
   int subframe_idx;
+  int projection_buf_size;
 
   blocks_in_col = cm->mi_rows >> MI_BLOCK_SIZE_LOG2;
   blocks_in_row = cm->mi_cols >> MI_BLOCK_SIZE_LOG2;
   alloc_size = blocks_in_row * blocks_in_col;
 
   // alloc buffer for 1D src and pred buffers for pro motion estimation
+  projection_buf_size = (blocks_in_row + 1) * 64 * (blocks_in_col + 1);
   eopencl->pred_1d_set[0] = clCreateBuffer(
       opencl->context, CL_MEM_READ_WRITE,
-      (blocks_in_row * 64 + 64) * blocks_in_col * sizeof(int16_t), NULL, &status);
+      projection_buf_size * sizeof(int16_t), NULL, &status);
   if (status != CL_SUCCESS)
     goto fail;
 
   eopencl->src_1d_set[0] = clCreateBuffer(
       opencl->context, CL_MEM_READ_WRITE,
-      (blocks_in_row * 64) * blocks_in_col * sizeof(int16_t), NULL, &status);
+      projection_buf_size * sizeof(int16_t), NULL, &status);
   if (status != CL_SUCCESS)
     goto fail;
 
   eopencl->pred_1d_set[1] = clCreateBuffer(
       opencl->context, CL_MEM_READ_WRITE,
-      (blocks_in_col * 64 + 64) * blocks_in_row * sizeof(int16_t), NULL, &status);
+      projection_buf_size * sizeof(int16_t), NULL, &status);
   if (status != CL_SUCCESS)
     goto fail;
 
   eopencl->src_1d_set[1] = clCreateBuffer(
       opencl->context, CL_MEM_READ_WRITE,
-      (blocks_in_col * 64) * blocks_in_row * sizeof(int16_t), NULL, &status);
+      projection_buf_size * sizeof(int16_t), NULL, &status);
   if (status != CL_SUCCESS)
     goto fail;
 
@@ -714,35 +698,19 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
   }
 
   // project Source/Reference SB Cols of each SB on to a horizontal plane
-  local_size[0] = 8;
+  local_size[0] = 64;
   local_size[1] = 1;
 
-  global_size[0] = ((blocks_in_row + 1) * local_size[0]);
-  global_size[1] = (blocks_in_col * local_size[1]);
+  global_size[0] = (blocks_in_row + 1) * local_size[0];
+  global_size[1] = (blocks_in_col + 1) * local_size[1];
 
   global_offset[0] = 0;
   global_offset[1] = (block_row_offset * local_size[1]);
 
   status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->row_projection,
+                                  eopencl->col_row_projection,
                                   2, global_offset, global_size, local_size,
                                   0, NULL, event_ptr[0]);
-  assert(status == CL_SUCCESS);
-
-  // project Source/Reference SB Rows of each SB on to a vertical plane
-  local_size[0] = 1;
-  local_size[1] = 64;
-
-  global_size[0] = (blocks_in_row * local_size[0]);
-  global_size[1] = ((blocks_in_col + 1) * local_size[1]);
-
-  global_offset[0] = 0;
-  global_offset[1] = (block_row_offset * local_size[1]);
-
-  status = clEnqueueNDRangeKernel(opencl->cmd_queue,
-                                  eopencl->column_projection,
-                                  2, global_offset, global_size, local_size,
-                                  0, NULL, event_ptr[1]);
   assert(status == CL_SUCCESS);
 
   // vector match x, y
@@ -758,7 +726,7 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
   status = clEnqueueNDRangeKernel(opencl->cmd_queue,
                                   eopencl->vector_match,
                                   2, global_offset, global_size, local_size,
-                                  0, NULL, event_ptr[2]);
+                                  0, NULL, event_ptr[1]);
   assert(status == CL_SUCCESS);
 
   // Pro Motion Estimation
@@ -774,7 +742,7 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
   status = clEnqueueNDRangeKernel(opencl->cmd_queue,
                                   eopencl->pro_motion_estimation,
                                   2, global_offset, global_size, local_size,
-                                  0, NULL, event_ptr[3]);
+                                  0, NULL, event_ptr[2]);
   assert(status == CL_SUCCESS);
 
   // Color Sensitivity
@@ -790,7 +758,7 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
   status = clEnqueueNDRangeKernel(opencl->cmd_queue,
                                   eopencl->color_sensitivity,
                                   2, global_offset, global_size, local_size,
-                                  0, NULL, event_ptr[4]);
+                                  0, NULL, event_ptr[3]);
   assert(status == CL_SUCCESS);
 
   // fill sum 8x8
@@ -806,7 +774,7 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
   status = clEnqueueNDRangeKernel(opencl->cmd_queue,
                                   eopencl->choose_partitions,
                                   2, global_offset, global_size, local_size,
-                                  0, NULL, event_ptr[5]);
+                                  0, NULL, event_ptr[4]);
   assert(status == CL_SUCCESS);
 
 #if OPENCL_PROFILING
@@ -1104,11 +1072,7 @@ void vp9_eopencl_remove(VP9_COMP *cpi) {
     }
   }
 
-  status = clReleaseKernel(eopencl->row_projection);
-  if (status != CL_SUCCESS)
-    goto fail;
-
-  status = clReleaseKernel(eopencl->column_projection);
+  status = clReleaseKernel(eopencl->col_row_projection);
   if (status != CL_SUCCESS)
     goto fail;
 
@@ -1518,13 +1482,8 @@ static int vp9_eopencl_build_choose_partitioning_kernel(VP9_COMP *cpi) {
     goto fail;
   }
 
-  eopencl->row_projection = clCreateKernel(program, "vp9_row_projection",
+  eopencl->col_row_projection = clCreateKernel(program, "vp9_col_row_projection",
                                            &status);
-  if (status != CL_SUCCESS)
-    goto fail;
-
-  eopencl->column_projection = clCreateKernel(program, "vp9_column_projection",
-                                              &status);
   if (status != CL_SUCCESS)
     goto fail;
 

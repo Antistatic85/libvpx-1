@@ -421,15 +421,17 @@ int vector_match(__global ushort *proj_ref,
   return (center - (bw >> 1));
 }
 
-void row_project(__global uchar *buff, ushort8 *sum, int stride, int height) {
+ushort8 row_project(__global uchar *buff, int stride, int height) {
   int idx;
   uchar8 ref;
+  ushort8 sum = 0;
 
   for (idx = 0; idx < height; idx += 1) {
     ref = vload8(0, buff);
-    *sum += convert_ushort8(ref);
+    sum += convert_ushort8(ref);
     buff += stride;
   }
+  return sum;
 }
 
 ushort column_project(__global uchar *buff, int width) {
@@ -445,66 +447,75 @@ ushort column_project(__global uchar *buff, int width) {
   ushort4 final_sad = convert_ushort4(sum.s0123) + convert_ushort4(sum.s4567);
   final_sad.s01 = final_sad.s01 + final_sad.s23;
 
-  return (final_sad.s0 + final_sad.s1);
+  return ((final_sad.s0 + final_sad.s1) >> (short)5);
 }
 
 //=====   KERNELS   =====
 //------------------------------
 __kernel
-void vp9_column_projection(__global uchar *src,
-                           __global uchar *ref,
-                           int in_stride,
-                           __global ushort *src_proj,
-                           __global ushort *ref_proj,
-                           int out_stride_ref) {
-  int global_col = get_global_id(0);
+void vp9_col_row_projection(__global uchar *src_frame,
+                        __global uchar *ref_frame,
+                        int in_stride,
+                        __global ushort *src_proj_r,
+                        __global ushort *ref_proj_r,
+                        __global ushort *src_proj_c,
+                        __global ushort *ref_proj_c) {
   int global_row = get_global_id(1);
-  int global_offset = (global_row * in_stride) +  (global_col * BLOCK_SIZE_IN_PIXELS);
-  int out_stride_src = out_stride_ref - BLOCK_SIZE_IN_PIXELS;
+  int local_col = get_local_id(0);
+  int group_col = get_group_id(0);
+  int global_offset = (global_row * in_stride * BLOCK_SIZE_IN_PIXELS) +
+      (local_col * in_stride) + (group_col * BLOCK_SIZE_IN_PIXELS);
+  int out_stride = get_num_groups(1) * BLOCK_SIZE_IN_PIXELS;
+  __local ushort8 intermediate_sum[8 * 4 * 2];
+  __global uchar *src, *ref;
 
+  // Column projection
   global_offset += (VP9_ENC_BORDER_IN_PIXELS * in_stride) + VP9_ENC_BORDER_IN_PIXELS;
 
-  if (get_group_id(1) < get_num_groups(1) - 1) {
-    src += global_offset;
-    src_proj[global_col * out_stride_src + global_row] =
-        column_project(src, BLOCK_SIZE_IN_PIXELS) >> 5;
-  }
+  src = src_frame + global_offset;
+  src_proj_c[group_col * out_stride + (global_row * BLOCK_SIZE_IN_PIXELS) + local_col] =
+      column_project(src, BLOCK_SIZE_IN_PIXELS);
 
-  ref += global_offset - (32 * in_stride);
-  ref_proj[global_col * out_stride_ref + global_row] =
-      column_project(ref, BLOCK_SIZE_IN_PIXELS) >> 5;
-}
+  ref = ref_frame + global_offset - (32 * in_stride);
+  ref_proj_c[group_col * out_stride + (global_row * BLOCK_SIZE_IN_PIXELS) + local_col] =
+      column_project(ref, BLOCK_SIZE_IN_PIXELS);
 
-__kernel
-void vp9_row_projection(__global uchar *src,
-                        __global uchar *ref,
-                        int in_stride,
-                        __global ushort *src_proj,
-                        __global ushort *ref_proj) {
-  int global_col = get_global_id(0);
-  int global_row = get_global_id(1);
-  int out_stride_ref = get_num_groups(0) * BLOCK_SIZE_IN_PIXELS;
-  int out_stride_src = out_stride_ref - BLOCK_SIZE_IN_PIXELS;
-  ushort8 sum;
-  int global_offset = (global_row * in_stride * BLOCK_SIZE_IN_PIXELS) +
-      (global_col * NUM_PIXELS_PER_WORKITEM);
+  // Row projection
+  if (local_col >= 32)
+    goto barrier_sync;
+
+  int col_offset = (group_col * BLOCK_SIZE_IN_PIXELS) +
+      ((local_col / 4) * NUM_PIXELS_PER_WORKITEM);
+  int row_offset = ((global_row * BLOCK_SIZE_IN_PIXELS) +
+      ((local_col & 3) * (BLOCK_SIZE_IN_PIXELS / 4))) * in_stride;
+  global_offset = row_offset + col_offset;
   global_offset += VP9_ENC_BORDER_IN_PIXELS * in_stride + VP9_ENC_BORDER_IN_PIXELS;
+  out_stride = get_num_groups(0) * BLOCK_SIZE_IN_PIXELS;
 
-  if (get_group_id(0) < get_num_groups(0) - 1) {
-    sum = 0;
-    src += global_offset;
-    row_project(src, &sum, in_stride, BLOCK_SIZE_IN_PIXELS);
+  src = src_frame + global_offset;
+  intermediate_sum[2 * local_col] =
+      row_project(src, in_stride, BLOCK_SIZE_IN_PIXELS / 4);
+
+  ref = ref_frame + global_offset - 32;
+  intermediate_sum[2 * local_col + 1] =
+      row_project(ref, in_stride, BLOCK_SIZE_IN_PIXELS / 4);
+
+barrier_sync:
+  barrier(CLK_LOCAL_MEM_FENCE);
+
+  if (((local_col & 3) == 0) && local_col < 32) {
+    int local_offset = 2 * local_col;
+    ushort8 sum = intermediate_sum[local_offset] + intermediate_sum[local_offset + 2] +
+        intermediate_sum[local_offset + 4] + intermediate_sum[local_offset + 6];
     sum >>= (ushort)5;
-    vstore8(sum, 0, &src_proj[global_row * out_stride_src +
-                              (global_col * NUM_PIXELS_PER_WORKITEM)]);
-  }
+    vstore8(sum, 0, &src_proj_r[global_row * out_stride + col_offset]);
 
-  sum = 0;
-  ref += global_offset - 32;
-  row_project(ref, &sum, in_stride, BLOCK_SIZE_IN_PIXELS);
-  sum >>= (ushort)5;
-  vstore8(sum, 0, &ref_proj[global_row * out_stride_ref +
-                            (global_col * NUM_PIXELS_PER_WORKITEM)]);
+    local_offset += 1;
+    sum = intermediate_sum[local_offset] + intermediate_sum[local_offset + 2] +
+        intermediate_sum[local_offset + 4] + intermediate_sum[local_offset + 6];
+    sum >>= (ushort)5;
+    vstore8(sum, 0, &ref_proj_r[global_row * out_stride + col_offset]);
+  }
 }
 
 __kernel
@@ -512,8 +523,7 @@ void vp9_vector_match(__global ushort *proj_src_h,
                       __global ushort *proj_ref_h,
                       __global ushort *proj_src_v,
                       __global ushort *proj_ref_v,
-                      __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me,
-                      int stride_src_v) {
+                      __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me) {
   __local int intermediate_int[2];
   int group_col = get_group_id(0);
   int group_stride = get_num_groups(0);
@@ -525,28 +535,23 @@ void vp9_vector_match(__global ushort *proj_src_h,
   gpu_output_pro_me += global_row * group_stride + group_col;
 
   {
-    int stride_src_h = get_num_groups(0) * BLOCK_SIZE_IN_PIXELS;
-    int stride_ref_h = (get_num_groups(0) + 1) * BLOCK_SIZE_IN_PIXELS;
-    int offset_src_h = (global_row * stride_src_h) + (group_col * BLOCK_SIZE_IN_PIXELS) +
-        (local_col * NUM_PIXELS_PER_WORKITEM);
-    int offset_ref_h = (global_row * stride_ref_h) + (group_col * BLOCK_SIZE_IN_PIXELS) +
+    int stride_h = (get_num_groups(0) + 1) * BLOCK_SIZE_IN_PIXELS;
+    int offset_h = (global_row * stride_h) + (group_col * BLOCK_SIZE_IN_PIXELS) +
         (local_col * NUM_PIXELS_PER_WORKITEM);
 
-    proj_src_h += offset_src_h;
-    proj_ref_h += offset_ref_h;
+    proj_src_h += offset_h;
+    proj_ref_h += offset_h;
 
     thismv.col = vector_match(proj_ref_h, proj_src_h, intermediate_int);
   }
 
   {
-    int stride_ref_v = stride_src_v + BLOCK_SIZE_IN_PIXELS;
-    int offset_src_v = (group_col * stride_src_v) + (global_row * 64) +
-        (local_col * NUM_PIXELS_PER_WORKITEM);
-    int offset_ref_v = (group_col * stride_ref_v) + (global_row * 64) +
+    int stride_v = (get_num_groups(1) + 1) * BLOCK_SIZE_IN_PIXELS;
+    int offset_v = (group_col * stride_v) + (global_row * BLOCK_SIZE_IN_PIXELS) +
         (local_col * NUM_PIXELS_PER_WORKITEM);
 
-    proj_src_v += offset_src_v;
-    proj_ref_v += offset_ref_v;
+    proj_src_v += offset_v;
+    proj_ref_v += offset_v;
 
     thismv.row = vector_match(proj_ref_v, proj_src_v, intermediate_int);
   }
