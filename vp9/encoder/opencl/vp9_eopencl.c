@@ -240,6 +240,7 @@ static void vp9_opencl_set_static_kernel_args(VP9_COMP *cpi) {
 static void vp9_opencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
   VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
   YV12_BUFFER_CONFIG *img_src = cpi->Source;
+  YV12_BUFFER_CONFIG *last_img_src = cpi->Last_Source;
   YV12_BUFFER_CONFIG *frm_ref = get_ref_frame_buffer(cpi, LAST_FRAME);
   cl_int status;
 
@@ -247,21 +248,22 @@ static void vp9_opencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
   status = clSetKernelArg(eopencl->col_row_projection, 0, sizeof(cl_mem),
                           &img_src->gpu_mem);
   status |= clSetKernelArg(eopencl->col_row_projection, 1, sizeof(cl_mem),
-                           &frm_ref->gpu_mem);
+                           &last_img_src->gpu_mem);
+
   assert(status == CL_SUCCESS);
 
   // Pro Motion Estimation
   status = clSetKernelArg(eopencl->pro_motion_estimation, 0, sizeof(cl_mem),
                           &img_src->gpu_mem);
   status |= clSetKernelArg(eopencl->pro_motion_estimation, 1, sizeof(cl_mem),
-                           &frm_ref->gpu_mem);
+                           &last_img_src->gpu_mem);
   assert(status == CL_SUCCESS);
 
   // color sensitivity
   status = clSetKernelArg(eopencl->color_sensitivity, 0, sizeof(cl_mem),
                           &img_src->gpu_mem);
   status |= clSetKernelArg(eopencl->color_sensitivity, 1, sizeof(cl_mem),
-                           &frm_ref->gpu_mem);
+                           &last_img_src->gpu_mem);
   assert(status == CL_SUCCESS);
 
   // choose partitions
@@ -626,6 +628,7 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
   VP9_OPENCL *const opencl = eopencl->opencl;
   VP9_COMMON *const cm = &cpi->common;
   YV12_BUFFER_CONFIG *img_src = cpi->Source;
+  YV12_BUFFER_CONFIG *last_img_src = cpi->Last_Source;
   YV12_BUFFER_CONFIG *frm_ref = get_ref_frame_buffer(cpi, LAST_FRAME);
   opencl_buffer *gpu_output_pro_me_sub_buffer =
         &eopencl->gpu_output_pro_me_sub_buffer[sub_frame_idx];
@@ -679,6 +682,14 @@ static void vp9_opencl_execute_prologue(VP9_COMP *cpi, int sub_frame_idx) {
     assert(status == CL_SUCCESS);
     frm_ref->buffer_alloc = frm_ref->y_buffer = frm_ref->u_buffer =
         frm_ref->v_buffer = NULL;
+  }
+  // release last source buffer to GPU
+  if (last_img_src->buffer_alloc != NULL && cm->last_frame_type == KEY_FRAME) {
+    status = clEnqueueUnmapMemObject(opencl->cmd_queue, last_img_src->gpu_mem,
+                                     last_img_src->buffer_alloc, 0, NULL, NULL);
+    assert(status == CL_SUCCESS);
+    last_img_src->buffer_alloc = last_img_src->y_buffer = last_img_src->u_buffer =
+        last_img_src->v_buffer = NULL;
   }
 
   // before launching pro motion estimation kernels unmap the output buffers
@@ -812,10 +823,8 @@ static void vp9_opencl_execute(VP9_COMP *cpi, int subframe_idx) {
   VP9_OPENCL *const opencl = eopencl->opencl;
 
   VP9_COMMON *const cm = &cpi->common;
-  opencl_buffer *gpu_input = &eopencl->gpu_input;
   opencl_buffer *gpu_output_me_sub_buffer =
       &eopencl->gpu_output_me_sub_buffer[subframe_idx];
-  opencl_buffer *rdopt_parameters = &eopencl->rdopt_parameters;
   SubFrameInfo subframe;
   int subframe_height;
   int blocks_in_col, blocks_in_row;
@@ -838,14 +847,6 @@ static void vp9_opencl_execute(VP9_COMP *cpi, int subframe_idx) {
 #else
     event_ptr[i] = NULL;
 #endif
-  }
-
-  if (vp9_opencl_unmap_buffer(opencl, rdopt_parameters, CL_FALSE)) {
-    assert(0);
-  }
-
-  if (vp9_opencl_unmap_buffer(opencl, gpu_input, CL_FALSE)) {
-    assert(0);
   }
 
   if (vp9_opencl_unmap_buffer(opencl, gpu_output_me_sub_buffer, CL_FALSE)) {

@@ -739,7 +739,7 @@ int choose_partitioning(VP9_COMP *cpi,
     // TODO(marpan): If that assumption is broken, we need to revisit this code.
     MB_MODE_INFO *mbmi = &xd->mi[0]->mbmi;
     unsigned int uv_sad;
-    const YV12_BUFFER_CONFIG *yv12 = get_ref_frame_buffer(cpi, LAST_FRAME);
+    const YV12_BUFFER_CONFIG *yv12 = cpi->Last_Source;
 
     unsigned int y_sad;
     const BLOCK_SIZE bsize = BLOCK_32X32
@@ -774,11 +774,6 @@ int choose_partitioning(VP9_COMP *cpi,
           (cpi->gpu_output_pro_me_base[index].color_sensitivity >> 1) & 1;
       y_sad = cpi->gpu_output_pro_me_base[index].pred_mv_sad;
       sum8x8 = &cpi->gpu_output_pro_me_base[index].sum8x8;
-
-      vp9_setup_pre_planes(xd, 0, yv12, mi_row, mi_col,
-                           &cm->frame_refs[LAST_FRAME - 1].sf);
-
-      vp9_build_inter_predictors_sby(xd, mi_row, mi_col, BLOCK_64X64);
 
       goto gpu_marker;
     }
@@ -827,6 +822,10 @@ gpu_marker:
         vp9_zero(cpi->pred_mv_map[sb_index]);
       }
     }
+
+    vp9_setup_pre_planes(xd, 0, get_ref_frame_buffer(cpi, LAST_FRAME),
+                         mi_row, mi_col, &cm->frame_refs[LAST_FRAME - 1].sf);
+    vp9_build_inter_predictors_sby(xd, mi_row, mi_col, BLOCK_64X64);
 
     d = xd->plane[0].dst.buf;
     dp = xd->plane[0].dst.stride;

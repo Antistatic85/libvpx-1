@@ -297,6 +297,7 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi) {
 
   // re-map source and reference pointers before starting cpu side processing
   vp9_acquire_frame_buffer(cm, cpi->Source);
+  vp9_acquire_frame_buffer(cm, cpi->Last_Source);
   vp9_acquire_frame_buffer(cm, get_ref_frame_buffer(cpi, LAST_FRAME));
 }
 
