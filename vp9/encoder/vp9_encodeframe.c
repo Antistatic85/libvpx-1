@@ -825,6 +825,7 @@ gpu_marker:
 
     vp9_setup_pre_planes(xd, 0, get_ref_frame_buffer(cpi, LAST_FRAME),
                          mi_row, mi_col, &cm->frame_refs[LAST_FRAME - 1].sf);
+
     vp9_build_inter_predictors_sby(xd, mi_row, mi_col, BLOCK_64X64);
 
     d = xd->plane[0].dst.buf;

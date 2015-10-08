@@ -20,7 +20,7 @@ extern "C" {
 
 #define GPU_INTER_MODES 2 // ZEROMV and NEWMV
 
-#define MAX_SUB_FRAMES 1
+#define MAX_SUB_FRAMES 3
 
 #define GPU_INTER_OFFSET(mode) ((mode) - ZEROMV)
 
@@ -110,7 +110,7 @@ typedef struct VP9_EGPU {
   void (*acquire_rd_param_buffer)(struct VP9_COMP *cpi, void **host_ptr);
   void (*enc_sync_read)(struct VP9_COMP *cpi, int event_id, int offset);
   void (*execute)(struct VP9_COMP *cpi, int sub_frame_idx);
-  void (*execute_prologue)(struct VP9_COMP *cpi, int sub_frame_idx);
+  void (*execute_prologue)(struct VP9_COMP *cpi);
   void (*remove)(struct VP9_COMP *cpi);
 } VP9_EGPU;
 

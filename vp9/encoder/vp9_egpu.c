@@ -287,10 +287,9 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi) {
   // fill rd param info
   vp9_gpu_fill_rd_parameters(cpi);
 
+  // enqueue prologue kernels for gpu
+  egpu->execute_prologue(cpi);
   for (subframe_idx = 0; subframe_idx < MAX_SUB_FRAMES; subframe_idx++) {
-    // enqueue prologue kernels for gpu
-    egpu->execute_prologue(cpi, subframe_idx);
-
     // enqueue kernels for gpu
     egpu->execute(cpi, subframe_idx);
   }
@@ -390,18 +389,20 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
     if (!x->data_parallel_processing && x->use_gpu) {
       VP9_EGPU *egpu = &cpi->egpu;
       TileInfo tile;
-      GPU_OUTPUT_PRO_ME *gpu_output_pro_me_subframe;
 
       egpu->enc_sync_read(cpi, subframe_idx, 0);
 
       egpu->acquire_output_pro_me_buffer(
-          cpi, (void **) &gpu_output_pro_me_subframe, subframe_idx);
-      if (subframe_idx == 0) {
-        cpi->gpu_output_pro_me_base = gpu_output_pro_me_subframe;
-      } else {
+          cpi, (void **) &cpi->gpu_output_pro_me_base, 0);
+
+      if (mi_row == subframe.mi_row_start) {
+        GPU_OUTPUT_PRO_ME *gpu_output_pro_me_subframe;
         const int sb_row_index = mi_row >> MI_BLOCK_SIZE_LOG2;
         const int buffer_offset = (cm->mi_cols >> MI_BLOCK_SIZE_LOG2)
                                                        * sb_row_index;
+
+        egpu->acquire_output_pro_me_buffer(
+            cpi, (void **) &gpu_output_pro_me_subframe, subframe_idx);
 
         (void) buffer_offset;
         assert(gpu_output_pro_me_subframe - cpi->gpu_output_pro_me_base ==

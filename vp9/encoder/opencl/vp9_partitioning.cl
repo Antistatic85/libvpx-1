@@ -408,12 +408,12 @@ ushort column_project(__global uchar *buff, int width) {
 //------------------------------
 __kernel
 void vp9_col_row_projection(__global uchar *src_frame,
-                        __global uchar *ref_frame,
-                        int in_stride,
-                        __global ushort *src_proj_r,
-                        __global ushort *ref_proj_r,
-                        __global ushort *src_proj_c,
-                        __global ushort *ref_proj_c) {
+                            __global uchar *ref_frame,
+                            int in_stride,
+                            __global ushort *src_proj_r,
+                            __global ushort *ref_proj_r,
+                            __global ushort *src_proj_c,
+                            __global ushort *ref_proj_c) {
   int global_row = get_global_id(1);
   int local_col = get_local_id(0);
   int group_col = get_group_id(0);
