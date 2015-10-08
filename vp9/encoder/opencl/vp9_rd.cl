@@ -179,49 +179,26 @@ __constant char8 filter[2][16] =
     *psse = sse.s0;
 
 #define MODEL_RD_FOR_SB_Y_LARGE                                             \
-  if (sse > (var << 2))                                                     \
-    tx_size = TX_16X16;                                                     \
-  else                                                                      \
-    tx_size = TX_8X8;                                                       \
-  {                                                                         \
-    int num8x8 = 1 << (bw + bh - 2);                                        \
-    uint32_t sse16x16[16];                                                  \
-    int sum16x16[16];                                                       \
-    uint32_t var16x16[16];                                                  \
-    int num16x16 = num8x8 >> 2;                                             \
-                                                                            \
-    int ac_test = 1;                                                        \
-    int dc_test = 1;                                                        \
-    int k;                                                                  \
-    int num = (tx_size == TX_8X8) ? num8x8 : num16x16;                      \
-    uint32_t *sse_tx = (tx_size == TX_8X8) ? sse8x8 : sse16x16;             \
-    uint32_t *var_tx = (tx_size == TX_8X8) ? var8x8 : var16x16;             \
-    if (tx_size >= TX_16X16) {                                              \
-      calculate_variance(bw, bh, TX_8X8, sse8x8, sum8x8, var16x16, sse16x16,\
-                         sum16x16);                                         \
+  skip_txfm = SKIP_TXFM_NONE;                                               \
+  for (k = 0; k < num; k++) {                                               \
+    if (!(var_tx[k] < ac_thr || var == 0)) {                                \
+      ac_test = 0;                                                          \
+      break;                                                                \
     }                                                                       \
-                                                                            \
-    skip_txfm = SKIP_TXFM_NONE;                                             \
-    for (k = 0; k < num; k++) {                                             \
-      if (!(var_tx[k] < ac_thr || var == 0)) {                              \
-        ac_test = 0;                                                        \
-        break;                                                              \
-      }                                                                     \
+  }                                                                         \
+  for (k = 0; k < num; k++) {                                               \
+    if (!(sse_tx[k] - var_tx[k] < dc_thr || sse == var)) {                  \
+      dc_test = 0;                                                          \
+      break;                                                                \
     }                                                                       \
-    for (k = 0; k < num; k++) {                                             \
-      if (!(sse_tx[k] - var_tx[k] < dc_thr || sse == var)) {                \
-        dc_test = 0;                                                        \
-        break;                                                              \
-      }                                                                     \
+  }                                                                         \
+  if (ac_test) {                                                            \
+    skip_txfm = SKIP_TXFM_AC_ONLY;                                          \
+    if (dc_test) {                                                          \
+      skip_txfm = SKIP_TXFM_AC_DC;                                          \
     }                                                                       \
-    if (ac_test) {                                                          \
-      skip_txfm = SKIP_TXFM_AC_ONLY;                                        \
-      if (dc_test) {                                                        \
-        skip_txfm = SKIP_TXFM_AC_DC;                                        \
-      }                                                                     \
-    } else if (dc_test) {                                                   \
-      skip_dc = 1;                                                          \
-    }                                                                       \
+  } else if (dc_test) {                                                     \
+    skip_dc = 1;                                                            \
   }                                                                         \
   if (skip_txfm == SKIP_TXFM_AC_DC) {                                       \
     actual_rate = 0;                                                        \
@@ -309,77 +286,37 @@ void calculate_variance(int bw, int bh, TX_SIZE tx_size,
   }
 }
 
-void vp9_variance_bxw(__global uchar *ref_frame,
-                      __global uchar *cur_frame,
-                      int *sum,
-                      uint32_t *sse,
-                      int stride,
-                      int width, int height) {
-  uchar8 src_load8, pred_load8;
-  short8 src_data8, pred_data8, e_data8, a_data8 = 0;
-  int4 b_data4;
-  int4 e_data4;
-  uint4 ase_data4 = 0;
-  int row, col;
-
-  for (row = 0; row < height; row += 1) {
-    for (col = 0; col < width; col += 8) {
-      src_load8 = vload8(0, cur_frame);
-      pred_load8 = vload8(0, ref_frame);
-
-      src_data8 = convert_short8(src_load8);
-      pred_data8 = convert_short8(pred_load8);
-      e_data8 = src_data8 - pred_data8;
-
-      a_data8 += e_data8;
-
-      e_data4 = convert_int4(e_data8.s0123);
-      ase_data4 +=  convert_uint4(e_data4 * e_data4);
-      e_data4 = convert_int4(e_data8.s4567);
-      ase_data4 +=  convert_uint4(e_data4 * e_data4);
-
-      cur_frame += 8;
-      ref_frame += 8;
-    }
-    cur_frame += stride - width;
-    ref_frame += stride - width;
-  }
-
-  b_data4.s0123 = convert_int4(a_data8.s0123) + convert_int4(a_data8.s4567);
-  b_data4.s01 = b_data4.s01 + b_data4.s23;
-  *sum = (int)b_data4.s0 + b_data4.s1;
-
-  ase_data4.s01 = ase_data4.s01 + ase_data4.s23;
-  ase_data4.s0 = ase_data4.s0 + ase_data4.s1;
-  *sse = ase_data4.s0;
-}
-
-void block_variance(__global uchar *ref_frame,
-                    __global uchar *cur_frame,
-                    int *sum,
-                    uint32_t *sse,
-                    int stride,
-                    unsigned int *sse8x8,
-                    int *sum8x8, unsigned int *var8x8) {
-  int w, h;
-  int i, j, k = 0;
-
-  w = h = BLOCK_SIZE_IN_PIXELS;
+inline void calculate_8x8_variance(__global uchar *ref_frame,
+                                   __global uchar *cur_frame,
+                                   unsigned int *sse,
+                                   int *sum,
+                                   int stride) {
+  short8 vsum = 0;
+  uint4 vsse = 0;
+  short row;
 
   *sse = 0;
   *sum = 0;
 
-  for (i = 0; i < h; i += 8) {
-    for (j = 0; j < w; j += 8) {
-      vp9_variance_bxw(ref_frame + stride * i + j,
-                       cur_frame + stride * i + j,
-                       &sum8x8[k], &sse8x8[k], stride, 8, 8);
-      *sse += sse8x8[k];
-      *sum += sum8x8[k];
-      var8x8[k] = sse8x8[k] - (((unsigned int)sum8x8[k] * sum8x8[k]) >> 6);
-      k++;
-    }
+  for(row = 0; row < 8; row++) {
+
+    uchar8 output = vload8(0, ref_frame);
+    ref_frame += stride;
+
+    uchar8 cur = vload8(0, cur_frame);
+    cur_frame += stride;
+
+    short8 diff = convert_short8(output) - convert_short8(cur);
+    vsum += diff;
+    vsse += convert_uint4(convert_int4(diff.s0123) * convert_int4(diff.s0123));
+    vsse += convert_uint4(convert_int4(diff.s4567) * convert_int4(diff.s4567));
   }
+  vsum.s0123 = vsum.s0123 + vsum.s4567;
+  vsum.s01 = vsum.s01 + vsum.s23;
+  *sum = vsum.s0 + vsum.s1;
+
+  vsse.s01 = vsse.s01 + vsse.s23;
+  *sse = vsse.s0 + vsse.s1;
 }
 
 TX_SIZE get_uv_tx_size(tx_size, bsize) {
@@ -666,6 +603,10 @@ void inter_prediction(__global uchar *ref_data,
 //=====   KERNELS   =====
 //------------------------------
 __kernel
+// PIXEL_ROWS_PER_WORKITEM should be exactly 16. Otherwise this kernel will fail
+__attribute__((reqd_work_group_size(BLOCK_SIZE_IN_PIXELS / NUM_PIXELS_PER_WORKITEM,
+                                    BLOCK_SIZE_IN_PIXELS / 16,
+                                    1)))
 void vp9_zero_motion_search(__global uchar *ref,
                             __global uchar *cur,
                             int stride,
@@ -675,24 +616,31 @@ void vp9_zero_motion_search(__global uchar *ref,
                             int64_t yplane_size, int64_t uvplane_size) {
   __global uchar *ref_frame = ref;
   __global uchar *cur_frame = cur;
-  uint32_t sse8x8[64], var8x8[64];
-  int sum8x8[64];
-  uint32_t sse, var;
-  int sum;
-  int bw, bh;
-  int frame_offset;
-  int global_col = get_global_id( 0 );
-  int global_row = get_global_id( 1 );
-  int global_stride = get_global_size( 0 );
+  uint sse_tmp;
+  int sum_tmp;
+  short bw;
+  int group_col = get_group_id(0);
+  int global_row = get_global_id(1);
+  int group_stride = get_num_groups(0);
   BLOCK_SIZE bsize;
-  int this_early_term = 0;
+  __local uint sse8x8[(BLOCK_SIZE_IN_PIXELS * BLOCK_SIZE_IN_PIXELS) / 64];
+  __local uint var8x8[(BLOCK_SIZE_IN_PIXELS * BLOCK_SIZE_IN_PIXELS) / 64];
+  __local int sum16x16[(BLOCK_SIZE_IN_PIXELS * BLOCK_SIZE_IN_PIXELS) / 256];
+  __local uint sse16x16[(BLOCK_SIZE_IN_PIXELS * BLOCK_SIZE_IN_PIXELS) / 256];
+  __local uint var16x16[(BLOCK_SIZE_IN_PIXELS * BLOCK_SIZE_IN_PIXELS) / 256];
+  __local uint sse_uv[2];
+  __local int sum_uv[2];
+  __local uint sse;
+  __local int sum;
 
 #if BLOCK_SIZE_IN_PIXELS == 64
   GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
-  int group_offset = (global_row * global_stride * 4 + global_col * 2);
+  int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
+      group_stride * 4 + group_col * 2);
 #else
   GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_32X32;
-  int group_offset = (global_row * global_stride + global_col);
+  int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
+      group_stride + group_col);
 #endif
 
   gpu_input += group_offset;
@@ -704,11 +652,16 @@ void vp9_zero_motion_search(__global uchar *ref,
   __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
       &rd_parameters->seg_rd_param[gpu_input->seg_id];
 
-  frame_offset = (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
-  frame_offset += (global_row * stride * BLOCK_SIZE_IN_PIXELS) + (global_col * BLOCK_SIZE_IN_PIXELS);
+  int local_col = get_local_id(0);
+  int local_row = get_local_id(1);
 
-  cur += frame_offset;
-  ref += frame_offset;
+  int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * stride) +
+                      (group_col * BLOCK_SIZE_IN_PIXELS) +
+                      (local_col * NUM_PIXELS_PER_WORKITEM);
+  global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
+
+  cur += global_offset;
+  ref += global_offset;
 
 #if BLOCK_SIZE_IN_PIXELS == 64
   bsize = BLOCK_64X64;
@@ -717,68 +670,69 @@ void vp9_zero_motion_search(__global uchar *ref,
 #endif
 
   bw = b_width_log2_lookup[bsize];
-  bh = b_height_log2_lookup[bsize];
 
-  block_variance(ref, cur, &sum, &sse, stride, sse8x8, sum8x8, var8x8);
-  var = sse - (((int64_t)sum * sum) >> (bw + bh + 4));
+  int offset_8x8 =
+      local_row * (BLOCK_SIZE_IN_PIXELS / NUM_PIXELS_PER_WORKITEM) * (PIXEL_ROWS_PER_WORKITEM / 8) + local_col;
+  int offset_16x16 =
+      local_row * (BLOCK_SIZE_IN_PIXELS / 16) * (PIXEL_ROWS_PER_WORKITEM / 16) + (local_col / 2);
 
-  {
-    TX_SIZE tx_size;
+  sum = 0;
+  sse = 0;
+  sum16x16[offset_16x16] = 0;
+  sse16x16[offset_16x16] = 0;
+  barrier(CLK_LOCAL_MEM_FENCE);
 
+  int i;
+  // Calculate the 8x8 and 16x16 variances for Y
+  for(i = 0; i < PIXEL_ROWS_PER_WORKITEM / 8; i++) {
+    calculate_8x8_variance(ref, cur, &sse_tmp, &sum_tmp, stride);
+    var8x8[offset_8x8] = sse_tmp - (((unsigned int)sum_tmp * sum_tmp) >> 6);
+    sse8x8[offset_8x8] = sse_tmp;
+    atomic_add(&sum, sum_tmp);
+    atomic_add(&sse, sse_tmp);
+    atomic_add(sum16x16 + offset_16x16, sum_tmp);
+    atomic_add(sse16x16 + offset_16x16, sse_tmp);
+    ref += 8 * stride;
+    cur += 8 * stride;
+    offset_8x8 += (BLOCK_SIZE_IN_PIXELS / NUM_PIXELS_PER_WORKITEM);
+  }
+  barrier(CLK_LOCAL_MEM_FENCE);
+  uint var = sse - (((int64_t)sum * sum) >> (bw * 2 + 4));
+
+  // Calculate the Txfm size
+  TX_SIZE tx_size;
+  int skip_txfm;
+
+  if (sse > (var << 2)) {
+    tx_size = TX_16X16;
+    var16x16[offset_16x16] = sse16x16[offset_16x16] -
+        (((int64_t)sum16x16[offset_16x16] * sum16x16[offset_16x16]) >> 8);
+    barrier(CLK_LOCAL_MEM_FENCE);
+  } else {
+    tx_size = TX_8X8;
+  }
+
+  // Calculate RD and fill the GPU_OUTPUT_ME structure vraiables
+  if (local_row == 0 && local_col == 0) {
     int dc_quant = seg_rd_params->dc_dequant;
     int ac_quant = seg_rd_params->ac_dequant;
     int64_t dc_thr = dc_quant * dc_quant >> 6;
     int64_t ac_thr = ac_quant * ac_quant >> 6;
-    int skip_txfm;
     int skip_dc = 0;
 
     int rate, actual_rate;
     int64_t dist, actual_dist;
+    int num8x8 = 1 << (bw * 2 - 2);
+    int num16x16 = num8x8 >> 2;
+
+    int ac_test = 1;
+    int dc_test = 1;
+    int k;
+    int num = (tx_size == TX_8X8) ? num8x8 : num16x16;
+    __local uint *sse_tx = (tx_size == TX_8X8) ? sse8x8 : sse16x16;
+    __local uint *var_tx = (tx_size == TX_8X8) ? var8x8 : var16x16;
 
     MODEL_RD_FOR_SB_Y_LARGE
-
-    if (skip_txfm == SKIP_TXFM_AC_DC) {
-      TX_SIZE uv_tx_size = get_uv_tx_size(tx_size, bsize);
-      BLOCK_SIZE unit_size = txsize_to_bsize[uv_tx_size];
-      BLOCK_SIZE uv_bsize = ss_size_lookup[bsize];
-      int uv_bw = b_width_log2_lookup[uv_bsize];
-      int uv_bh = b_height_log2_lookup[uv_bsize];
-      int sf = (uv_bw - b_width_log2_lookup[unit_size]) +
-          (uv_bh - b_height_log2_lookup[unit_size]);
-      uint32_t uv_dc_thr = dc_quant * dc_quant >> (6 - sf);
-      uint32_t uv_ac_thr = ac_quant * ac_quant >> (6 - sf);
-      int i;
-
-      frame_offset = ((VP9_ENC_BORDER_IN_PIXELS >> 1) * (stride >> 1)) +
-          (VP9_ENC_BORDER_IN_PIXELS >> 1);
-      frame_offset += (global_row * (stride >> 1) * (BLOCK_SIZE_IN_PIXELS >> 1)) +
-          (global_col * (BLOCK_SIZE_IN_PIXELS >> 1));
-
-      for (i = 0; i < 2; i++) {
-        __global uchar *ref_uv = ref_frame + yplane_size + i * uvplane_size;
-        __global uchar *cur_uv = cur_frame + yplane_size + i * uvplane_size;
-
-        ref_uv += frame_offset;
-        cur_uv += frame_offset;
-
-        vp9_variance_bxw(ref_uv,
-                         cur_uv,
-                         &sum8x8[0], &sse8x8[0],
-                         stride >> 1,
-                         (1 << (uv_bw + 2)), (1 << (uv_bh + 2)));
-        var8x8[0] = sse8x8[0] - (((int64_t)sum8x8[0] * sum8x8[0]) >> (uv_bw + uv_bh + 4));
-
-        if ((var8x8[0] < uv_ac_thr || var8x8[0] == 0) &&
-            (sse8x8[0] - var8x8[0] < uv_dc_thr || sse8x8[0] == var8x8[0])) {
-          if (i == 1) {
-            this_early_term = 1;
-            break;
-          }
-        } else {
-          break;
-        }
-      }
-    }
 
     gpu_output_me->rate[GPU_INTER_OFFSET(ZEROMV)] = actual_rate;
     gpu_output_me->dist[GPU_INTER_OFFSET(ZEROMV)] = actual_dist;
@@ -787,20 +741,70 @@ void vp9_zero_motion_search(__global uchar *ref,
     gpu_output_me->interp_filter[GPU_INTER_OFFSET(ZEROMV)] = EIGHTTAP;
     gpu_output_me->tx_size[GPU_INTER_OFFSET(ZEROMV)] = tx_size;
     gpu_output_me->skip_txfm[GPU_INTER_OFFSET(ZEROMV)] = skip_txfm;
-    gpu_output_me->this_early_term[GPU_INTER_OFFSET(ZEROMV)] = this_early_term;
-    if (this_early_term) {
-      gpu_input->do_compute = GPU_BLOCK_INVALID;
-      gpu_output_me->rv = 1;
+    gpu_output_me->this_early_term[GPU_INTER_OFFSET(ZEROMV)] = 0;
+    if (skip_txfm == SKIP_TXFM_AC_DC) {
+      vstore2(0, 0, sum_uv);
+      vstore2(0, 0, sse_uv);
+    }
+  }
+  barrier(CLK_LOCAL_MEM_FENCE);
+
+  // Check for this_early_term from UV variances
+  skip_txfm = gpu_output_me->skip_txfm[GPU_INTER_OFFSET(ZEROMV)];
+  if (skip_txfm == SKIP_TXFM_AC_DC) {
+    global_offset = (global_row * (PIXEL_ROWS_PER_WORKITEM >> 1) * (stride >> 1)) +
+                    (group_col * (BLOCK_SIZE_IN_PIXELS >> 1)) +
+                    ((local_col >> 1) * NUM_PIXELS_PER_WORKITEM);
+    global_offset += (VP9_ENC_BORDER_IN_PIXELS >> 1) * (stride >> 1) + (VP9_ENC_BORDER_IN_PIXELS >> 1);
+
+    short uv_idx = (local_col & 1);
+    global_offset += yplane_size + uv_idx * uvplane_size;
+
+    __global uchar *ref_uv = ref_frame + global_offset;
+    __global uchar *cur_uv = cur_frame + global_offset;
+
+    calculate_8x8_variance(ref_uv, cur_uv, &sse_tmp, &sum_tmp, stride >> 1);
+
+    atomic_add(sum_uv + uv_idx, sum_tmp);
+    atomic_add(sse_uv + uv_idx, sse_tmp);
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+
+    if (local_row == 0 && local_col == 0) {
+      int uv_bw = bw - 1;
+      // Assumes value of TX_16X16 as 2
+      int sf = (uv_bw - tx_size) * 2;
+      int dc_quant = seg_rd_params->dc_dequant;
+      int ac_quant = seg_rd_params->ac_dequant;
+      uint32_t uv_dc_thr = dc_quant * dc_quant >> (6 - sf);
+      uint32_t uv_ac_thr = ac_quant * ac_quant >> (6 - sf);
+      int this_early_term = 1;
+      var = sse_uv[0] - (((int64_t)sum_uv[0] * sum_uv[0]) >> (uv_bw * 2 + 4));
+      if (!((var < uv_ac_thr || var == 0) &&
+            (sse_uv[0] - var < uv_dc_thr || sse_uv[0] == var))) {
+        this_early_term = 0;
+      }
+      var = sse_uv[1] - (((int64_t)sum_uv[1] * sum_uv[1]) >> (uv_bw * 2 + 4));
+      if (!((var < uv_ac_thr || var == 0) &&
+            (sse_uv[1] - var < uv_dc_thr || sse_uv[1] == var))) {
+        this_early_term = 0;
+      }
+      gpu_output_me->this_early_term[GPU_INTER_OFFSET(ZEROMV)] = this_early_term;
+
+      if (this_early_term) {
+        gpu_input->do_compute = GPU_BLOCK_INVALID;
+        gpu_output_me->rv = 1;
 #if BLOCK_SIZE_IN_PIXELS == 64
-      (gpu_input + 1)->do_compute = GPU_BLOCK_INVALID;
-      (gpu_input + (global_stride * 2))->do_compute = GPU_BLOCK_INVALID;
-      (gpu_input + (global_stride * 2) + 1)->do_compute = GPU_BLOCK_INVALID;
+        group_stride = get_num_groups(0);
+        (gpu_input + 1)->do_compute = GPU_BLOCK_INVALID;
+        (gpu_input + (group_stride * 2))->do_compute = GPU_BLOCK_INVALID;
+        (gpu_input + (group_stride * 2) + 1)->do_compute = GPU_BLOCK_INVALID;
 #endif
-      goto exit;
+      }
     }
   }
 
-  exit:
+exit:
   return;
 }
 
@@ -959,7 +963,26 @@ void vp9_rd_calculation(__global uchar *ref_frame,
 
       int rate, actual_rate;
       int64_t dist, actual_dist;
+      if (sse > (var << 2))
+        tx_size = TX_16X16;
+      else
+        tx_size = TX_8X8;
+      int num8x8 = 1 << (bw + bh - 2);
+      uint32_t sse16x16[16];
+      int sum16x16[16];
+      uint32_t var16x16[16];
+      int num16x16 = num8x8 >> 2;
 
+      int ac_test = 1;
+      int dc_test = 1;
+      int k;
+      int num = (tx_size == TX_8X8) ? num8x8 : num16x16;
+      uint32_t *sse_tx = (tx_size == TX_8X8) ? sse8x8 : sse16x16;
+      uint32_t *var_tx = (tx_size == TX_8X8) ? var8x8 : var16x16;
+      if (tx_size >= TX_16X16) {
+        calculate_variance(bw, bh, TX_8X8, sse8x8, sum8x8, var16x16, sse16x16,
+                           sum16x16);
+      }
       MODEL_RD_FOR_SB_Y_LARGE
 
       if (horz_subpel || vert_subpel)

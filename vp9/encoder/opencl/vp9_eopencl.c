@@ -22,6 +22,8 @@
 
 static const int pixel_rows_per_workitem_log2_pro_me = 4;
 
+static const int pixel_rows_per_workitem_log2_zeromv = 4;
+
 static const int pixel_rows_per_workitem_log2_inter_pred[GPU_BLOCK_SIZES]
                                                          = {3, 3};
 
@@ -884,6 +886,7 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx) {
     const int b_height_in_pixels = 1 << b_height_in_pixels_log2;
     const int b_height_mask = b_height_in_pixels - 1;
 
+    size_t local_size_zeromv[2];
     size_t local_size_full_pixel[2], local_size_sub_pixel[2];
     const int ms_pixels = (num_8x8_blocks_wide_lookup[bsize] / 2) * 8;
 
@@ -903,24 +906,27 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx) {
       goto skip_execution;
     }
 
+    local_size[0] = b_width_in_pixels / workitem_size[0];
+    local_size[1] = b_height_in_pixels / workitem_size[1];
+
     // launch full pixel search kernel zero mv analysis
-    // total number of workitems
-    global_size[0] = blocks_in_row;
-    global_size[1] = blocks_in_col;
+    local_size_zeromv[0] = local_size[0];
+    local_size_zeromv[1] = local_size[1] >> pixel_rows_per_workitem_log2_zeromv;
+
+    global_size[0] = blocks_in_row * local_size_zeromv[0];
+    global_size[1] = blocks_in_col * local_size_zeromv[1];
 
     global_offset[0] = 0;
     global_offset[1] = block_row_offset;
 
     status = clEnqueueNDRangeKernel(opencl->cmd_queue,
                                     eopencl->rd_calculation_zeromv[gpu_bsize],
-                                    2, global_offset, global_size, NULL,
+                                    2, global_offset, global_size,
+                                    local_size_zeromv,
                                     0, NULL, event_ptr[0]);
     assert(status == CL_SUCCESS);
 
     // launch full pixel search new mv analysis kernel
-    local_size[0] = b_width_in_pixels / workitem_size[0];
-    local_size[1] = b_height_in_pixels / workitem_size[1];
-
     local_size_full_pixel[0] = local_size[0];
     local_size_full_pixel[1] =
         local_size[1] >> pixel_rows_per_workitem_log2_full_pixel[gpu_bsize];
@@ -1353,6 +1359,91 @@ static int vp9_eopencl_build_fullpel_kernel(VP9_COMP *cpi) {
   return 1;
 }
 
+static int vp9_eopencl_build_zeromv_kernel(VP9_COMP *cpi) {
+  VP9_OPENCL *opencl = cpi->common.gpu.compute_framework;
+  VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
+  cl_int status = CL_SUCCESS;
+  cl_device_id device = opencl->device;
+  cl_program program;
+  const char *kernel_file_name= PREFIX_PATH"vp9_rd.cl";
+  char build_options[BUILD_OPTION_LENGTH];
+  char *kernel_src = NULL;
+  GPU_BLOCK_SIZE gpu_bsize;
+  BLOCK_SIZE bsize;
+
+  // Read kernel source files
+  kernel_src = read_src(kernel_file_name);
+  if (kernel_src == NULL)
+    goto fail;
+
+  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
+    bsize = get_actual_block_size(gpu_bsize);
+    program = clCreateProgramWithSource(opencl->context, 1,
+                                        (const char**)(void *)&kernel_src,
+                                        NULL,
+                                        &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    sprintf(build_options,
+            "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
+            PREFIX_PATH,
+            num_8x8_blocks_wide_lookup[bsize] * 8,
+            1 << pixel_rows_per_workitem_log2_zeromv);
+
+    // Build the program
+    status = clBuildProgram(program, 1, &device,
+                            build_options,
+                            NULL, NULL);
+    if (status != CL_SUCCESS) {
+      // Enable this if you are a OpenCL developer and need to print the build
+      // errors of the OpenCL kernel
+#if OPENCL_DEVELOPER_MODE
+      uint8_t *build_log;
+      size_t build_log_size;
+
+      clGetProgramBuildInfo(program,
+                            device,
+                            CL_PROGRAM_BUILD_LOG,
+                            0,
+                            NULL,
+                            &build_log_size);
+      build_log = (uint8_t*)vpx_malloc(build_log_size);
+      if (build_log == NULL)
+        goto fail;
+
+      clGetProgramBuildInfo(program,
+                            device,
+                            CL_PROGRAM_BUILD_LOG,
+                            build_log_size,
+                            build_log,
+                            NULL);
+      build_log[build_log_size-1] = '\0';
+      fprintf(stderr, "Build Log:\n%s\n", build_log);
+      vpx_free(build_log);
+#endif
+      goto fail;
+    }
+
+    eopencl->rd_calculation_zeromv[gpu_bsize] =
+        clCreateKernel(program, "vp9_zero_motion_search", &status);
+    if (status != CL_SUCCESS)
+      goto fail;
+
+    status = clReleaseProgram(program);
+    if (status != CL_SUCCESS)
+      goto fail;
+  }
+
+  vpx_free(kernel_src);
+  return 0;
+
+fail:
+  if (kernel_src != NULL)
+    vpx_free(kernel_src);
+  return 1;
+}
+
 static int vp9_eopencl_build_rd_kernel(VP9_COMP *cpi) {
   VP9_OPENCL *opencl = cpi->common.gpu.compute_framework;
   VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
@@ -1418,11 +1509,6 @@ static int vp9_eopencl_build_rd_kernel(VP9_COMP *cpi) {
 #endif
       goto fail;
     }
-
-    eopencl->rd_calculation_zeromv[gpu_bsize] =
-        clCreateKernel(program, "vp9_zero_motion_search", &status);
-    if (status != CL_SUCCESS)
-      goto fail;
 
     eopencl->rd_calculation_newmv[gpu_bsize] = clCreateKernel(
         program, "vp9_rd_calculation", &status);
@@ -1568,6 +1654,9 @@ int vp9_eopencl_init(VP9_COMP *cpi) {
   eopencl->opencl = opencl;
 
   if (vp9_eopencl_build_choose_partitioning_kernel(cpi))
+    return 1;
+
+  if (vp9_eopencl_build_zeromv_kernel(cpi))
     return 1;
 
   if (vp9_eopencl_build_rd_kernel(cpi))
