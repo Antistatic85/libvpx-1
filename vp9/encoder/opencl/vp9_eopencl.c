@@ -917,7 +917,7 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx) {
     global_size[1] = blocks_in_col * local_size_zeromv[1];
 
     global_offset[0] = 0;
-    global_offset[1] = block_row_offset;
+    global_offset[1] = block_row_offset * local_size_zeromv[1];
 
     status = clEnqueueNDRangeKernel(opencl->cmd_queue,
                                     eopencl->rd_calculation_zeromv[gpu_bsize],
