@@ -241,6 +241,8 @@ static const arg_def_t error_resilient = ARG_DEF(
     NULL, "error-resilient", 1, "Enable error resiliency features");
 static const arg_def_t lag_in_frames = ARG_DEF(
     NULL, "lag-in-frames", 1, "Max number of frames to lag");
+static const arg_def_t gpu = ARG_DEF(
+    NULL, "gpu", 0, "Use GPU compute, Experimental");
 
 static const arg_def_t *global_args[] = {
   &use_yv12, &use_i420, &use_i422, &use_i444, &use_i440,
@@ -254,7 +256,7 @@ static const arg_def_t *global_args[] = {
 #if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
   &test16bitinternalarg,
 #endif
-  &lag_in_frames, NULL
+  &lag_in_frames, NULL, &gpu,
 };
 
 static const arg_def_t dropframe_thresh = ARG_DEF(
@@ -349,8 +351,6 @@ static const arg_def_t cq_level = ARG_DEF(
     NULL, "cq-level", 1, "Constant/Constrained Quality level");
 static const arg_def_t max_intra_rate_pct = ARG_DEF(
     NULL, "max-intra-rate", 1, "Max I-frame bitrate (pct)");
-static const arg_def_t gpu = ARG_DEF(
-    NULL, "gpu", 0, "Use GPU compute, Experimental");
 
 #if CONFIG_VP8_ENCODER
 static const arg_def_t cpu_used_vp8 = ARG_DEF(
@@ -904,6 +904,8 @@ static void parse_global_config(struct VpxEncoderConfig *global, char **argv) {
       global->disable_warnings = 1;
     else if (arg_match(&arg, &disable_warning_prompt, argi))
       global->disable_warning_prompt = 1;
+    else if (arg_match(&arg, &gpu, argi))
+      global->use_gpu = 1;
     else
       argj++;
   }
@@ -1134,7 +1136,8 @@ static int parse_stream_params(struct VpxEncoderConfig *global,
     } else if (arg_match(&arg, &lag_in_frames, argi)) {
       config->cfg.g_lag_in_frames = arg_parse_uint(&arg);
       if (global->deadline == VPX_DL_REALTIME &&
-          config->cfg.g_lag_in_frames != 0) {
+          config->cfg.g_lag_in_frames != 0 &&
+          global->use_gpu == 0) {
         warn("non-zero %s option ignored in realtime mode.\n", arg.name);
         config->cfg.g_lag_in_frames = 0;
       }
@@ -1189,8 +1192,6 @@ static int parse_stream_params(struct VpxEncoderConfig *global,
       config->have_kf_max_dist = 1;
     } else if (arg_match(&arg, &kf_disabled, argi)) {
       config->cfg.kf_mode = VPX_KF_DISABLED;
-    } else if (arg_match(&arg, &gpu, argi)) {
-      config->cfg.use_gpu = 1;
 #if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
     } else if (arg_match(&arg, &test16bitinternalarg, argi)) {
       if (strcmp(global->codec->name, "vp9") == 0) {
@@ -1461,6 +1462,12 @@ static void close_output_file(struct stream_state *stream,
   }
 
   fclose(stream->file);
+}
+
+
+static void setup_gpu(struct stream_state *stream,
+                      int use_gpu) {
+  stream->config.cfg.use_gpu = use_gpu;
 }
 
 
@@ -2062,6 +2069,7 @@ int main(int argc, const char **argv_) {
                                              &global.framerate));
     }
 
+    FOREACH_STREAM(setup_gpu(stream, global.use_gpu));
     FOREACH_STREAM(setup_pass(stream, &global, pass));
     FOREACH_STREAM(open_output_file(stream, &global,
                                     &input.pixel_aspect_ratio));

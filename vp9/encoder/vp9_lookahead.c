@@ -119,7 +119,7 @@ struct lookahead_ctx *vp9_lookahead_init(VP9_COMMON *cm,
 
 #define USE_PARTIAL_COPY 0
 
-int vp9_lookahead_push(struct lookahead_ctx *ctx, YV12_BUFFER_CONFIG   *src,
+int vp9_lookahead_push(struct lookahead_ctx *ctx, YV12_BUFFER_CONFIG *src,
                        int64_t ts_start, int64_t ts_end,
 #if CONFIG_VP9_HIGHBITDEPTH
                        int use_highbitdepth,
@@ -229,6 +229,7 @@ int vp9_lookahead_push(struct lookahead_ctx *ctx, YV12_BUFFER_CONFIG   *src,
   buf->ts_start = ts_start;
   buf->ts_end = ts_end;
   buf->flags = flags;
+
   return 0;
 }
 

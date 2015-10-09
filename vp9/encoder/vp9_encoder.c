@@ -637,7 +637,7 @@ static void alloc_raw_frame_buffers(VP9_COMP *cpi) {
 #if CONFIG_VP9_HIGHBITDEPTH
                                         cm->use_highbitdepth,
 #endif
-                                        oxcf->lag_in_frames);
+                                        oxcf->lag_in_frames + 1);
   if (!cpi->lookahead)
     vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
                        "Failed to allocate lag buffers");

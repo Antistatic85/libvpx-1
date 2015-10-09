@@ -258,7 +258,7 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi) {
   const int tile_cols = 1 << cm->log2_tile_cols;
   int tile_col, tile_row;
   int mi_row;
-  VP9_EGPU * const egpu = &cpi->egpu;
+  VP9_EGPU *const egpu = &cpi->egpu;
   const int mi_cols_g = (cm->mi_cols >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
   const int mi_rows_g = (cm->mi_rows >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
   int subframe_idx;
@@ -287,19 +287,32 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi) {
   // fill rd param info
   vp9_gpu_fill_rd_parameters(cpi);
 
-  // enqueue prologue kernels for gpu
-  egpu->execute_prologue(cpi);
   for (subframe_idx = 0; subframe_idx < MAX_SUB_FRAMES; subframe_idx++) {
     // enqueue kernels for gpu
     egpu->execute(cpi, subframe_idx);
   }
 
   // re-map source and reference pointers before starting cpu side processing
-  vp9_acquire_frame_buffer(cm, cpi->Source);
-  vp9_acquire_frame_buffer(cm, cpi->Last_Source);
-  vp9_acquire_frame_buffer(cm, get_ref_frame_buffer(cpi, LAST_FRAME));
+  vp9_gpu_acquire_frame_buffer(cm, cpi->Source);
+  vp9_gpu_acquire_frame_buffer(cm, cpi->Last_Source);
+  vp9_gpu_acquire_frame_buffer(cm, get_ref_frame_buffer(cpi, LAST_FRAME));
 }
 
+void vp9_gpu_mv_compute_async(VP9_COMP *cpi) {
+  VP9_COMMON *const cm = &cpi->common;
+  VP9_EGPU *const egpu = &cpi->egpu;
+  struct lookahead_entry *next_source = NULL;
+
+  next_source = vp9_lookahead_peek(cpi->lookahead, 0);
+  if (next_source == NULL)
+    return;
+
+  // enqueue prologue kernels for gpu
+  egpu->execute_prologue(cpi);
+
+  vp9_gpu_acquire_frame_buffer(cm, cpi->Source);
+  vp9_gpu_acquire_frame_buffer(cm, &next_source->img);
+}
 #endif
 
 int vp9_get_gpu_buffer_index(VP9_COMP *const cpi, int mi_row, int mi_col) {
@@ -414,24 +427,21 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
       vp9_gpu_read_output_buffers(cpi, td, &tile, mi_row);
 
       egpu->enc_sync_read(cpi, subframe_idx, MAX_SUB_FRAMES);
+
+      egpu->acquire_output_me_buffer(
+          cpi, (void **) &cpi->gpu_output_me_base, 0);
+
       if (mi_row == subframe.mi_row_start) {
         GPU_OUTPUT_ME *gpu_output_me_subframe;
+        const int buffer_offset =
+            vp9_get_gpu_buffer_index(cpi, subframe.mi_row_start, 0);
 
-        // acquire GPU output buffers
-        egpu->acquire_output_me_buffer(cpi, (void **) &gpu_output_me_subframe,
-                                       subframe_idx);
-        if (subframe_idx == 0) {
-          cpi->gpu_output_me_base = gpu_output_me_subframe;
-        } else {
-          // Check if the acquired memory pointer for the given subframe is
-          // contiguous with respect to the previous subframes
-          const int buffer_offset =
-              vp9_get_gpu_buffer_index(cpi, subframe.mi_row_start, 0);
+        egpu->acquire_output_me_buffer(
+            cpi, (void **) &gpu_output_me_subframe, subframe_idx);
 
-          (void)buffer_offset;
-          assert(gpu_output_me_subframe - cpi->gpu_output_me_base ==
-              buffer_offset);
-        }
+        (void)buffer_offset;
+        assert(gpu_output_me_subframe - cpi->gpu_output_me_base ==
+            buffer_offset);
       }
     }
 #endif

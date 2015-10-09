@@ -3930,17 +3930,22 @@ static void encode_tiles(VP9_COMP *cpi) {
   int mi_row_start = 0, mi_row_end = cm->mi_rows;
 
   // enable gpu processing
-  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode && !frame_is_intra_only(cm)) {
-    td->mb.data_parallel_processing = 1;
+  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode) {
+    if (!frame_is_intra_only(cm)) {
+      td->mb.data_parallel_processing = 1;
 
 #if CONFIG_GPU_COMPUTE
-    vp9_gpu_mv_compute(cpi);
+      vp9_gpu_mv_compute(cpi);
 #else
-    encode_sb_rows(cpi, td, mi_row_start, mi_row_end, MI_BLOCK_SIZE);
+      encode_sb_rows(cpi, td, mi_row_start, mi_row_end, MI_BLOCK_SIZE);
 #endif
 
-    // reset data parallel processing flag
-    td->mb.data_parallel_processing = 0;
+      // reset data parallel processing flag
+      td->mb.data_parallel_processing = 0;
+    }
+#if CONFIG_GPU_COMPUTE
+    vp9_gpu_mv_compute_async(cpi);
+#endif
   }
 
   // encode superblock rows
@@ -3966,14 +3971,18 @@ static void encode_tiles_mt(VP9_COMP *cpi) {
 
 #if CONFIG_GPU_COMPUTE
   // enable gpu processing
-  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode && !frame_is_intra_only(cm)) {
-    // set data parallel processing flag
-    cpi->td.mb.data_parallel_processing = 1;
+  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode) {
+    if (!frame_is_intra_only(cm)) {
+      // set data parallel processing flag
+      cpi->td.mb.data_parallel_processing = 1;
 
-    vp9_gpu_mv_compute(cpi);
+      vp9_gpu_mv_compute(cpi);
 
-    // reset data parallel processing flag
-    cpi->td.mb.data_parallel_processing = 0;
+      // reset data parallel processing flag
+      cpi->td.mb.data_parallel_processing = 0;
+    }
+
+    vp9_gpu_mv_compute_async(cpi);
   }
 #endif
 

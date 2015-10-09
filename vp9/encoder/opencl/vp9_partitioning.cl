@@ -48,34 +48,34 @@ __constant MV search_pos[4] = {
 //=====   FUNCTION DEFINITIONS   =====
 //-------------------------------------------
 int vp9_minmax_8x8(__global uchar *s, __global uchar *d, int stride,
-                   uchar *max, uchar *min) {
+                   uchar *max_val, uchar *min_val) {
   int i, j;
   uchar8 src, pred;
   uchar8 diff;
 
-  *min = 255;
-  *max = 0;
+  *min_val = 255;
+  *max_val = 0;
   for (i = 0; i < 8; ++i, s += stride, d += stride) {
     src = vload8(0, s);
     pred = vload8(0, d);
     diff = abs_diff(src, pred);
 
-    *max = MAX(*max, diff.s0);
-    *min = MIN(*min, diff.s0);
-    *max = MAX(*max, diff.s1);
-    *min = MIN(*min, diff.s1);
-    *max = MAX(*max, diff.s2);
-    *min = MIN(*min, diff.s2);
-    *max = MAX(*max, diff.s3);
-    *min = MIN(*min, diff.s3);
-    *max = MAX(*max, diff.s4);
-    *min = MIN(*min, diff.s4);
-    *max = MAX(*max, diff.s5);
-    *min = MIN(*min, diff.s5);
-    *max = MAX(*max, diff.s6);
-    *min = MIN(*min, diff.s6);
-    *max = MAX(*max, diff.s7);
-    *min = MIN(*min, diff.s7);
+    *max_val = max(*max_val, diff.s0);
+    *min_val = min(*min_val, diff.s0);
+    *max_val = max(*max_val, diff.s1);
+    *min_val = min(*min_val, diff.s1);
+    *max_val = max(*max_val, diff.s2);
+    *min_val = min(*min_val, diff.s2);
+    *max_val = max(*max_val, diff.s3);
+    *min_val = min(*min_val, diff.s3);
+    *max_val = max(*max_val, diff.s4);
+    *min_val = min(*min_val, diff.s4);
+    *max_val = max(*max_val, diff.s5);
+    *min_val = min(*min_val, diff.s5);
+    *max_val = max(*max_val, diff.s6);
+    *min_val = min(*min_val, diff.s6);
+    *max_val = max(*max_val, diff.s7);
+    *min_val = min(*min_val, diff.s7);
   }
 }
 
@@ -89,16 +89,16 @@ int compute_minmax_8x8(__global uchar *src, __global uchar *ref,
   for (k = 0; k < 4; k++) {
     int x8_idx = ((k & 1) << 3);
     int y8_idx = ((k >> 1) << 3);
-    uchar min;
-    uchar max;
+    uchar min_val;
+    uchar max_val;
 
     vp9_minmax_8x8(src + y8_idx * stride + x8_idx,
                    ref + y8_idx * stride + x8_idx, stride,
-                   &max, &min);
-    if ((max - min) > minmax_max)
-      minmax_max = (max - min);
-    if ((max - min) < minmax_min)
-      minmax_min = (max - min);
+                   &max_val, &min_val);
+    if ((max_val - min_val) > minmax_max)
+      minmax_max = (max_val - min_val);
+    if ((max_val - min_val) < minmax_min)
+      minmax_min = (max_val - min_val);
   }
   return (minmax_max - minmax_min);
 }

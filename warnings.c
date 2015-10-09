@@ -80,8 +80,9 @@ static void check_quantizer(int min_q, int max_q,
 static void check_lag_in_frames_realtime_deadline(
     int lag_in_frames,
     int deadline,
+    int use_gpu,
     struct WarningList *warning_list) {
-  if (deadline == VPX_DL_REALTIME && lag_in_frames != 0)
+  if (deadline == VPX_DL_REALTIME && lag_in_frames != 0 && use_gpu == 0)
     add_warning(lag_in_frames_with_realtime, warning_list);
 }
 
@@ -97,6 +98,7 @@ void check_encoder_config(int disable_prompt,
                   &warning_list);
   check_lag_in_frames_realtime_deadline(stream_config->g_lag_in_frames,
                                         global_config->deadline,
+                                        global_config->use_gpu,
                                         &warning_list);
   /* Count and print warnings. */
   for (warning = warning_list.warning_node;

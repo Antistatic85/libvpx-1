@@ -55,6 +55,7 @@ struct VpxEncoderConfig {
   int disable_warnings;
   int disable_warning_prompt;
   int experimental_bitstream;
+  int use_gpu;
 };
 
 #ifdef __cplusplus

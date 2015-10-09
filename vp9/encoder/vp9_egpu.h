@@ -160,6 +160,8 @@ int vp9_egpu_init(struct VP9_COMP *cpi);
 
 void vp9_gpu_mv_compute(struct VP9_COMP *cpi);
 
+void vp9_gpu_mv_compute_async(struct VP9_COMP *cpi);
+
 #endif
 
 #ifdef __cplusplus

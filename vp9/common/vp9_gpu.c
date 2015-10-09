@@ -56,7 +56,7 @@ int vp9_gpu_free_frame_buffer(VP9_COMMON *cm, YV12_BUFFER_CONFIG *ybf) {
   return 0;
 }
 
-void vp9_acquire_frame_buffer(VP9_COMMON *cm, YV12_BUFFER_CONFIG *ybf) {
+void vp9_gpu_acquire_frame_buffer(VP9_COMMON *cm, YV12_BUFFER_CONFIG *ybf) {
   void *host_ptr = ybf->buffer_alloc;
 
   cm->gpu.acquire_frame_buffers(cm, &ybf->gpu_mem,

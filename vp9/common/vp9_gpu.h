@@ -45,9 +45,13 @@ typedef struct gpu_cb_priv {
 
 int vp9_gpu_get_frame_buffer(void *cb_priv, size_t min_size,
                              vpx_codec_frame_buffer_t *fb);
+
 int vp9_gpu_free_frame_buffer(struct VP9Common *cm, YV12_BUFFER_CONFIG *ybf);
-void vp9_acquire_frame_buffer(struct VP9Common *cm, YV12_BUFFER_CONFIG *ybf);
+
+void vp9_gpu_acquire_frame_buffer(struct VP9Common *cm, YV12_BUFFER_CONFIG *ybf);
+
 void vp9_gpu_remove(struct VP9Common *cm);
+
 int vp9_gpu_init(struct VP9Common *cm);
 
 #endif
