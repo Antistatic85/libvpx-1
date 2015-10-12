@@ -28,7 +28,7 @@ static const int pixel_rows_per_workitem_log2_inter_pred[GPU_BLOCK_SIZES]
                                                          = {3, 3};
 
 static const int pixel_rows_per_workitem_log2_full_pixel[GPU_BLOCK_SIZES]
-                                                                = {3, 3};
+                                                                = {4, 4};
 
 static const int pixel_rows_per_workitem_log2_sub_pixel[GPU_BLOCK_SIZES]
                                                                 = {4, 5};
@@ -952,7 +952,7 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx) {
     assert(status == CL_SUCCESS);
 
     // launch full pixel search new mv analysis kernel
-    local_size_full_pixel[0] = local_size[0];
+    local_size_full_pixel[0] = local_size[0] * 4;
     local_size_full_pixel[1] =
         local_size[1] >> pixel_rows_per_workitem_log2_full_pixel[gpu_bsize];
 

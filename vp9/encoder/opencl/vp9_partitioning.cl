@@ -214,37 +214,6 @@ int get_uv_filtered_sad(__global uchar *ref_frame,
   return atomic_sad[0];
 }
 
-inline ushort calculate_sad_rows(MV *currentmv,
-                                 __global uchar *ref_frame,
-                                 __global uchar *cur_frame,
-                                 int stride,
-                                 int rows) {
-  __global uchar *tmp_ref, *tmp_cur;
-  uchar8 ref, cur;
-  ushort8 sad = 0;
-  int buffer_offset;
-  int row;
-
-  buffer_offset = (currentmv->row * stride) + currentmv->col;
-  tmp_ref = ref_frame + buffer_offset;
-  tmp_cur = cur_frame;
-
-  for (row = 0; row < rows; row++) {
-    ref = vload8(0, tmp_ref);
-    cur = vload8(0, tmp_cur);
-
-    sad += abs_diff(convert_ushort8(ref), convert_ushort8(cur));
-
-    tmp_ref += stride;
-    tmp_cur += stride;
-  }
-
-  ushort4 final_sad = convert_ushort4(sad.s0123) + convert_ushort4(sad.s4567);
-  final_sad.s01 = final_sad.s01 + final_sad.s23;
-
-  return (final_sad.s0 + final_sad.s1);
-}
-
 void calculate_vector_var(__global ushort *ref_vector,
                           __global ushort *src_vector,
                           int *sum,

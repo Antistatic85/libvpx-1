@@ -1067,7 +1067,7 @@ static int vp9_pattern_search(const MACROBLOCK *x,
                                in_what->stride);
             CHECK_BETTER
           }
-        } else if (!x->data_parallel_processing) {
+        } else {
           for (i = 0; i < num_candidates[s]; i++) {
             const MV this_mv = {br + candidates[s][i].row,
                                 bc + candidates[s][i].col};
@@ -1088,16 +1088,22 @@ static int vp9_pattern_search(const MACROBLOCK *x,
           k = best_site;
         }
       }
+      if (s == 0 && x->data_parallel_processing)
+        break;
 
       do {
-        int next_chkpts_indices[PATTERN_CANDIDATES_REF];
+        int next_chkpts_indices[PATTERN_CANDIDATES_REF + 1];
+        int num_cand = x->data_parallel_processing ?
+            PATTERN_CANDIDATES_REF + 1 : PATTERN_CANDIDATES_REF;
         best_site = -1;
-        next_chkpts_indices[0] = (k == 0) ? num_candidates[s] - 1 : k - 1;
+        next_chkpts_indices[0] = (k - 1) < 0 ? num_candidates[s] - 1 : k - 1;
         next_chkpts_indices[1] = k;
-        next_chkpts_indices[2] = (k == num_candidates[s] - 1) ? 0 : k + 1;
+        next_chkpts_indices[2] = (k + 1) >= num_candidates[s] ? 0 : k + 1;
+        next_chkpts_indices[3] =
+            (k + 2) >= num_candidates[s] ? k + 2 - num_candidates[s] : k + 2;
 
         if (check_bounds(x, br, bc, 1 << s)) {
-          for (i = 0; i < PATTERN_CANDIDATES_REF; i++) {
+          for (i = 0; i < num_cand; i++) {
             const MV this_mv = {br + candidates[s][next_chkpts_indices[i]].row,
                                 bc + candidates[s][next_chkpts_indices[i]].col};
             thissad = vfp->sdf(what->buf, what->stride,
@@ -1105,8 +1111,8 @@ static int vp9_pattern_search(const MACROBLOCK *x,
                                in_what->stride);
             CHECK_BETTER
           }
-        } else if (!x->data_parallel_processing) {
-          for (i = 0; i < PATTERN_CANDIDATES_REF; i++) {
+        } else {
+          for (i = 0; i < num_cand; i++) {
             const MV this_mv = {br + candidates[s][next_chkpts_indices[i]].row,
                                 bc + candidates[s][next_chkpts_indices[i]].col};
             if (!is_mv_in(x, &this_mv))
@@ -1536,10 +1542,17 @@ int vp9_bigdia_search(const MACROBLOCK *x,
     {{-512, -512}, {0, -1024}, {512, -512}, {1024, 0}, {512, 512}, {0, 1024},
       {-512, 512}, {-1024, 0}},
   };
-  return vp9_pattern_search_sad(x, ref_mv, search_param, sad_per_bit,
-                                do_init_search, cost_list, vfp, use_mvcost,
-                                center_mv, best_mv,
-                                bigdia_num_candidates, bigdia_candidates);
+  if (x->data_parallel_processing) {
+    return vp9_pattern_search(x, ref_mv, search_param, sad_per_bit,
+                              do_init_search, cost_list, vfp, use_mvcost,
+                              center_mv, best_mv,
+                              bigdia_num_candidates, bigdia_candidates);
+  } else {
+    return vp9_pattern_search_sad(x, ref_mv, search_param, sad_per_bit,
+                                  do_init_search, cost_list, vfp, use_mvcost,
+                                  center_mv, best_mv,
+                                  bigdia_num_candidates, bigdia_candidates);
+  }
 }
 
 int vp9_square_search(const MACROBLOCK *x,
@@ -2440,7 +2453,8 @@ int vp9_full_pixel_search(VP9_COMP *cpi, MACROBLOCK *x,
                           const MV *ref_mv, MV *tmp_mv,
                           int var_max, int rd) {
   const SPEED_FEATURES *const sf = &cpi->sf;
-  const SEARCH_METHODS method = (cpi->common.use_gpu) ? FAST_HEX : sf->mv.search_method;
+  const SEARCH_METHODS method =
+      (x->data_parallel_processing) ? FAST_DIAMOND : sf->mv.search_method;
   vp9_variance_fn_ptr_t *fn_ptr = &cpi->fn_ptr[bsize];
   int var = 0;
   if (cost_list) {

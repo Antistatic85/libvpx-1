@@ -150,17 +150,16 @@ typedef short2 MV;
 #define row s0
 #define col s1
 
+typedef short4 INIT;
+#define mv_row_min s0
+#define mv_row_max s1
+#define mv_col_min s2
+#define mv_col_max s3
+
 typedef union int_mv {
   uint32_t as_int;
   MV as_mv;
 } int_mv;
-
-typedef struct initvalues {
-  int mv_row_min;
-  int mv_row_max;
-  int mv_col_min;
-  int mv_col_max;
-}INIT;
 
 typedef struct GPU_INPUT {
   int_mv pred_mv;
@@ -292,6 +291,37 @@ ushort calculate_sad(MV *currentmv,
   tmp_cur = cur_frame;
 
   for (row = 0; row < PIXEL_ROWS_PER_WORKITEM; row++) {
+    ref = vload8(0, tmp_ref);
+    cur = vload8(0, tmp_cur);
+
+    sad += abs_diff(convert_ushort8(ref), convert_ushort8(cur));
+
+    tmp_ref += stride;
+    tmp_cur += stride;
+  }
+
+  ushort4 final_sad = convert_ushort4(sad.s0123) + convert_ushort4(sad.s4567);
+  final_sad.s01 = final_sad.s01 + final_sad.s23;
+
+  return (final_sad.s0 + final_sad.s1);
+}
+
+inline ushort calculate_sad_rows(MV *currentmv,
+                                 __global uchar *ref_frame,
+                                 __global uchar *cur_frame,
+                                 int stride,
+                                 int rows) {
+  __global uchar *tmp_ref, *tmp_cur;
+  uchar8 ref, cur;
+  ushort8 sad = 0;
+  int buffer_offset;
+  int row;
+
+  buffer_offset = (currentmv->row * stride) + currentmv->col;
+  tmp_ref = ref_frame + buffer_offset;
+  tmp_cur = cur_frame;
+
+  for (row = 0; row < rows; row++) {
     ref = vload8(0, tmp_ref);
     cur = vload8(0, tmp_cur);
 
