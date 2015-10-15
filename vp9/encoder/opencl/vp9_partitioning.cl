@@ -477,6 +477,7 @@ void vp9_vector_match(__global ushort *proj_src_h,
 
     thismv.row = vector_match(proj_ref_v, proj_src_v, intermediate_int);
   }
+  barrier(CLK_GLOBAL_MEM_FENCE);
   intermediate_int[local_col] = 0;
   gpu_output_pro_me->pred_mv.as_mv = thismv;
 }
