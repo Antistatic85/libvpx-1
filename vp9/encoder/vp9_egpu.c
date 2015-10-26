@@ -396,8 +396,6 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
     subframe_idx = vp9_get_subframe_index(cm, mi_row);
     vp9_subframe_init(&subframe, cm, subframe_idx);
 
-    x->use_gpu = cm->use_gpu;
-
 #if CONFIG_GPU_COMPUTE
     if (!x->data_parallel_processing && x->use_gpu) {
       VP9_EGPU *egpu = &cpi->egpu;

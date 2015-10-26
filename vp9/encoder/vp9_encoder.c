@@ -809,7 +809,7 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
   // flag. For example, when the current frame's resolution is different from
   // the previous frame, then 'use_gpu' should be set to '0'. All similar
   // conditions needs to be identified and added.
-  cm->use_gpu = cpi->oxcf.use_gpu;
+  cpi->td.mb.use_gpu = cm->use_gpu = cpi->oxcf.use_gpu;
   vp9_alloc_compressor_data(cpi);
 #if CONFIG_GPU_COMPUTE
   if (cm->use_gpu) {
