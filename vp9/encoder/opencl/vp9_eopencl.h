@@ -39,7 +39,7 @@ typedef struct VP9_EOPENCL {
   opencl_buffer gpu_input;
   cl_mem gpu_output_me;
   opencl_buffer gpu_output_me_sub_buf[MAX_SUB_FRAMES];
-  opencl_buffer rdopt_parameters;
+  opencl_buffer rdopt_parameters[2];
 
   cl_mem gpu_scratch;
 

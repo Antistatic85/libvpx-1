@@ -572,3 +572,25 @@ void vp9_cyclic_refresh_reset_resize(VP9_COMP *const cpi) {
   cr->sb_index = 0;
   cpi->refresh_golden_frame = 1;
 }
+
+void vp9_gpu_cyclic_refresh_qindex_setup(VP9_COMP *const cpi) {
+  VP9_COMMON *const cm = &cpi->common;
+  CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
+  struct segmentation *const seg = &cm->seg;
+  int qindex_delta = 0;
+  int qindex2;
+
+  // Set the q delta for segment BOOST1.
+  qindex_delta = compute_deltaq(cpi, cm->base_qindex, cr->rate_ratio_qdelta);
+  cr->qindex_delta[1] = qindex_delta;
+  // Compute rd-mult for segment BOOST1.
+  qindex2 = clamp(cm->base_qindex + cm->y_dc_delta_q + qindex_delta, 0, MAXQ);
+  cr->rdmult = vp9_compute_rd_mult(cpi, qindex2);
+  vp9_set_segdata(seg, CR_SEGMENT_ID_BOOST1, SEG_LVL_ALT_Q, qindex_delta);
+  // Set a more aggressive (higher) q delta for segment BOOST2.
+  qindex_delta = compute_deltaq(
+      cpi, cm->base_qindex, MIN(CR_MAX_RATE_TARGET_RATIO,
+                                0.1 * cr->rate_boost_fac * cr->rate_ratio_qdelta));
+  cr->qindex_delta[2] = qindex_delta;
+  vp9_set_segdata(seg, CR_SEGMENT_ID_BOOST2, SEG_LVL_ALT_Q, qindex_delta);
+}

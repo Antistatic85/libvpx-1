@@ -478,7 +478,11 @@ typedef struct VP9_COMP {
 #if CONFIG_VP9_TEMPORAL_DENOISING
   VP9_DENOISER denoiser;
 #endif
+
+  YV12_BUFFER_CONFIG *last_frame_buffer;
+
 #if CONFIG_GPU_COMPUTE
+  int b_async;
   VP9_EGPU egpu;
 #endif
   int resize_pending;
@@ -497,6 +501,8 @@ typedef struct VP9_COMP {
   int64_t vbp_threshold_sad;
   BLOCK_SIZE vbp_bsize_min;
 } VP9_COMP;
+
+void vp9_swap_mi_and_prev_mi(VP9_COMMON *cm);
 
 void vp9_initialize_enc(void);
 
@@ -658,6 +664,11 @@ static INLINE int *cond_cost_list(const struct VP9_COMP *cpi, int *cost_list) {
 void vp9_new_framerate(VP9_COMP *cpi, double framerate);
 
 #define LAYER_IDS_TO_IDX(sl, tl, num_tl) ((sl) * (num_tl) + (tl))
+
+#define HIGH_PRECISION_MV_QTHRESH 200   // Q threshold for high precision
+                                         // mv. Choose a very high value for
+                                         // now so that HIGH_PRECISION is always
+                                         // chosen.
 
 #ifdef __cplusplus
 }  // extern "C"

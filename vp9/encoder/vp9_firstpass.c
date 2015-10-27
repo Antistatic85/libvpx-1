@@ -622,7 +622,7 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
   x->skip_recode = 0;
 
   vp9_init_mv_probs(cm);
-  vp9_initialize_rd_consts(cpi);
+  vp9_initialize_rd_consts(cpi, x);
 
   // Tiling is ignored in the first pass.
   vp9_tile_init(&tile, cm, 0, 0);

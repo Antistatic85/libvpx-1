@@ -63,10 +63,6 @@
 
 #define ALTREF_HIGH_PRECISION_MV 1      // Whether to use high precision mv
                                          //  for altref computation.
-#define HIGH_PRECISION_MV_QTHRESH 200   // Q threshold for high precision
-                                         // mv. Choose a very high value for
-                                         // now so that HIGH_PRECISION is always
-                                         // chosen.
 // #define OUTPUT_YUV_REC
 
 #ifdef OUTPUT_YUV_DENOISED
@@ -299,7 +295,7 @@ static void vp9_enc_free_mi(VP9_COMMON *cm) {
   cm->prev_mi_grid_base = NULL;
 }
 
-static void vp9_swap_mi_and_prev_mi(VP9_COMMON *cm) {
+void vp9_swap_mi_and_prev_mi(VP9_COMMON *cm) {
   // Current mip will be the prev_mip for the next frame.
   MODE_INFO **temp_base = cm->prev_mi_grid_base;
   MODE_INFO *temp = cm->prev_mip;
@@ -822,6 +818,7 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
     if (vp9_egpu_init(cpi))
       vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
                          "EGPU initialization failed");
+    assert(ASYNC_FRAME_COUNT_WAIT > 1);
   }
 #endif
 
@@ -3845,6 +3842,7 @@ static void encode_frame_to_data_rate(VP9_COMP *cpi,
 #endif
 
   cm->frame_to_show = get_frame_new_buffer(cm);
+  cpi->last_frame_buffer = get_ref_frame_buffer(cpi, LAST_FRAME);
 
   if (cpi->sf.recode_loop == DISALLOW_RECODE) {
     encode_without_recode_loop(cpi);

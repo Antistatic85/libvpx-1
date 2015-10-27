@@ -22,6 +22,10 @@ extern "C" {
 
 #define MAX_SUB_FRAMES 3
 
+// Number of frames to wait before launching me/pro-me kernels asynchronously.
+// NOTE: minimum value is 1
+#define ASYNC_FRAME_COUNT_WAIT 30
+
 #define GPU_INTER_OFFSET(mode) ((mode) - ZEROMV)
 
 // Block sizes for which MV computations are done in GPU
@@ -107,9 +111,10 @@ typedef struct VP9_EGPU {
       int sub_frame_idx);
   void (*acquire_output_pro_me_buffer)(struct VP9_COMP *cpi, void **host_ptr,
       int sub_frame_idx);
-  void (*acquire_rd_param_buffer)(struct VP9_COMP *cpi, void **host_ptr);
+  void (*acquire_rd_param_buffer)(struct VP9_COMP *cpi, void **host_ptr,
+      int index);
   void (*enc_sync_read)(struct VP9_COMP *cpi, int event_id, int offset);
-  void (*execute)(struct VP9_COMP *cpi, int sub_frame_idx);
+  void (*execute)(struct VP9_COMP *cpi, int sub_frame_idx, int async);
   void (*execute_prologue)(struct VP9_COMP *cpi);
   void (*remove)(struct VP9_COMP *cpi);
 } VP9_EGPU;
@@ -158,9 +163,10 @@ void vp9_egpu_remove(struct VP9_COMP *cpi);
 
 int vp9_egpu_init(struct VP9_COMP *cpi);
 
-void vp9_gpu_mv_compute(struct VP9_COMP *cpi);
+void vp9_gpu_mv_compute(struct VP9_COMP *cpi, struct ThreadData *td);
 
-void vp9_gpu_mv_compute_async(struct VP9_COMP *cpi);
+void vp9_gpu_mv_compute_async(struct VP9_COMP *cpi, struct ThreadData *td,
+                              int subframe_idx);
 
 #endif
 

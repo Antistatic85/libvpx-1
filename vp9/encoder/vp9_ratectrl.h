@@ -142,6 +142,9 @@ typedef struct {
   int frame_width[FRAME_SCALE_STEPS];
   int frame_height[FRAME_SCALE_STEPS];
   int rf_level_maxq[RATE_FACTOR_LEVELS];
+
+  int q_prediction_next;
+  int q_prediction_curr;
 } RATE_CONTROL;
 
 struct VP9_COMP;
@@ -255,6 +258,8 @@ void vp9_rc_set_gf_interval_range(const struct VP9_COMP *const cpi,
 void vp9_set_target_rate(struct VP9_COMP *cpi);
 
 int vp9_resize_one_pass_cbr(struct VP9_COMP *cpi);
+
+void vp9_gpu_predict_inter_qp(struct VP9_COMP *cpi);
 
 #ifdef __cplusplus
 }  // extern "C"

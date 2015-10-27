@@ -284,10 +284,9 @@ static void set_block_thresholds(const VP9_COMMON *cm, RD_OPT *rd) {
   }
 }
 
-void vp9_initialize_rd_consts(VP9_COMP *cpi) {
+void vp9_initialize_rd_consts(VP9_COMP *cpi, MACROBLOCK *const x) {
   VP9_COMMON *const cm = &cpi->common;
-  MACROBLOCK *const x = &cpi->td.mb;
-  MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
+  MACROBLOCKD *const xd = &x->e_mbd;
   RD_OPT *const rd = &cpi->rd;
   int i;
 

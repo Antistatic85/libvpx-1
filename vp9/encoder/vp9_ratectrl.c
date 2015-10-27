@@ -1900,3 +1900,36 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
   }
   return resize_now;
 }
+
+void vp9_gpu_predict_inter_qp(VP9_COMP *cpi) {
+  RATE_CONTROL *const rc = &cpi->rc;
+  int target = rc->this_frame_target;
+  int top_index, bottom_index;
+  int q = 0;
+
+  (void) top_index;
+  (void) bottom_index;
+  (void) target;
+  // After encoding few gops, it is assumed that RC correction factors are
+  // tuned and the base_qindex might have stabilized for the current bit rate.
+  // This should allow us to approximate the qp_index of future frame to
+  // perform gpu computations asynchronously
+  if (cpi->oxcf.rc_mode == VPX_CBR) {
+    if (rc->frames_till_gf_update_due == 1) {
+      cpi->refresh_golden_frame = 1;
+      rc->this_frame_target = calc_pframe_target_size_one_pass_cbr(cpi);
+      q = rc_pick_q_and_bounds_one_pass_cbr(cpi, &bottom_index, &top_index);
+      cpi->refresh_golden_frame = 0;
+      rc->this_frame_target = target;
+//      q = cpi->rc.last_boosted_qindex;
+    } else if (cpi->refresh_golden_frame) {
+      q = cpi->rc.last_q[INTER_FRAME];
+    }
+    else {
+      q = cpi->common.base_qindex;
+    }
+  }
+
+  rc->q_prediction_curr = rc->q_prediction_next;
+  rc->q_prediction_next = q;
+}
