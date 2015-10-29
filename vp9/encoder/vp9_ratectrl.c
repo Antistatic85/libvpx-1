@@ -1905,7 +1905,7 @@ void vp9_gpu_predict_inter_qp(VP9_COMP *cpi) {
   RATE_CONTROL *const rc = &cpi->rc;
   int target = rc->this_frame_target;
   int top_index, bottom_index;
-  int q = 0;
+  int q = cpi->common.base_qindex;
 
   (void) top_index;
   (void) bottom_index;

@@ -395,11 +395,11 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
 
   if (cm->use_gpu) {
     vp9_free_gpu_interface_buffers(cpi);
-
 #if CONFIG_GPU_COMPUTE
     vp9_egpu_remove(cpi);
     vp9_gpu_remove(&cpi->common);
 #endif
+    vpx_free(cpi->seg_map_pred);
   }
 
   vp9_free_pc_tree(&cpi->td);
@@ -807,8 +807,8 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
   // conditions needs to be identified and added.
   cpi->td.mb.use_gpu = cm->use_gpu = cpi->oxcf.use_gpu;
   vp9_alloc_compressor_data(cpi);
-#if CONFIG_GPU_COMPUTE
   if (cm->use_gpu) {
+#if CONFIG_GPU_COMPUTE
     // TODO(karthick-ittiam): If the GPU initialization fails, the calling
     // function signals it as memory allocation error, instead of the error
     // signaled below. This needs to be fixed.
@@ -819,8 +819,11 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
       vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
                          "EGPU initialization failed");
     assert(ASYNC_FRAME_COUNT_WAIT > 1);
-  }
 #endif
+    vpx_free(cpi->seg_map_pred);
+    CHECK_MEM_ERROR(cm, cpi->seg_map_pred,
+                    vpx_calloc(cm->mi_rows * cm->mi_cols, 1));
+  }
 
   cpi->svc.temporal_layering_mode = oxcf->temporal_layering_mode;
 

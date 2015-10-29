@@ -3962,27 +3962,25 @@ void vp9_gpu_rewrite_quant_info(VP9_COMP *cpi, MACROBLOCK *x, int q) {
     vp9_set_high_precision_mv(cpi, q < HIGH_PRECISION_MV_QTHRESH);
   }
   vp9_set_quantizer(cm, q);
-  vp9_set_variance_partition_thresholds(cpi, q);
-  vp9_frame_init_quantizer(cpi, x);
-  vp9_initialize_rd_consts(cpi, x);
   if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
     vp9_gpu_cyclic_refresh_qindex_setup(cpi);
   }
+  vp9_set_variance_partition_thresholds(cpi, q);
+  vp9_frame_init_quantizer(cpi, x);
+  vp9_initialize_rd_consts(cpi, x);
 }
 
-static void encode_tiles(VP9_COMP *cpi) {
+static void vp9_gpu_compute(VP9_COMP *cpi, ThreadData *td) {
   VP9_COMMON *const cm = &cpi->common;
-  ThreadData *const td = &cpi->td;
-  int mi_row_start = 0, mi_row_end = cm->mi_rows;
 
-  // enable gpu processing
   if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode) {
     vp9_gpu_predict_inter_qp(cpi);
     if (!frame_is_intra_only(cm)) {
       int base_qindex = cm->base_qindex;
 
       td->mb.data_parallel_processing = 1;
-      if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT) {
+      if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT &&
+          MAX_SUB_FRAMES > 2) {
         int q = cpi->rc.q_prediction_curr;
 
         if (cm->base_qindex != q) {
@@ -3992,12 +3990,11 @@ static void encode_tiles(VP9_COMP *cpi) {
 #if CONFIG_GPU_COMPUTE
       vp9_gpu_mv_compute(cpi, td);
 #else
-      encode_sb_rows(cpi, td, mi_row_start, mi_row_end, MI_BLOCK_SIZE);
+      encode_sb_rows(cpi, td, 0, cm->mi_rows, MI_BLOCK_SIZE);
 #endif
-      if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT) {
-#if CONFIG_GPU_COMPUTE
+      if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT &&
+          MAX_SUB_FRAMES > 2) {
         cpi->b_async = 1;
-#endif
         if (cm->base_qindex != base_qindex) {
           vp9_gpu_rewrite_quant_info(cpi, &td->mb, base_qindex);
         }
@@ -4005,9 +4002,17 @@ static void encode_tiles(VP9_COMP *cpi) {
       td->mb.data_parallel_processing = 0;
     }
   }
+}
+
+static void encode_tiles(VP9_COMP *cpi) {
+  VP9_COMMON *const cm = &cpi->common;
+  ThreadData *const td = &cpi->td;
+
+  // enable gpu processing
+  vp9_gpu_compute(cpi, td);
 
   // encode superblock rows
-  encode_sb_rows(cpi, td, mi_row_start, mi_row_end, MI_BLOCK_SIZE);
+  encode_sb_rows(cpi, td, 0, cm->mi_rows, MI_BLOCK_SIZE);
 }
 
 static void encode_tiles_mt(VP9_COMP *cpi) {
@@ -4029,35 +4034,7 @@ static void encode_tiles_mt(VP9_COMP *cpi) {
   memset(cpi->cur_sb_col, -1, (sizeof(*cpi->cur_sb_col) * cm->sb_rows));
 
   // enable gpu processing
-  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode) {
-    vp9_gpu_predict_inter_qp(cpi);
-    if (!frame_is_intra_only(cm)) {
-      int base_qindex = cm->base_qindex;
-
-      td->mb.data_parallel_processing = 1;
-      if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT) {
-        int q = cpi->rc.q_prediction_curr;
-
-        if (cm->base_qindex != q) {
-          vp9_gpu_rewrite_quant_info(cpi, &td->mb, q);
-        }
-      }
-#if CONFIG_GPU_COMPUTE
-      vp9_gpu_mv_compute(cpi, td);
-#else
-      encode_sb_rows(cpi, td, 0, cm->mi_rows, MI_BLOCK_SIZE);
-#endif
-      if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT) {
-#if CONFIG_GPU_COMPUTE
-        cpi->b_async = 1;
-#endif
-        if (cm->base_qindex != base_qindex) {
-          vp9_gpu_rewrite_quant_info(cpi, &td->mb, base_qindex);
-        }
-      }
-      td->mb.data_parallel_processing = 0;
-    }
-  }
+  vp9_gpu_compute(cpi, td);
 
   for (thread_id = 0; thread_id < cpi->max_threads ; ++thread_id) {
     VPxWorker *const worker = &cpi->enc_thread_hndl[thread_id];

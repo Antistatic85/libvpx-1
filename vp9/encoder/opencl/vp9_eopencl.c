@@ -389,7 +389,7 @@ static void vp9_eopencl_alloc_buffers(VP9_COMP *cpi) {
     goto fail;
 
   // alloc output buffers for pro motion estimation
-  for (i = 0; i < 2; i++) {
+  for (i = 0; i < NUM_PING_PONG_BUFFERS; i++) {
     eopencl->gpu_output_pro_me[i] = clCreateBuffer(
         opencl->context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
         alloc_size * sizeof(GPU_OUTPUT_PRO_ME), NULL, &status);
@@ -516,7 +516,7 @@ static void vp9_eopencl_free_buffers(VP9_COMP *cpi) {
       goto fail;
   }
 
-  for (i = 0; i < 2; i++) {
+  for (i = 0; i < NUM_PING_PONG_BUFFERS; i++) {
     for (subframe_id = 0; subframe_id < MAX_SUB_FRAMES; ++subframe_id) {
       opencl_buffer *gpu_output_pro_me_sub_buffer =
           &eopencl->gpu_output_pro_me_sub_buf[i][subframe_id];

@@ -39,7 +39,7 @@ typedef struct VP9_EOPENCL {
   opencl_buffer gpu_input;
   cl_mem gpu_output_me;
   opencl_buffer gpu_output_me_sub_buf[MAX_SUB_FRAMES];
-  opencl_buffer rdopt_parameters[2];
+  opencl_buffer rdopt_parameters[NUM_PING_PONG_BUFFERS];
 
   cl_mem gpu_scratch;
 
@@ -56,8 +56,8 @@ typedef struct VP9_EOPENCL {
   cl_mem src_1d_set[2];
 
   // buffer pair to be used alternately across frames (ping-pong)
-  cl_mem gpu_output_pro_me[2];
-  opencl_buffer gpu_output_pro_me_sub_buf[2][MAX_SUB_FRAMES];
+  cl_mem gpu_output_pro_me[NUM_PING_PONG_BUFFERS];
+  opencl_buffer gpu_output_pro_me_sub_buf[NUM_PING_PONG_BUFFERS][MAX_SUB_FRAMES];
 
   // gpu choose partitioning kernels
   cl_kernel col_row_projection;

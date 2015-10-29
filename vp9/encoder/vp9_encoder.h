@@ -481,8 +481,9 @@ typedef struct VP9_COMP {
 
   YV12_BUFFER_CONFIG *last_frame_buffer;
 
-#if CONFIG_GPU_COMPUTE
   int b_async;
+  unsigned char *seg_map_pred;
+#if CONFIG_GPU_COMPUTE
   VP9_EGPU egpu;
 #endif
   int resize_pending;

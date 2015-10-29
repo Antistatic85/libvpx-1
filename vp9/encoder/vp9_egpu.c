@@ -234,7 +234,7 @@ static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi, ThreadData *td,
     vp9_gpu_fill_segment_rd_parameters(cpi, &rd_param_ptr->seg_rd_param[1], 1);
 }
 
-static void vp9_gpu_fill_seg_id(VP9_COMP *cpi) {
+static void vp9_gpu_fill_seg_id(VP9_COMP *cpi, int mi_row_start, int mi_row_end) {
   VP9_COMMON *const cm = &cpi->common;
   VP9_EGPU *egpu = &cpi->egpu;
   GPU_INPUT *gpu_input_base = NULL;
@@ -250,7 +250,7 @@ static void vp9_gpu_fill_seg_id(VP9_COMP *cpi) {
   // the supported segmentation feature in GPU maintains same seg_id for the
   // entire SB. If this is not the case in the future then make seg id as an
   // array and fill it for all GPU_BLOCK_SIZES
-  for (mi_row = 0; mi_row < cm->mi_rows; mi_row += mi_row_step) {
+  for (mi_row = mi_row_start; mi_row < mi_row_end; mi_row += mi_row_step) {
     for (mi_col = 0; mi_col < cm->mi_cols; mi_col += mi_col_step) {
       GPU_INPUT *gpu_input = gpu_input_base +
           vp9_get_gpu_buffer_index(cpi, mi_row, mi_col);
@@ -282,11 +282,11 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi, ThreadData *td) {
 
   (void) tile_row;
 
-  subframe_idx_start = ((MAX_SUB_FRAMES != 1) ? cpi->b_async : 0);
+  subframe_idx_start = cpi->b_async;
   vp9_subframe_init(&subframe, cm, subframe_idx_start);
 
   // fill segmentation map
-  vp9_gpu_fill_seg_id(cpi);
+  vp9_gpu_fill_seg_id(cpi, subframe.mi_row_start, cm->mi_rows);
 
   // fill gpu input buffers for blocks that are not processed in GPU by
   // prologue kernels.
@@ -304,7 +304,7 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi, ThreadData *td) {
     }
   }
 
-  if (MAX_SUB_FRAMES == 1 || !cpi->b_async) {
+  if (MAX_SUB_FRAMES <= 2 || !cpi->b_async) {
     // fill rd param info
     vp9_gpu_fill_rd_parameters(cpi, td, 0);
   }
@@ -316,8 +316,6 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi, ThreadData *td) {
   }
 
   // re-map source and reference pointers before starting cpu side processing
-  vp9_gpu_acquire_frame_buffer(cm, cpi->Source);
-  vp9_gpu_acquire_frame_buffer(cm, cpi->Last_Source);
   vp9_gpu_acquire_frame_buffer(cm, get_ref_frame_buffer(cpi, LAST_FRAME));
 }
 
@@ -330,29 +328,52 @@ void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
   if (next_source == NULL)
     return;
 
-  if (subframe_idx == MAX_SUB_FRAMES - 1 && MAX_SUB_FRAMES > 1) {
-    SubFrameInfo subframe;
-    int tile_col, tile_row;
-    int mi_row;
-    const int tile_cols = 1 << cm->log2_tile_cols;
-    const int mi_cols_g = (cm->mi_cols >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
-    const int mi_rows_g = (cm->mi_rows >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
-    TileInfo tile;
-    YV12_BUFFER_CONFIG *last_source = cpi->Last_Source;
-
-    (void) tile_row;
-
-    vp9_subframe_init(&subframe, cm, 0);
-
-    // enqueue prologue kernels for gpu
+  // enqueue prologue kernels for gpu
+  if (subframe_idx == 0)
     egpu->execute_prologue(cpi);
 
+  // enqueue me kernels for gpu
+  if (subframe_idx == MAX_SUB_FRAMES - 1) {
     if (cpi->b_async) {
+      SubFrameInfo subframe;
+      int tile_col, tile_row;
+      int mi_row;
+      const int tile_cols = 1 << cm->log2_tile_cols;
+      const int mi_cols_g = (cm->mi_cols >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
+      const int mi_rows_g = (cm->mi_rows >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
+      TileInfo tile;
+      YV12_BUFFER_CONFIG *last_source = cpi->Last_Source;
+      unsigned char *seg_map = cpi->segmentation_map;
+      CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
+      double rate_ratio_qdelta = cr->rate_ratio_qdelta;
       int q = cpi->rc.q_prediction_next;
       int base_qindex = cm->base_qindex;
 
-      if (cm->base_qindex != q) {
+      (void) tile_row;
+      vp9_subframe_init(&subframe, cm, 0);
+
+      if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
+        if (cr->percent_refresh > 0 &&
+            (cpi->rc.frames_since_key + 1) >= (4 * cpi->svc.number_temporal_layers) *
+            (100 / cr->percent_refresh)) {
+          cr->rate_ratio_qdelta = 2.0;
+          if (cr->rate_ratio_qdelta != rate_ratio_qdelta) {
+            vp9_gpu_cyclic_refresh_qindex_setup(cpi);
+          }
+        }
+      }
+      if (cm->base_qindex != q || cr->rate_ratio_qdelta != rate_ratio_qdelta) {
         vp9_gpu_rewrite_quant_info(cpi, &td->mb, q);
+      }
+
+      // fill segmentation map
+      if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
+        cpi->segmentation_map = cpi->seg_map_pred;
+        cyclic_refresh_update_map(cpi, 1);
+      }
+      vp9_gpu_fill_seg_id(cpi, subframe.mi_row_start, subframe.mi_row_end);
+      if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
+        cpi->segmentation_map = seg_map;
       }
 
       // fill gpu input buffers for blocks that are not processed in GPU by
@@ -391,15 +412,20 @@ void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
       // enqueue kernels for gpu
       egpu->execute(cpi, 0, 1);
 
-      if (cm->base_qindex != base_qindex) {
+      if (cm->base_qindex != base_qindex ||
+          cr->rate_ratio_qdelta != rate_ratio_qdelta) {
+        if (cr->rate_ratio_qdelta != rate_ratio_qdelta) {
+          cr->rate_ratio_qdelta = rate_ratio_qdelta;
+          vp9_gpu_cyclic_refresh_qindex_setup(cpi);
+        }
         vp9_gpu_rewrite_quant_info(cpi, &td->mb, base_qindex);
       }
+
       vp9_gpu_acquire_frame_buffer(cm, get_frame_new_buffer(cm));
     }
-
-    vp9_gpu_acquire_frame_buffer(cm, cpi->Source);
-    vp9_gpu_acquire_frame_buffer(cm, &next_source->img);
   }
+  vp9_gpu_acquire_frame_buffer(cm, cpi->Source);
+  vp9_gpu_acquire_frame_buffer(cm, &next_source->img);
 }
 #endif
 
@@ -542,6 +568,27 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
         }
         vp9_gpu_mv_compute_async(cpi, td, subframe_idx);
       }
+    }
+#else
+    if (MAX_SUB_FRAMES > 2 &&
+        cm->current_video_frame >= ASYNC_FRAME_COUNT_WAIT &&
+        cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ &&
+        subframe_idx == MAX_SUB_FRAMES - 1 &&
+        mi_row == subframe.mi_row_start &&
+        !x->data_parallel_processing) {
+      unsigned char *seg_map = cpi->segmentation_map;
+
+      if (cpi->max_threads > 1) {
+        const int sb_row = subframe.mi_row_start >> MI_BLOCK_SIZE_LOG2;
+        const int sb_col = cm->mi_cols >> MI_BLOCK_SIZE_LOG2;
+
+        vp9_enc_sync_read(cpi, sb_row, sb_col);
+      }
+
+      assert(cpi->oxcf.content != VP9E_CONTENT_SCREEN);
+      cpi->segmentation_map = cpi->seg_map_pred;
+      cyclic_refresh_update_map(cpi, 1);
+      cpi->segmentation_map = seg_map;
     }
 #endif
   }

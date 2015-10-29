@@ -20,44 +20,6 @@
 #include "vp9/encoder/vp9_ratectrl.h"
 #include "vp9/encoder/vp9_segmentation.h"
 
-struct CYCLIC_REFRESH {
-  // Percentage of blocks per frame that are targeted as candidates
-  // for cyclic refresh.
-  int percent_refresh;
-  // Maximum q-delta as percentage of base q.
-  int max_qdelta_perc;
-  // Superblock starting index for cycling through the frame.
-  int sb_index;
-  // Controls how long block will need to wait to be refreshed again, in
-  // excess of the cycle time, i.e., in the case of all zero motion, block
-  // will be refreshed every (100/percent_refresh + time_for_refresh) frames.
-  int time_for_refresh;
-  // Target number of (8x8) blocks that are set for delta-q.
-  int target_num_seg_blocks;
-  // Actual number of (8x8) blocks that were applied delta-q.
-  int actual_num_seg1_blocks;
-  int actual_num_seg2_blocks;
-  // RD mult. parameters for segment 1.
-  int rdmult;
-  // Cyclic refresh map.
-  signed char *map;
-  // Map of the last q a block was coded at.
-  uint8_t *last_coded_q_map;
-  // Thresholds applied to the projected rate/distortion of the coding block,
-  // when deciding whether block should be refreshed.
-  int64_t thresh_rate_sb;
-  int64_t thresh_dist_sb;
-  // Threshold applied to the motion vector (in units of 1/8 pel) of the
-  // coding block, when deciding whether block should be refreshed.
-  int16_t motion_thresh;
-  // Rate target ratio to set q delta.
-  double rate_ratio_qdelta;
-  // Boost factor for rate target ratio, for segment CR_SEGMENT_ID_BOOST2.
-  int rate_boost_fac;
-  double low_content_avg;
-  int qindex_delta[3];
-};
-
 CYCLIC_REFRESH *vp9_cyclic_refresh_alloc(int mi_rows, int mi_cols) {
   size_t last_coded_q_map_size;
   CYCLIC_REFRESH *const cr = vpx_calloc(1, sizeof(*cr));
@@ -383,12 +345,13 @@ void vp9_cyclic_refresh_check_golden_update(VP9_COMP *const cpi) {
 // 1/CR_SEGMENT_ID_BOOST1 (refresh) for each superblock.
 // Blocks labeled as BOOST1 may later get set to BOOST2 (during the
 // encoding of the superblock).
-static void cyclic_refresh_update_map(VP9_COMP *const cpi) {
+void cyclic_refresh_update_map(VP9_COMP *const cpi, int dry_run) {
   VP9_COMMON *const cm = &cpi->common;
   CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
   unsigned char *const seg_map = cpi->segmentation_map;
   int i, block_count, bl_index, sb_rows, sb_cols, sbs_in_frame;
   int xmis, ymis, x, y;
+  int target_num_seg_blocks = 0;
   memset(seg_map, CR_SEGMENT_ID_BASE, cm->mi_rows * cm->mi_cols);
   sb_cols = (cm->mi_cols + MI_BLOCK_SIZE - 1) / MI_BLOCK_SIZE;
   sb_rows = (cm->mi_rows + MI_BLOCK_SIZE - 1) / MI_BLOCK_SIZE;
@@ -400,7 +363,6 @@ static void cyclic_refresh_update_map(VP9_COMP *const cpi) {
   // to be refreshed, or we have passed through whole frame.
   assert(cr->sb_index < sbs_in_frame);
   i = cr->sb_index;
-  cr->target_num_seg_blocks = 0;
   do {
     int sum_map = 0;
     // Get the mi_row/mi_col corresponding to superblock index i.
@@ -429,7 +391,7 @@ static void cyclic_refresh_update_map(VP9_COMP *const cpi) {
         if (cr->map[bl_index2] == 0) {
           if (cr->last_coded_q_map[bl_index2] > qindex_thresh)
             sum_map++;
-        } else if (cr->map[bl_index2] < 0) {
+        } else if (cr->map[bl_index2] < 0 && !dry_run) {
           cr->map[bl_index2]++;
         }
       }
@@ -441,14 +403,17 @@ static void cyclic_refresh_update_map(VP9_COMP *const cpi) {
         for (x = 0; x < xmis; x++) {
           seg_map[bl_index + y * cm->mi_cols + x] = CR_SEGMENT_ID_BOOST1;
         }
-      cr->target_num_seg_blocks += xmis * ymis;
+      target_num_seg_blocks += xmis * ymis;
     }
     i++;
     if (i == sbs_in_frame) {
       i = 0;
     }
-  } while (cr->target_num_seg_blocks < block_count && i != cr->sb_index);
-  cr->sb_index = i;
+  } while (target_num_seg_blocks < block_count && i != cr->sb_index);
+  if (!dry_run) {
+    cr->sb_index = i;
+    cr->target_num_seg_blocks = target_num_seg_blocks;
+  }
 }
 
 // Set cyclic refresh parameters.
@@ -557,7 +522,14 @@ void vp9_cyclic_refresh_setup(VP9_COMP *const cpi) {
     vp9_set_segdata(seg, CR_SEGMENT_ID_BOOST2, SEG_LVL_ALT_Q, qindex_delta);
 
     // Update the segmentation and refresh map.
-    cyclic_refresh_update_map(cpi);
+    cyclic_refresh_update_map(cpi, 0);
+
+    if (cpi->b_async) {
+      SubFrameInfo subframe;
+      vp9_subframe_init(&subframe, cm, 0);
+      memcpy(cpi->segmentation_map, cpi->seg_map_pred,
+             (subframe.mi_row_end - subframe.mi_row_start) * cm->mi_cols);
+    }
   }
 }
 
