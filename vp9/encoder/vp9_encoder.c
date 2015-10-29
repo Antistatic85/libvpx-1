@@ -2828,7 +2828,7 @@ static void loopfilter_frame(VP9_COMP *cpi) {
       vp9_loop_filter_frame(cm->frame_to_show, cm, xd, lf->filter_level, 0, 0);
   }
 
-  vp9_post_loopfilter(cm);
+  vp9_extend_frame_inner_borders(cm->frame_to_show);
 }
 
 void vp9_pre_loopfilter(VP9_COMP *cpi) {
@@ -2854,10 +2854,6 @@ void vp9_pre_loopfilter(VP9_COMP *cpi) {
   if (lf->filter_level > 0) {
     vp9_loop_filter_frame_init(cm, lf->filter_level);
   }
-}
-
-void vp9_post_loopfilter(VP9_COMMON *cm) {
-  vp9_extend_frame_inner_borders(cm->frame_to_show);
 }
 
 static INLINE void alloc_frame_mvs(const VP9_COMMON *cm,

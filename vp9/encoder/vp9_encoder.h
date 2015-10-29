@@ -612,8 +612,6 @@ void vp9_alloc_compressor_data(VP9_COMP *cpi);
 
 void vp9_pre_loopfilter(VP9_COMP *cpi);
 
-void vp9_post_loopfilter(VP9_COMMON *cm);
-
 void vp9_scale_references(VP9_COMP *cpi);
 
 void vp9_update_reference_frames(VP9_COMP *cpi);

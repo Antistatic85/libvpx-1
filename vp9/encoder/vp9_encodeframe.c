@@ -3650,6 +3650,93 @@ static void nonrd_use_partition(VP9_COMP *cpi,
     update_partition_context(xd, mi_row, mi_col, subsize, bsize);
 }
 
+static void loopfilter_extend_onfly(VP9_COMP *cpi, ThreadData *td,
+                                    int mi_row, int mi_col) {
+  VP9_COMMON *const cm = &cpi->common;
+  MACROBLOCK *const x = &td->mb;
+  MACROBLOCKD *const xd = &x->e_mbd;
+
+  if (!x->data_parallel_processing && mi_row >= MI_BLOCK_SIZE
+      && mi_col >= MI_BLOCK_SIZE && cpi->sf.lpf_pick >= LPF_PICK_FROM_Q) {
+    // Do a loopfilter of the top-left SB
+    if (cm->lf.filter_level > 0) {
+      vp9_loop_filter_sb(cm->frame_to_show, cm, x->e_mbd.plane,
+                         mi_row - MI_BLOCK_SIZE, mi_col - MI_BLOCK_SIZE, 0);
+    }
+    // extend frame borders towards left
+    if (mi_col == MI_BLOCK_SIZE && (mi_row - 2 * MI_BLOCK_SIZE) >= 0) {
+      YV12_BUFFER_CONFIG *rec_buff = cm->frame_to_show;
+      const int inner_bw = (rec_buff->border > VP9INNERBORDERINPIXELS) ?
+          VP9INNERBORDERINPIXELS : rec_buff->border;
+
+      vp9_setup_dst_planes(xd->plane, rec_buff, mi_row - 2 * MI_BLOCK_SIZE, 0);
+      vp9_extend_sb(cm->frame_to_show, xd->plane[0].dst.buf,
+                    xd->plane[1].dst.buf, xd->plane[2].dst.buf, inner_bw,
+                    LEFT);
+    }
+
+    if (mi_col + MI_BLOCK_SIZE >= cm->mi_cols) {
+      YV12_BUFFER_CONFIG *rec_buff = cm->frame_to_show;
+      const int inner_bw = (rec_buff->border > VP9INNERBORDERINPIXELS) ?
+          VP9INNERBORDERINPIXELS : rec_buff->border;
+
+      // Do a loopfilter of the top SB
+      if (cm->lf.filter_level > 0) {
+        vp9_loop_filter_sb(cm->frame_to_show, cm, x->e_mbd.plane,
+                           mi_row - MI_BLOCK_SIZE, mi_col, 0);
+      }
+
+      if ((mi_row - 2 * MI_BLOCK_SIZE) >= 0) {
+        // extend frame borders towards right
+        vp9_setup_dst_planes(xd->plane, rec_buff,  mi_row - 2 * MI_BLOCK_SIZE, 0);
+        vp9_extend_sb(cm->frame_to_show, xd->plane[0].dst.buf,
+                      xd->plane[1].dst.buf, xd->plane[2].dst.buf, inner_bw,
+                      RIGHT);
+        if ((mi_row - 2 * MI_BLOCK_SIZE) == 0) {
+          // extend frame borders towards top
+          vp9_extend_sb(cm->frame_to_show, xd->plane[0].dst.buf,
+                        xd->plane[1].dst.buf, xd->plane[2].dst.buf, inner_bw,
+                        TOP);
+        }
+      }
+    }
+  }
+
+  if (!x->data_parallel_processing &&
+      mi_row + MI_BLOCK_SIZE >= cm->mi_rows &&
+      mi_col + MI_BLOCK_SIZE >= cm->mi_cols &&
+      cpi->sf.lpf_pick >= LPF_PICK_FROM_Q) {
+    YV12_BUFFER_CONFIG *rec_buff = cm->frame_to_show;
+    const int inner_bw = (rec_buff->border > VP9INNERBORDERINPIXELS) ?
+        VP9INNERBORDERINPIXELS : rec_buff->border;
+
+    // Do a loopfilter of the last SB row of the frame
+    if (cm->lf.filter_level > 0) {
+      vp9_loop_filter_rows(cm->frame_to_show, cm, x->e_mbd.plane,
+                           mi_row, cm->mi_rows, 0);
+    }
+    // extend frame borders for last row
+    vp9_setup_dst_planes(xd->plane, rec_buff, mi_row - MI_BLOCK_SIZE, 0);
+    vp9_extend_sb(cm->frame_to_show, xd->plane[0].dst.buf,
+                  xd->plane[1].dst.buf, xd->plane[2].dst.buf, inner_bw,
+                  LEFT);
+    vp9_extend_sb(cm->frame_to_show, xd->plane[0].dst.buf,
+                  xd->plane[1].dst.buf, xd->plane[2].dst.buf, inner_bw,
+                  RIGHT);
+    vp9_setup_dst_planes(xd->plane, rec_buff, mi_row, 0);
+    vp9_extend_sb(cm->frame_to_show, xd->plane[0].dst.buf,
+                  xd->plane[1].dst.buf, xd->plane[2].dst.buf, inner_bw,
+                  LEFT);
+    vp9_extend_sb(cm->frame_to_show, xd->plane[0].dst.buf,
+                  xd->plane[1].dst.buf, xd->plane[2].dst.buf, inner_bw,
+                  RIGHT);
+    vp9_setup_dst_planes(xd->plane, rec_buff, 0, 0);
+    vp9_extend_sb(cm->frame_to_show, xd->plane[0].dst.buf,
+                  xd->plane[1].dst.buf, xd->plane[2].dst.buf, inner_bw,
+                  BOTTOM);
+  }
+}
+
 static void encode_nonrd_sb_row(VP9_COMP *cpi,
                                 ThreadData *td,
                                 const TileInfo *const tile_info,
@@ -3764,31 +3851,9 @@ static void encode_nonrd_sb_row(VP9_COMP *cpi,
         assert(0);
         break;
     }
-    if (!x->data_parallel_processing && cm->lf.filter_level > 0 &&
-        mi_row >= MI_BLOCK_SIZE && mi_col >= MI_BLOCK_SIZE &&
-        cpi->sf.lpf_pick >= LPF_PICK_FROM_Q) {
-      // Do a loopfilter of the top-left SB
-      vp9_loop_filter_sb(cm->frame_to_show, cm, x->e_mbd.plane,
-                         mi_row - MI_BLOCK_SIZE, mi_col - MI_BLOCK_SIZE, 0);
 
-      // Do a loopfilter of the top SB
-      if (mi_col + MI_BLOCK_SIZE >= cm->mi_cols) {
-        vp9_loop_filter_sb(cm->frame_to_show, cm, x->e_mbd.plane,
-                           mi_row - MI_BLOCK_SIZE, mi_col, 0);
-      }
-    }
-
-    if (!x->data_parallel_processing &&
-        mi_row + MI_BLOCK_SIZE >= cm->mi_rows &&
-        mi_col + MI_BLOCK_SIZE >= cm->mi_cols &&
-        cpi->sf.lpf_pick >= LPF_PICK_FROM_Q) {
-      // Do a loopfilter of the last SB row of the frame
-      if (cm->lf.filter_level > 0) {
-        vp9_loop_filter_rows(cm->frame_to_show, cm, x->e_mbd.plane,
-                             mi_row, cm->mi_rows, 0);
-      }
-      vp9_post_loopfilter(cm);
-    }
+    // perform loop filter and extend borders
+    loopfilter_extend_onfly(cpi, td, mi_row, mi_col);
 
     // In multi-threading, after encoding the SB, make sure this is updated
     // in the cur_sb_col count

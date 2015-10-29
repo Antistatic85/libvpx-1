@@ -198,3 +198,99 @@ void vp9_copy_and_extend_frame_with_rect(const YV12_BUFFER_CONFIG *src,
                         srcw_uv, srch_uv,
                         et_uv, el_uv, eb_uv, er_uv);
 }
+
+static void vp9_extend_sbp_left(uint8_t *const src, int src_stride,
+                                int height, int extend_left) {
+  int i;
+  uint8_t *src_ptr = src;
+  uint8_t *dst_ptr = src - extend_left;
+
+  for (i = 0; i < height; ++i) {
+    memset(dst_ptr, src_ptr[0], extend_left);
+    src_ptr += src_stride;
+    dst_ptr += src_stride;
+  }
+}
+
+static void vp9_extend_sbp_right(uint8_t *const src, int src_stride,
+                                 int width, int height, int extend_right) {
+  int i;
+  uint8_t *src_ptr = src + width - 1;
+  uint8_t *dst_ptr = src + width;
+
+  for (i = 0; i < height; ++i) {
+    memset(dst_ptr, src_ptr[0], extend_right);
+    src_ptr += src_stride;
+    dst_ptr += src_stride;
+  }
+}
+
+static void vp9_extend_sbp_top(uint8_t *const src, int src_stride, int width,
+                               int extend_left, int extend_top,
+                               int extend_right) {
+  int i;
+  const int linesize = extend_left + extend_right + width;
+  uint8_t *src_ptr = src - extend_left;
+  uint8_t *dst_ptr = src + src_stride * -extend_top - extend_left;
+
+  for (i = 0; i < extend_top; ++i) {
+    memcpy(dst_ptr, src_ptr, linesize);
+    dst_ptr += src_stride;
+  }
+}
+
+static void vp9_extend_sbp_bottom(uint8_t *const src, int src_stride,
+                                  int width, int height, int extend_left,
+                                  int extend_bottom, int extend_right) {
+  int i;
+  const int linesize = extend_left + extend_right + width;
+  uint8_t *src_ptr = src + src_stride * (height - 1) - extend_left;
+  uint8_t *dst_ptr = src + src_stride * height - extend_left;
+
+  for (i = 0; i < extend_bottom; ++i) {
+    memcpy(dst_ptr, src_ptr, linesize);
+    dst_ptr += src_stride;
+  }
+}
+
+void vp9_extend_sb(YV12_BUFFER_CONFIG *ybf,
+                   uint8_t *src_y, uint8_t *src_u, uint8_t *src_v,
+                   int ext_size, int direction) {
+  const int bh = 64;
+  const int ss_x = ybf->uv_width < ybf->y_width;
+  const int ss_y = ybf->uv_height < ybf->y_height;
+  const int c_bh = bh >> ss_y;
+  const int c_el = ext_size >> ss_x;
+  const int c_et = ext_size >> ss_y;
+  const int c_eb = c_et;
+  const int c_er = c_el;
+
+  switch (direction) {
+    case LEFT:
+      vp9_extend_sbp_left(src_y, ybf->y_stride, bh, ext_size);
+      vp9_extend_sbp_left(src_u, ybf->uv_stride, c_bh, c_el);
+      vp9_extend_sbp_left(src_v, ybf->uv_stride, c_bh, c_el);
+      break;
+    case RIGHT:
+      vp9_extend_sbp_right(src_y, ybf->y_stride, ybf->y_width, bh, ext_size);
+      vp9_extend_sbp_right(src_u, ybf->uv_stride, ybf->uv_width, c_bh, c_er);
+      vp9_extend_sbp_right(src_v, ybf->uv_stride, ybf->uv_width, c_bh, c_er);
+      break;
+    case TOP:
+      vp9_extend_sbp_top(src_y, ybf->y_stride, ybf->y_width, ext_size, ext_size,
+                         ext_size);
+      vp9_extend_sbp_top(src_u, ybf->uv_stride, ybf->uv_width, c_el, c_et,
+                         c_er);
+      vp9_extend_sbp_top(src_v, ybf->uv_stride, ybf->uv_width, c_el, c_et,
+                         c_er);
+      break;
+    case BOTTOM:
+      vp9_extend_sbp_bottom(src_y, ybf->y_stride, ybf->y_width, ybf->y_height,
+                            ext_size, ext_size, ext_size);
+      vp9_extend_sbp_bottom(src_u, ybf->uv_stride, ybf->uv_width,
+                            ybf->uv_height, c_el, c_eb, c_er);
+      vp9_extend_sbp_bottom(src_v, ybf->uv_stride, ybf->uv_width,
+                            ybf->uv_height, c_el, c_eb, c_er);
+      break;
+  }
+}

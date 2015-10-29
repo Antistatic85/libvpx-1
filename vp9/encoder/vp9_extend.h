@@ -18,6 +18,10 @@
 extern "C" {
 #endif
 
+#define LEFT 0
+#define RIGHT 1
+#define TOP 2
+#define BOTTOM 3
 
 void vp9_copy_and_extend_frame(const YV12_BUFFER_CONFIG *src,
                                YV12_BUFFER_CONFIG *dst);
@@ -26,6 +30,11 @@ void vp9_copy_and_extend_frame_with_rect(const YV12_BUFFER_CONFIG *src,
                                          YV12_BUFFER_CONFIG *dst,
                                          int srcy, int srcx,
                                          int srch, int srcw);
+
+void vp9_extend_sb(YV12_BUFFER_CONFIG *ybf,
+                   uint8_t *src_y, uint8_t *src_u, uint8_t *src_v,
+                   int ext_size, int direction);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

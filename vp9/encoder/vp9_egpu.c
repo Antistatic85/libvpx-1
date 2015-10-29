@@ -405,10 +405,6 @@ void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
       // fill rd param info
       vp9_gpu_fill_rd_parameters(cpi, td, 1);
 
-      // extend frame borders before queuing kernels
-      // TODO: move frame border extension inside encode non rd loop
-      vp9_post_loopfilter(cm);
-
       // enqueue kernels for gpu
       egpu->execute(cpi, 0, 1);
 
