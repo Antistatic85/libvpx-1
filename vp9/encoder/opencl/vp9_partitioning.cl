@@ -23,6 +23,7 @@ struct GPU_OUTPUT_PRO_ME {
   int_mv pred_mv;
   int pred_mv_sad;
   char color_sensitivity;
+  char block_size;
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT_PRO_ME GPU_OUTPUT_PRO_ME;
 
@@ -692,6 +693,7 @@ void vp9_choose_partitions(__global uchar *src,
   if (segment_id == CR_SEGMENT_ID_BASE &&
       gpu_output_pro_me->pred_mv_sad < rd_parameters->vbp_threshold_sad) {
     if (local_col == 0 && local_row == 0) {
+      gpu_output_pro_me->block_size = BLOCK_64X64;
       gpu_input[0].do_compute = GPU_BLOCK_64X64;
       gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
       gpu_input[1].do_compute = GPU_BLOCK_64X64;
@@ -719,8 +721,10 @@ void vp9_choose_partitions(__global uchar *src,
   sum_array[0][local_row * 8 + local_col] = s_avg - d_avg;
   sse_array[0][local_row * 8 + local_col] = (s_avg - d_avg) * (s_avg - d_avg);
 
-  if (local_col == 0 && local_row == 0)
+  if (local_col == 0 && local_row == 0) {
     force_split[0] = 0;
+    gpu_output_pro_me->block_size = -1;
+  }
 
   if (local_col < 2 && local_row < 2)
     force_split[1 + local_row * 2 + local_col] = 0;
@@ -787,6 +791,7 @@ select_partitions:
       sum_2 = sum_array[2][1] + sum_array[2][3];
       variance = get_variance(sse_1 + sse_2, sum_1 + sum_2, 6);
       if (variance < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2]) {
+        gpu_output_pro_me->block_size = BLOCK_64X64;
         gpu_input[0].do_compute = GPU_BLOCK_64X64;
         gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
         gpu_input[1].do_compute = GPU_BLOCK_64X64;
@@ -801,6 +806,7 @@ select_partitions:
         var2 = get_variance(sse_2, sum_2, 5);
         if (var1 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2] &&
             var2 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2]) {
+          gpu_output_pro_me->block_size = BLOCK_32X64;
           gpu_input[0].do_compute = GPU_BLOCK_INVALID;
           gpu_input[1].do_compute = GPU_BLOCK_INVALID;
           gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_INVALID;
@@ -815,6 +821,7 @@ select_partitions:
           var2 = get_variance(sse_2, sum_2, 5);
           if (var1 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2] &&
               var2 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2]) {
+            gpu_output_pro_me->block_size = BLOCK_64X32;
             gpu_input[0].do_compute = GPU_BLOCK_INVALID;
             gpu_input[1].do_compute = GPU_BLOCK_INVALID;
             gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_INVALID;

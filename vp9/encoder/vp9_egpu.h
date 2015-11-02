@@ -70,6 +70,7 @@ struct GPU_OUTPUT_PRO_ME {
   int_mv pred_mv;
   int pred_mv_sad;
   char color_sensitivity;
+  char block_size;
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT_PRO_ME GPU_OUTPUT_PRO_ME;
 

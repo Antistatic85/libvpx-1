@@ -702,6 +702,9 @@ int choose_partitioning(VP9_COMP *cpi,
   int64_t thresholds[4] = {cpi->vbp_thresholds[0], cpi->vbp_thresholds[1],
       cpi->vbp_thresholds[2], cpi->vbp_thresholds[3]};
   SUM8X8 *sum8x8 = NULL;
+#if CONFIG_GPU_COMPUTE
+  int leave = 0;
+#endif
 
   // Always use 4x4 partition for key frame.
   const int is_key_frame = (cm->frame_type == KEY_FRAME);
@@ -775,6 +778,21 @@ int choose_partitioning(VP9_COMP *cpi,
       y_sad = cpi->gpu_output_pro_me_base[index].pred_mv_sad;
       sum8x8 = &cpi->gpu_output_pro_me_base[index].sum8x8;
 
+      if (cpi->gpu_output_pro_me_base[index].block_size == BLOCK_64X64) {
+        set_block_size(cpi, x, xd, mi_row, mi_col, BLOCK_64X64);
+        leave = 1;
+      } else if (cpi->gpu_output_pro_me_base[index].block_size == BLOCK_64X32) {
+        const int block_width = num_8x8_blocks_wide_lookup[BLOCK_64X64];
+        set_block_size(cpi, x, xd, mi_row, mi_col, BLOCK_64X32);
+        set_block_size(cpi, x, xd, mi_row + block_width / 2, mi_col, BLOCK_64X32);
+        leave = 1;
+      } else if (cpi->gpu_output_pro_me_base[index].block_size == BLOCK_32X64) {
+        const int block_width = num_8x8_blocks_wide_lookup[BLOCK_64X64];
+        set_block_size(cpi, x, xd, mi_row, mi_col, BLOCK_32X64);
+        set_block_size(cpi, x, xd, mi_row, mi_col + block_width / 2, BLOCK_32X64);
+        leave = 1;
+      }
+
       goto gpu_marker;
     }
 #endif
@@ -822,6 +840,10 @@ gpu_marker:
         vp9_zero(cpi->pred_mv_map[sb_index]);
       }
     }
+
+#if CONFIG_GPU_COMPUTE
+    if (leave) return 0;
+#endif
 
     vp9_setup_pre_planes(xd, 0, cpi->last_frame_buffer, mi_row, mi_col,
                          &cm->frame_refs[LAST_FRAME - 1].sf);
