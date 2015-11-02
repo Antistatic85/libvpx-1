@@ -4073,8 +4073,16 @@ static void encode_tiles(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
   ThreadData *const td = &cpi->td;
 
-  // enable gpu processing
-  vp9_gpu_compute(cpi, td);
+  {
+    struct vpx_usec_timer emr_timer;
+    vpx_usec_timer_start(&emr_timer);
+
+    // enable gpu processing
+    vp9_gpu_compute(cpi, td);
+
+    vpx_usec_timer_mark(&emr_timer);
+    cpi->time_gpu_compute += vpx_usec_timer_elapsed(&emr_timer);
+  }
 
   // encode superblock rows
   encode_sb_rows(cpi, td, 0, cm->mi_rows, MI_BLOCK_SIZE);

@@ -10,6 +10,7 @@
 
 #include "./vpx_config.h"
 #include "vpx_mem/vpx_mem.h"
+#include "vpx_ports/vpx_timer.h"
 
 #include "vp9/common/vp9_mvref_common.h"
 #if CONFIG_OPENCL
@@ -323,14 +324,21 @@ void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
   VP9_COMMON *const cm = &cpi->common;
   VP9_EGPU *const egpu = &cpi->egpu;
   struct lookahead_entry *next_source = NULL;
+  struct vpx_usec_timer emr_timer;
+
+  vpx_usec_timer_start(&emr_timer);
 
   next_source = vp9_lookahead_peek(cpi->lookahead, 0);
   if (next_source == NULL)
     return;
 
   // enqueue prologue kernels for gpu
-  if (subframe_idx == 0)
+  if (subframe_idx == 0) {
     egpu->execute_prologue(cpi);
+
+    vp9_gpu_acquire_frame_buffer(cm, cpi->Source);
+    vp9_gpu_acquire_frame_buffer(cm, &next_source->img);
+  }
 
   // enqueue me kernels for gpu
   if (subframe_idx == MAX_SUB_FRAMES - 1) {
@@ -416,12 +424,12 @@ void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
         }
         vp9_gpu_rewrite_quant_info(cpi, &td->mb, base_qindex);
       }
-
       vp9_gpu_acquire_frame_buffer(cm, get_frame_new_buffer(cm));
     }
   }
-  vp9_gpu_acquire_frame_buffer(cm, cpi->Source);
-  vp9_gpu_acquire_frame_buffer(cm, &next_source->img);
+
+  vpx_usec_timer_mark(&emr_timer);
+  cpi->time_gpu_compute += vpx_usec_timer_elapsed(&emr_timer);
 }
 #endif
 
