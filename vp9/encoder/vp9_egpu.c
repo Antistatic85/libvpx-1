@@ -534,16 +534,16 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
               cpi, (void **) &gpu_output_pro_me_subframe, subframe_idx);
           assert(gpu_output_pro_me_subframe - cpi->gpu_output_pro_me_base ==
               buffer_offset);
-          tile.mi_row_start = subframe.mi_row_start;
-          tile.mi_row_end = subframe.mi_row_end;
-          tile.mi_col_start = 0;
-          tile.mi_col_end = cm->mi_cols;
           if (cpi->max_threads > 1) {
-            const int sb_row = tile.mi_row_start >> MI_BLOCK_SIZE_LOG2;
-            const int sb_col = tile.mi_col_end >> MI_BLOCK_SIZE_LOG2;
+            const int sb_row = subframe.mi_row_start >> MI_BLOCK_SIZE_LOG2;
+            const int sb_col = cm->mi_cols >> MI_BLOCK_SIZE_LOG2;
 
             vp9_enc_sync_read(cpi, sb_row, sb_col);
           }
+          tile.mi_row_start = subframe.mi_row_start;
+          tile.mi_row_end = (subframe.mi_row_end >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
+          tile.mi_col_start = 0;
+          tile.mi_col_end = (cm->mi_cols >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
           vp9_gpu_read_output_buffers(cpi, td, &tile);
           vp9_gpu_mv_compute_async(cpi, td, subframe_idx);
         }

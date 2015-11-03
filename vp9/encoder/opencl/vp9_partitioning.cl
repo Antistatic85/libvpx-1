@@ -721,10 +721,8 @@ void vp9_choose_partitions(__global uchar *src,
   sum_array[0][local_row * 8 + local_col] = s_avg - d_avg;
   sse_array[0][local_row * 8 + local_col] = (s_avg - d_avg) * (s_avg - d_avg);
 
-  if (local_col == 0 && local_row == 0) {
+  if (local_col == 0 && local_row == 0)
     force_split[0] = 0;
-    gpu_output_pro_me->block_size = -1;
-  }
 
   if (local_col < 2 && local_row < 2)
     force_split[1 + local_row * 2 + local_col] = 0;
@@ -780,6 +778,7 @@ void vp9_choose_partitions(__global uchar *src,
 select_partitions:
   barrier(CLK_LOCAL_MEM_FENCE);
   if (local_col == 0 && local_row == 0) {
+    gpu_output_pro_me->block_size = 255;
     if (force_split[0] == 0) {
       int sum_1, sum_2;
       uint32_t sse_1, sse_2;
