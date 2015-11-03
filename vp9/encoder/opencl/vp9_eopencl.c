@@ -797,17 +797,21 @@ static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
 #endif
 
   // acquire current & last source buffer
-  img_src->buffer_alloc_dup =
-      clEnqueueMapBuffer(opencl->cmd_queue, img_src->gpu_mem_sub, CL_FALSE,
-                         CL_MAP_READ | CL_MAP_WRITE, 0,
-                         img_src->buffer_alloc_sz, 0, NULL, NULL, &status);
-  assert(status == CL_SUCCESS);
+  if (img_src->buffer_alloc_dup == NULL) {
+    img_src->buffer_alloc_dup =
+        clEnqueueMapBuffer(opencl->cmd_queue, img_src->gpu_mem_sub, CL_FALSE,
+                           CL_MAP_READ | CL_MAP_WRITE, 0,
+                           img_src->buffer_alloc_sz, 0, NULL, NULL, &status);
+    assert(status == CL_SUCCESS);
+  }
 
-  last_img_src->buffer_alloc_dup =
-      clEnqueueMapBuffer(opencl->cmd_queue, last_img_src->gpu_mem_sub, CL_FALSE,
-                         CL_MAP_READ | CL_MAP_WRITE, 0,
-                         last_img_src->buffer_alloc_sz, 0, NULL, NULL, &status);
-  assert(status == CL_SUCCESS);
+  if (last_img_src->buffer_alloc_dup == NULL) {
+    last_img_src->buffer_alloc_dup =
+        clEnqueueMapBuffer(opencl->cmd_queue, last_img_src->gpu_mem_sub, CL_FALSE,
+                           CL_MAP_READ | CL_MAP_WRITE, 0,
+                           last_img_src->buffer_alloc_sz, 0, NULL, NULL, &status);
+    assert(status == CL_SUCCESS);
+  }
 
   return;
 }
@@ -862,7 +866,8 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
   // before launching kernels make sure the buffers needed by GPU are cache
   // synced
   // release reference buffer to GPU
-  if (frm_ref->buffer_alloc_dup != NULL) {
+  if (frm_ref->buffer_alloc_dup != NULL &&
+      (sub_frame_idx == 0 || sub_frame_idx == cpi->b_async)) {
     status = clEnqueueUnmapMemObject(opencl->cmd_queue, frm_ref->gpu_mem_sub,
                                      frm_ref->buffer_alloc_dup, 0, NULL, NULL);
     frm_ref->buffer_alloc_dup = NULL;
@@ -915,19 +920,21 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
                                   0, NULL, event_ptr[NUM_KERNELS_ME]);
   assert(status == CL_SUCCESS);
 
-  if (eopencl->event[sub_frame_idx] != NULL) {
-    status = clReleaseEvent(eopencl->event[sub_frame_idx]);
-    eopencl->event[sub_frame_idx] = NULL;
-    assert(status == CL_SUCCESS);
-  }
-
   gpu_output_pro_me_sub_buffer->mapped_pointer =
       clEnqueueMapBuffer(opencl->cmd_queue,
                          gpu_output_pro_me_sub_buffer->opencl_mem,
                          CL_FALSE,
                          CL_MAP_READ,
                          0, gpu_output_pro_me_sub_buffer->size, 0,
-                         NULL, &eopencl->event[sub_frame_idx], &status);
+                         NULL, NULL, &status);
+  assert(status == CL_SUCCESS);
+
+  if (eopencl->event[sub_frame_idx] != NULL) {
+    status = clReleaseEvent(eopencl->event[sub_frame_idx]);
+    eopencl->event[sub_frame_idx] = NULL;
+    assert(status == CL_SUCCESS);
+  }
+  status = clEnqueueMarker(opencl->cmd_queue, &eopencl->event[sub_frame_idx]);
   assert(status == CL_SUCCESS);
 
 
@@ -1130,10 +1137,21 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
 
 skip_execution:
 
-  frm_ref->buffer_alloc_dup =
-      clEnqueueMapBuffer(opencl->cmd_queue, frm_ref->gpu_mem_sub, CL_FALSE,
-                         CL_MAP_READ | CL_MAP_WRITE, 0,
-                         frm_ref->buffer_alloc_sz, 0, NULL, NULL, &status);
+  if (frm_ref->buffer_alloc_dup == NULL) {
+    frm_ref->buffer_alloc_dup =
+        clEnqueueMapBuffer(opencl->cmd_queue, frm_ref->gpu_mem_sub, CL_FALSE,
+                           CL_MAP_READ | CL_MAP_WRITE, 0,
+                           frm_ref->buffer_alloc_sz, 0, NULL, NULL, &status);
+    assert(status == CL_SUCCESS);
+  }
+
+  gpu_output_me_sub_buffer->mapped_pointer =
+      clEnqueueMapBuffer(opencl->cmd_queue,
+                         gpu_output_me_sub_buffer->opencl_mem,
+                         CL_FALSE,
+                         CL_MAP_READ,
+                         0, gpu_output_me_sub_buffer->size, 0,
+                         NULL, NULL, &status);
   assert(status == CL_SUCCESS);
 
   status = clFlush(opencl->cmd_queue);
