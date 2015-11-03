@@ -24,7 +24,9 @@ int vp9_gpu_get_frame_buffer(void *cb_priv, size_t min_size,
   if (min_size > (size_t)priv->ybf->buffer_alloc_sz) {
     vp9_gpu_free_frame_buffer(cm, priv->ybf);
     fb->data = cm->gpu.alloc_frame_buffers(cm, min_size,
-                                           &priv->ybf->gpu_mem);
+                                           &priv->ybf->gpu_mem,
+                                           &priv->ybf->gpu_mem_sub,
+                                           &priv->ybf->buffer_alloc_dup);
     priv->ybf->buffer_alloc_sz = min_size;
     fb->size = min_size;
     fb->priv = NULL;
@@ -43,7 +45,9 @@ int vp9_gpu_free_frame_buffer(VP9_COMMON *cm, YV12_BUFFER_CONFIG *ybf) {
   if (ybf) {
     if (ybf->buffer_alloc_sz > 0) {
       cm->gpu.release_frame_buffers(cm, &ybf->gpu_mem,
-                                    (void **)&ybf->buffer_alloc);
+                                    (void **)&ybf->buffer_alloc,
+                                    &ybf->gpu_mem_sub,
+                                    &ybf->buffer_alloc_dup);
     }
     /* buffer_alloc isn't accessed by most functions.  Rather y_buffer,
      * u_buffer and v_buffer point to buffer_alloc and are used.  Clear out
@@ -54,30 +58,6 @@ int vp9_gpu_free_frame_buffer(VP9_COMMON *cm, YV12_BUFFER_CONFIG *ybf) {
   }
 
   return 0;
-}
-
-void vp9_gpu_acquire_frame_buffer(VP9_COMMON *cm, YV12_BUFFER_CONFIG *ybf) {
-  void *host_ptr = ybf->buffer_alloc;
-
-  cm->gpu.acquire_frame_buffers(cm, &ybf->gpu_mem,
-                                (void **)&ybf->buffer_alloc,
-                                ybf->buffer_alloc_sz);
-  if (host_ptr != ybf->buffer_alloc) {
-    // the host pointer is modified, correct the pointers in buffer config
-    const int border = VP9_ENC_BORDER_IN_PIXELS;
-    const uint64_t yplane_size = (ybf->y_height + 2 * border) *
-        (uint64_t)ybf->y_stride;
-    const int uv_border_w = border >> cm->subsampling_x;
-    const int uv_border_h = border >> cm->subsampling_y;
-    const int uv_height = ybf->y_height >> cm->subsampling_y;
-    const uint64_t uvplane_size = (uv_height + 2 * uv_border_h) *
-        (uint64_t)ybf->uv_stride;
-    ybf->y_buffer = ybf->buffer_alloc + (border * ybf->y_stride) + border;
-    ybf->u_buffer = ybf->buffer_alloc + yplane_size +
-        (uv_border_h * ybf->uv_stride) + uv_border_w;
-    ybf->v_buffer = ybf->buffer_alloc + yplane_size + uvplane_size +
-        (uv_border_h * ybf->uv_stride) + uv_border_w;
-  }
 }
 
 void vp9_gpu_remove(VP9_COMMON *cm) {

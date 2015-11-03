@@ -316,8 +316,6 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi, ThreadData *td) {
     egpu->execute(cpi, subframe_idx, 0);
   }
 
-  // re-map source and reference pointers before starting cpu side processing
-  vp9_gpu_acquire_frame_buffer(cm, get_ref_frame_buffer(cpi, LAST_FRAME));
 }
 
 void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
@@ -335,9 +333,6 @@ void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
   // enqueue prologue kernels for gpu
   if (subframe_idx == 0) {
     egpu->execute_prologue(cpi);
-
-    vp9_gpu_acquire_frame_buffer(cm, cpi->Source);
-    vp9_gpu_acquire_frame_buffer(cm, &next_source->img);
   }
 
   // enqueue me kernels for gpu
@@ -424,7 +419,6 @@ void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
         }
         vp9_gpu_rewrite_quant_info(cpi, &td->mb, base_qindex);
       }
-      vp9_gpu_acquire_frame_buffer(cm, get_frame_new_buffer(cm));
     }
   }
 

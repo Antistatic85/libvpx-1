@@ -696,21 +696,19 @@ static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
   // source and reference buffers are available for GPU
 
   // release source buffer to GPU
-  if (img_src->buffer_alloc != NULL) {
-    status = clEnqueueUnmapMemObject(opencl->cmd_queue, img_src->gpu_mem,
-                                     img_src->buffer_alloc, 0, NULL, NULL);
+  if (img_src->buffer_alloc_dup != NULL) {
+    status = clEnqueueUnmapMemObject(opencl->cmd_queue, img_src->gpu_mem_sub,
+                                     img_src->buffer_alloc_dup, 0, NULL, NULL);
+    img_src->buffer_alloc_dup = NULL;
     assert(status == CL_SUCCESS);
-    img_src->buffer_alloc = img_src->y_buffer = img_src->u_buffer =
-        img_src->v_buffer = NULL;
   }
 
   // release last source buffer to GPU
-  if (last_img_src->buffer_alloc != NULL && frame_type == KEY_FRAME) {
-    status = clEnqueueUnmapMemObject(opencl->cmd_queue, last_img_src->gpu_mem,
-                                     last_img_src->buffer_alloc, 0, NULL, NULL);
+  if (last_img_src->buffer_alloc_dup != NULL && frame_type == KEY_FRAME) {
+    status = clEnqueueUnmapMemObject(opencl->cmd_queue, last_img_src->gpu_mem_sub,
+                                     last_img_src->buffer_alloc_dup, 0, NULL, NULL);
+    last_img_src->buffer_alloc_dup = NULL;
     assert(status == CL_SUCCESS);
-    last_img_src->buffer_alloc = last_img_src->y_buffer =
-        last_img_src->u_buffer = last_img_src->v_buffer = NULL;
   }
 
   // before launching pro motion estimation kernels unmap the output buffers
@@ -798,6 +796,19 @@ static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
   }
 #endif
 
+  // acquire current & last source buffer
+  img_src->buffer_alloc_dup =
+      clEnqueueMapBuffer(opencl->cmd_queue, img_src->gpu_mem_sub, CL_FALSE,
+                         CL_MAP_READ | CL_MAP_WRITE, 0,
+                         img_src->buffer_alloc_sz, 0, NULL, NULL, &status);
+  assert(status == CL_SUCCESS);
+
+  last_img_src->buffer_alloc_dup =
+      clEnqueueMapBuffer(opencl->cmd_queue, last_img_src->gpu_mem_sub, CL_FALSE,
+                         CL_MAP_READ | CL_MAP_WRITE, 0,
+                         last_img_src->buffer_alloc_sz, 0, NULL, NULL, &status);
+  assert(status == CL_SUCCESS);
+
   return;
 }
 
@@ -851,12 +862,11 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
   // before launching kernels make sure the buffers needed by GPU are cache
   // synced
   // release reference buffer to GPU
-  if (frm_ref->buffer_alloc != NULL) {
-    status = clEnqueueUnmapMemObject(opencl->cmd_queue, frm_ref->gpu_mem,
-                                     frm_ref->buffer_alloc, 0, NULL, NULL);
+  if (frm_ref->buffer_alloc_dup != NULL) {
+    status = clEnqueueUnmapMemObject(opencl->cmd_queue, frm_ref->gpu_mem_sub,
+                                     frm_ref->buffer_alloc_dup, 0, NULL, NULL);
+    frm_ref->buffer_alloc_dup = NULL;
     assert(status == CL_SUCCESS);
-    frm_ref->buffer_alloc = frm_ref->y_buffer = frm_ref->u_buffer =
-        frm_ref->v_buffer = NULL;
   }
 
   // release gpu rd buffers
@@ -1119,6 +1129,13 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
   }
 
 skip_execution:
+
+  frm_ref->buffer_alloc_dup =
+      clEnqueueMapBuffer(opencl->cmd_queue, frm_ref->gpu_mem_sub, CL_FALSE,
+                         CL_MAP_READ | CL_MAP_WRITE, 0,
+                         frm_ref->buffer_alloc_sz, 0, NULL, NULL, &status);
+  assert(status == CL_SUCCESS);
+
   status = clFlush(opencl->cmd_queue);
   assert(status == CL_SUCCESS);
 

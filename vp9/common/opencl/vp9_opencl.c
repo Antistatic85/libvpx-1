@@ -11,11 +11,15 @@
 #include "vp9/common/opencl/vp9_opencl.h"
 
 static void *vp9_opencl_alloc_frame_buffers(VP9_COMMON *cm, int frame_size,
-                                            void **opencl_mem) {
+                                            void **opencl_mem,
+                                            void **opencl_mem_dup,
+                                            uint8_t **mapped_ptr_dup) {
   VP9_OPENCL *opencl = cm->gpu.compute_framework;
   void *mapped_pointer;
+  cl_buffer_region sf_region;
   cl_int status;
 
+  // allocate buffer to store source/reference
   *opencl_mem = clCreateBuffer(opencl->context,
                                CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR,
                                frame_size, NULL, &status);
@@ -31,11 +35,33 @@ static void *vp9_opencl_alloc_frame_buffers(VP9_COMMON *cm, int frame_size,
     return NULL;
   }
 
+  // create a duplicate buffer for the above buffer
+  // used while mantaining cache sync b/w cpu & gpu
+  sf_region.origin = 0;
+  sf_region.size = frame_size;
+  *opencl_mem_dup = clCreateSubBuffer(*opencl_mem, CL_MEM_READ_ONLY,
+                                      CL_BUFFER_CREATE_TYPE_REGION,
+                                      &sf_region, &status);
+  if (status != CL_SUCCESS)
+    return NULL;
+  *mapped_ptr_dup = clEnqueueMapBuffer(opencl->cmd_queue, *opencl_mem_dup,
+                                       CL_TRUE, CL_MAP_READ | CL_MAP_WRITE,
+                                       0, frame_size, 0, NULL, NULL,
+                                       &status);
+  if (status != CL_SUCCESS) {
+    clReleaseMemObject(*opencl_mem_dup);
+    *opencl_mem_dup = NULL;
+    return NULL;
+  }
+
   return mapped_pointer;
 }
 
-static void vp9_opencl_release_frame_buffers(VP9_COMMON *cm, void **opencl_mem,
-                                             void **mapped_pointer) {
+static void vp9_opencl_release_frame_buffers(VP9_COMMON *cm,
+                                             void **opencl_mem,
+                                             void **mapped_pointer,
+                                             void **opencl_mem_dup,
+                                             uint8_t **mapped_pointer_dup) {
   VP9_OPENCL *opencl = cm->gpu.compute_framework;
   cl_event event;
   cl_int status;
@@ -61,26 +87,28 @@ static void vp9_opencl_release_frame_buffers(VP9_COMMON *cm, void **opencl_mem,
       goto fail;
     *opencl_mem = NULL;
   }
-  return;
 
-fail:
-  assert(0);
-}
+  if (*mapped_pointer_dup != NULL) {
+    status = clEnqueueUnmapMemObject(opencl->cmd_queue,
+                                     *opencl_mem_dup,
+                                     *mapped_pointer_dup,
+                                     0, NULL, &event);
+    status |= clWaitForEvents(1, &event);
+    if (status != CL_SUCCESS)
+      goto fail;
+    *mapped_pointer_dup = NULL;
 
-static void vp9_opencl_acquire_frame_buffers(VP9_COMMON *cm, void **opencl_mem,
-                                             void **mapped_pointer, int size) {
-  VP9_OPENCL *opencl = cm->gpu.compute_framework;
-  cl_int status;
-
-  if (*mapped_pointer == NULL) {
-    *mapped_pointer =
-        clEnqueueMapBuffer(opencl->cmd_queue_memory, *opencl_mem, CL_TRUE,
-                           CL_MAP_READ | CL_MAP_WRITE, 0, size, 0,
-                           NULL, NULL, &status);
+    status = clReleaseEvent(event);
     if (status != CL_SUCCESS)
       goto fail;
   }
 
+  if (*opencl_mem_dup != NULL) {
+    status = clReleaseMemObject(*opencl_mem_dup);
+    if (status != CL_SUCCESS)
+      goto fail;
+    *opencl_mem_dup = NULL;
+  }
   return;
 
 fail:
@@ -177,7 +205,6 @@ int vp9_opencl_init(VP9_COMMON *cm) {
 
   gpu->alloc_frame_buffers = vp9_opencl_alloc_frame_buffers;
   gpu->release_frame_buffers = vp9_opencl_release_frame_buffers;
-  gpu->acquire_frame_buffers = vp9_opencl_acquire_frame_buffers;
   gpu->remove = vp9_opencl_remove;
 
   opencl = gpu->compute_framework;
