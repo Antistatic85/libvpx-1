@@ -589,36 +589,42 @@ static void block_yrd(VP9_COMP *cpi, MACROBLOCK *x, int *rate, int64_t *dist,
                       BLOCK_SIZE bsize, TX_SIZE tx_size) {
   MACROBLOCKD *xd = &x->e_mbd;
   const struct macroblockd_plane *pd = &xd->plane[plane];
-  const struct macroblock_plane *const p = &x->plane[plane];
+  struct macroblock_plane *const p = &x->plane[plane];
   const int num_4x4_w = num_4x4_blocks_wide_lookup[bsize];
   const int num_4x4_h = num_4x4_blocks_high_lookup[bsize];
   const int step = 1 << (tx_size << 1);
   const int block_step = (1 << tx_size);
-  int block = 0, r, c;
+  int r, c;
   int shift = tx_size == TX_32X32 ? 0 : 2;
   const int max_blocks_wide = num_4x4_w + (xd->mb_to_right_edge >= 0 ? 0 :
       xd->mb_to_right_edge >> (5 + pd->subsampling_x));
   const int max_blocks_high = num_4x4_h + (xd->mb_to_bottom_edge >= 0 ? 0 :
       xd->mb_to_bottom_edge >> (5 + pd->subsampling_y));
   int eob_cost = 0;
+  const scan_order *const scan_order = &vp9_default_scan_orders[tx_size];
+  tran_low_t *const coeff = p->coeff;
+  tran_low_t *const qcoeff = p->qcoeff;
+  // We will re-use the difference buffer as dqcoeff buffer. This helps
+  // reduce cache miss
+  tran_low_t *const dqcoeff = p->src_diff;
+  uint16_t *const eob = &p->eobs[0];
+  int16_t *src_diff = p->src_diff;
+  const int diff_stride = 4 * block_step;
 
   (void)cpi;
-  vp9_subtract_plane(x, bsize, plane);
   *skippable = 1;
+  *rate = 0;
+  *dist = 0;
   // Keep track of the row and column of the blocks we use so that we know
   // if we are in the unrestricted motion border.
   for (r = 0; r < max_blocks_high; r += block_step) {
     for (c = 0; c < num_4x4_w; c += block_step) {
       if (c < max_blocks_wide) {
-        const scan_order *const scan_order = &vp9_default_scan_orders[tx_size];
-        tran_low_t *const coeff = BLOCK_OFFSET(p->coeff, block);
-        tran_low_t *const qcoeff = BLOCK_OFFSET(p->qcoeff, block);
-        tran_low_t *const dqcoeff = BLOCK_OFFSET(pd->dqcoeff, block);
-        uint16_t *const eob = &p->eobs[block];
-        const int diff_stride = 4 * num_4x4_blocks_wide_lookup[bsize];
-        const int16_t *src_diff;
-        src_diff = &p->src_diff[(r * diff_stride + c) << 2];
-
+        vpx_subtract_block(diff_stride, diff_stride, src_diff, diff_stride,
+                           p->src.buf + (r * 4 * p->src.stride) + (c * 4),
+                           p->src.stride,
+                           pd->dst.buf + (r * 4 * pd->dst.stride) + (c * 4),
+                           pd->dst.stride);
         switch (tx_size) {
           case TX_32X32:
             vpx_fdct32x32_rd(src_diff, coeff, diff_stride);
@@ -654,30 +660,6 @@ static void block_yrd(VP9_COMP *cpi, MACROBLOCK *x, int *rate, int64_t *dist,
         }
         *skippable &= (*eob == 0);
         eob_cost += 1;
-      }
-      block += step;
-    }
-  }
-
-  if (*skippable && *sse < INT64_MAX) {
-    *rate = 0;
-    *dist = (*sse << 6) >> shift;
-    *sse = *dist;
-    return;
-  }
-
-  block = 0;
-  *rate = 0;
-  *dist = 0;
-  if (*sse < INT64_MAX)
-    *sse = (*sse << 6) >> shift;
-  for (r = 0; r < max_blocks_high; r += block_step) {
-    for (c = 0; c < num_4x4_w; c += block_step) {
-      if (c < max_blocks_wide) {
-        tran_low_t *const coeff = BLOCK_OFFSET(p->coeff, block);
-        tran_low_t *const qcoeff = BLOCK_OFFSET(p->qcoeff, block);
-        tran_low_t *const dqcoeff = BLOCK_OFFSET(pd->dqcoeff, block);
-        uint16_t *const eob = &p->eobs[block];
 
         if (*eob == 1)
           *rate += (int)abs(qcoeff[0]);
@@ -686,8 +668,14 @@ static void block_yrd(VP9_COMP *cpi, MACROBLOCK *x, int *rate, int64_t *dist,
 
         *dist += vp9_block_error_fp(coeff, dqcoeff, step << 4) >> shift;
       }
-      block += step;
     }
+  }
+
+  if (*sse < INT64_MAX)
+    *sse = (*sse << 6) >> shift;
+
+  if (*skippable && *sse < INT64_MAX) {
+    return;
   }
 
   if (*skippable == 0) {
