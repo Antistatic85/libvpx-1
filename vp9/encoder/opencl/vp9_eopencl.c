@@ -203,17 +203,15 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
                              sizeof(cl_mem), gpu_ip);
     status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 4,
                              sizeof(cl_mem), gpu_op_me);
-    status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 6,
+    status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 5,
                              sizeof(cl_mem), gpu_scratch);
     assert(status == CL_SUCCESS);
 
-    status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 2,
-                             sizeof(cl_int), &y_stride);
-    status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 3,
+    status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 0,
                              sizeof(cl_mem), gpu_ip);
-    status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 4,
+    status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 1,
                              sizeof(cl_mem), gpu_op_me);
-    status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 6,
+    status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 3,
                              sizeof(cl_mem), gpu_scratch);
     assert(status == CL_SUCCESS);
   }
@@ -331,15 +329,9 @@ static void vp9_eopencl_set_dynamic_kernel_args_me(VP9_COMP *cpi,
                           sizeof(cl_mem), &frm_ref->gpu_mem);
   status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 1,
                            sizeof(cl_mem), &img_src->gpu_mem);
-  status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 5,
-                           sizeof(cl_mem), rdopt_parameters);
   assert(status == CL_SUCCESS);
 
-  status = clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 0,
-                          sizeof(cl_mem), &frm_ref->gpu_mem);
-  status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 1,
-                           sizeof(cl_mem), &img_src->gpu_mem);
-  status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 5,
+  status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 2,
                            sizeof(cl_mem), rdopt_parameters);
   assert(status == CL_SUCCESS);
 }

@@ -817,7 +817,6 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
                                   int stride,
                                   __global GPU_INPUT *gpu_input,
                                   __global GPU_OUTPUT_ME *gpu_output_me,
-                                  __global GPU_RD_PARAMETERS *rd_parameters,
                                   __global GPU_SCRATCH *gpu_scratch) {
   __local uchar8 intermediate_uchar8[(BLOCK_SIZE_IN_PIXELS * (BLOCK_SIZE_IN_PIXELS + 8)) / NUM_PIXELS_PER_WORKITEM];
   __local int *intermediate_int = (__local int *)intermediate_uchar8;
@@ -889,10 +888,7 @@ exit:
 }
 
 __kernel
-void vp9_rd_calculation(__global uchar *ref_frame,
-                        __global uchar *cur_frame,
-                        int stride,
-                        __global GPU_INPUT *gpu_input,
+void vp9_rd_calculation(__global GPU_INPUT *gpu_input,
                         __global GPU_OUTPUT_ME *gpu_output_me,
                         __global GPU_RD_PARAMETERS *rd_parameters,
                         __global GPU_SCRATCH *gpu_scratch) {
