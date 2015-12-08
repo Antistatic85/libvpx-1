@@ -261,9 +261,7 @@ static void vp9_eopencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
   assert(status == CL_SUCCESS);
 }
 
-static void vp9_eopencl_set_dynamic_kernel_args_me(VP9_COMP *cpi,
-                                                   GPU_BLOCK_SIZE gpu_bsize,
-                                                   int async) {
+static void vp9_eopencl_set_dynamic_kernel_args_me(VP9_COMP *cpi, int async) {
   VP9_COMMON *cm = &cpi->common;
   VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
   YV12_BUFFER_CONFIG *img_src = cpi->Source;
@@ -272,6 +270,7 @@ static void vp9_eopencl_set_dynamic_kernel_args_me(VP9_COMP *cpi,
       &eopencl->gpu_output_pro_me[cm->current_video_frame & 1];
   cl_mem *rdopt_parameters =
       &eopencl->rdopt_parameters[cm->current_video_frame & 1].opencl_mem;
+  GPU_BLOCK_SIZE gpu_bsize;
   cl_int status;
 
   if (async) {
@@ -297,33 +296,39 @@ static void vp9_eopencl_set_dynamic_kernel_args_me(VP9_COMP *cpi,
                            rdopt_parameters);
   assert(status == CL_SUCCESS);
 
-  status = clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 0,
-                          sizeof(cl_mem), &frm_ref->gpu_mem);
-  status |= clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 1,
-                           sizeof(cl_mem), &img_src->gpu_mem);
-  status |= clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 5,
-                           sizeof(cl_mem), rdopt_parameters);
-  assert(status == CL_SUCCESS);
+  for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
 
-  status = clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 0,
-                          sizeof(cl_mem), &frm_ref->gpu_mem);
-  status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 1,
-                           sizeof(cl_mem), &img_src->gpu_mem);
-  status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 5,
-                           sizeof(cl_mem), rdopt_parameters);
-  assert(status == CL_SUCCESS);
+    status = clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 0,
+                            sizeof(cl_mem), &frm_ref->gpu_mem);
+    status |= clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 1,
+                             sizeof(cl_mem), &img_src->gpu_mem);
+    status |= clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 5,
+                             sizeof(cl_mem), rdopt_parameters);
+    assert(status == CL_SUCCESS);
 
-  status = clSetKernelArg(eopencl->hpel_search[gpu_bsize], 0,
-                          sizeof(cl_mem), &frm_ref->gpu_mem);
-  status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 1,
-                           sizeof(cl_mem), &img_src->gpu_mem);
-  assert(status == CL_SUCCESS);
+    status = clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 0,
+                            sizeof(cl_mem), &frm_ref->gpu_mem);
+    status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 1,
+                             sizeof(cl_mem), &img_src->gpu_mem);
+    status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 5,
+                             sizeof(cl_mem), rdopt_parameters);
+    assert(status == CL_SUCCESS);
 
-  status = clSetKernelArg(eopencl->qpel_search[gpu_bsize], 0,
-                          sizeof(cl_mem), &frm_ref->gpu_mem);
-  status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 1,
-                           sizeof(cl_mem), &img_src->gpu_mem);
-  assert(status == CL_SUCCESS);
+    status = clSetKernelArg(eopencl->hpel_search[gpu_bsize], 0,
+                            sizeof(cl_mem), &frm_ref->gpu_mem);
+    status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 1,
+                             sizeof(cl_mem), &img_src->gpu_mem);
+    assert(status == CL_SUCCESS);
+
+    status = clSetKernelArg(eopencl->qpel_search[gpu_bsize], 0,
+                            sizeof(cl_mem), &frm_ref->gpu_mem);
+    status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 1,
+                             sizeof(cl_mem), &img_src->gpu_mem);
+    assert(status == CL_SUCCESS);
+  }
+
+  // Lowest GPU Block size selected for the merged kernels
+  gpu_bsize = GPU_BLOCK_32X32;
 
   status = clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 0,
                           sizeof(cl_mem), &frm_ref->gpu_mem);
@@ -883,9 +888,7 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
 
   // set up kernel args
   if (sub_frame_idx == 0) {
-    for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
-      vp9_eopencl_set_dynamic_kernel_args_me(cpi, gpu_bsize, async);
-    }
+    vp9_eopencl_set_dynamic_kernel_args_me(cpi, async);
   }
 
   vp9_subframe_init(&subframe, cm, sub_frame_idx);

@@ -63,22 +63,18 @@ static void vp9_opencl_release_frame_buffers(VP9_COMMON *cm,
                                              void **opencl_mem_dup,
                                              uint8_t **mapped_pointer_dup) {
   VP9_OPENCL *opencl = cm->gpu.compute_framework;
-  cl_event event;
   cl_int status;
 
   if (*mapped_pointer != NULL) {
     status = clEnqueueUnmapMemObject(opencl->cmd_queue,
                                      *opencl_mem,
                                      *mapped_pointer,
-                                     0, NULL, &event);
-    status |= clWaitForEvents(1, &event);
+                                     0, NULL, NULL);
+    status |= clFinish(opencl->cmd_queue);
     if (status != CL_SUCCESS)
       goto fail;
     *mapped_pointer = NULL;
 
-    status = clReleaseEvent(event);
-    if (status != CL_SUCCESS)
-      goto fail;
   }
 
   if (*opencl_mem != NULL) {
@@ -92,15 +88,12 @@ static void vp9_opencl_release_frame_buffers(VP9_COMMON *cm,
     status = clEnqueueUnmapMemObject(opencl->cmd_queue,
                                      *opencl_mem_dup,
                                      *mapped_pointer_dup,
-                                     0, NULL, &event);
-    status |= clWaitForEvents(1, &event);
+                                     0, NULL, NULL);
+    status |= clFinish(opencl->cmd_queue);
     if (status != CL_SUCCESS)
       goto fail;
     *mapped_pointer_dup = NULL;
 
-    status = clReleaseEvent(event);
-    if (status != CL_SUCCESS)
-      goto fail;
   }
 
   if (*opencl_mem_dup != NULL) {
