@@ -588,8 +588,8 @@ static void block_yrd(VP9_COMP *cpi, MACROBLOCK *x, int *rate, int64_t *dist,
                       int *skippable, int64_t *sse, int plane,
                       BLOCK_SIZE bsize, TX_SIZE tx_size) {
   MACROBLOCKD *xd = &x->e_mbd;
-  const struct macroblockd_plane *pd = &xd->plane[plane];
-  struct macroblock_plane *const p = &x->plane[plane];
+  const struct macroblockd_plane *const pd = &xd->plane[plane];
+  const struct macroblock_plane *const p = &x->plane[plane];
   const int num_4x4_w = num_4x4_blocks_wide_lookup[bsize];
   const int num_4x4_h = num_4x4_blocks_high_lookup[bsize];
   const int step = 1 << (tx_size << 1);

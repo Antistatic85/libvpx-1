@@ -1102,6 +1102,7 @@ static void update_state(VP9_COMP *cpi, ThreadData *td,
 
   max_plane = is_inter_block(mbmi) ? MAX_MB_PLANE : 1;
   for (i = 0; i < max_plane; ++i) {
+    p[i].src_diff = ctx->src_diff_pbuf[i][1];
     p[i].coeff = ctx->coeff_pbuf[i][1];
     p[i].qcoeff = ctx->qcoeff_pbuf[i][1];
     pd[i].dqcoeff = ctx->dqcoeff_pbuf[i][1];
@@ -1109,6 +1110,7 @@ static void update_state(VP9_COMP *cpi, ThreadData *td,
   }
 
   for (i = max_plane; i < MAX_MB_PLANE; ++i) {
+    p[i].src_diff = ctx->src_diff_pbuf[i][2];
     p[i].coeff = ctx->coeff_pbuf[i][2];
     p[i].qcoeff = ctx->qcoeff_pbuf[i][2];
     pd[i].dqcoeff = ctx->dqcoeff_pbuf[i][2];
@@ -1270,6 +1272,7 @@ static void rd_pick_sb_modes(VP9_COMP *cpi,
   mbmi->sb_type = bsize;
 
   for (i = 0; i < MAX_MB_PLANE; ++i) {
+    p[i].src_diff = ctx->src_diff_pbuf[i][0];
     p[i].coeff = ctx->coeff_pbuf[i][0];
     p[i].qcoeff = ctx->qcoeff_pbuf[i][0];
     pd[i].dqcoeff = ctx->dqcoeff_pbuf[i][0];
@@ -4189,10 +4192,13 @@ int vp9_encoding_thread_process(thread_context *const thread_ctxt,
     struct macroblockd_plane *const pd = xd->plane;
     PICK_MODE_CONTEXT *ctx = &td->pc_root->none;
 
+    // Reusing the Y-plane's buffers for the UV planes to optimize the cache
+    // access
     for (i = 0; i < MAX_MB_PLANE; ++i) {
-      p[i].coeff = ctx->coeff_pbuf[i][0];
+      p[i].src_diff = ctx->src_diff_pbuf[0][0];
+      p[i].coeff = ctx->coeff_pbuf[0][0];
       p[i].qcoeff = ctx->qcoeff_pbuf[i][0];
-      pd[i].dqcoeff = ctx->dqcoeff_pbuf[i][0];
+      pd[i].dqcoeff = ctx->dqcoeff_pbuf[0][0];
       p[i].eobs = ctx->eobs_pbuf[i][0];
     }
     vp9_zero(x->zcoeff_blk);
@@ -4282,10 +4288,13 @@ static void encode_frame_internal(VP9_COMP *cpi) {
     struct macroblockd_plane *const pd = xd->plane;
     PICK_MODE_CONTEXT *ctx = &td->pc_root->none;
 
+    // Reusing the Y-plane's buffers for the UV planes to optimize the cache
+    // access
     for (i = 0; i < MAX_MB_PLANE; ++i) {
-      p[i].coeff = ctx->coeff_pbuf[i][0];
+      p[i].src_diff = ctx->src_diff_pbuf[0][0];
+      p[i].coeff = ctx->coeff_pbuf[0][0];
       p[i].qcoeff = ctx->qcoeff_pbuf[i][0];
-      pd[i].dqcoeff = ctx->dqcoeff_pbuf[i][0];
+      pd[i].dqcoeff = ctx->dqcoeff_pbuf[0][0];
       p[i].eobs = ctx->eobs_pbuf[i][0];
     }
     vp9_zero(x->zcoeff_blk);

@@ -29,6 +29,8 @@ static void alloc_mode_context(VP9_COMMON *cm, int num_4x4_blk,
                   vpx_calloc(num_blk, sizeof(uint8_t)));
   for (i = 0; i < MAX_MB_PLANE; ++i) {
     for (k = 0; k < 3; ++k) {
+      CHECK_MEM_ERROR(cm, ctx->src_diff[i][k],
+                      vpx_memalign(16, num_pix * sizeof(*ctx->src_diff[i][k])));
       CHECK_MEM_ERROR(cm, ctx->coeff[i][k],
                       vpx_memalign(16, num_pix * sizeof(*ctx->coeff[i][k])));
       CHECK_MEM_ERROR(cm, ctx->qcoeff[i][k],
@@ -37,6 +39,7 @@ static void alloc_mode_context(VP9_COMMON *cm, int num_4x4_blk,
                       vpx_memalign(16, num_pix * sizeof(*ctx->dqcoeff[i][k])));
       CHECK_MEM_ERROR(cm, ctx->eobs[i][k],
                       vpx_memalign(16, num_blk * sizeof(*ctx->eobs[i][k])));
+      ctx->src_diff_pbuf[i][k]= ctx->src_diff[i][k];
       ctx->coeff_pbuf[i][k]   = ctx->coeff[i][k];
       ctx->qcoeff_pbuf[i][k]  = ctx->qcoeff[i][k];
       ctx->dqcoeff_pbuf[i][k] = ctx->dqcoeff[i][k];
@@ -51,6 +54,8 @@ static void free_mode_context(PICK_MODE_CONTEXT *ctx) {
   ctx->zcoeff_blk = 0;
   for (i = 0; i < MAX_MB_PLANE; ++i) {
     for (k = 0; k < 3; ++k) {
+      vpx_free(ctx->src_diff[i][k]);
+      ctx->src_diff[i][k] = 0;
       vpx_free(ctx->coeff[i][k]);
       ctx->coeff[i][k] = 0;
       vpx_free(ctx->qcoeff[i][k]);
