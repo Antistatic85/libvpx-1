@@ -322,21 +322,19 @@ static INLINE void highbd_fdct32x32(int rd_transform, const int16_t *src,
 }
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 
-void vp9_xform_quant_fp(MACROBLOCK *x, int plane, int block,
-                        BLOCK_SIZE plane_bsize, TX_SIZE tx_size) {
+void vp9_xform_quant_fp(MACROBLOCK *x, int plane, int block, TX_SIZE tx_size) {
   MACROBLOCKD *const xd = &x->e_mbd;
   const struct macroblock_plane *const p = &x->plane[plane];
   const struct macroblockd_plane *const pd = &xd->plane[plane];
   const scan_order *const scan_order = &vp9_default_scan_orders[tx_size];
-  tran_low_t *const coeff = BLOCK_OFFSET(p->coeff, block);
+  tran_low_t *const coeff = p->coeff;
   tran_low_t *const qcoeff = BLOCK_OFFSET(p->qcoeff, block);
-  tran_low_t *const dqcoeff = BLOCK_OFFSET(pd->dqcoeff, block);
+  tran_low_t *const dqcoeff = pd->dqcoeff;
   uint16_t *const eob = &p->eobs[block];
-  const int diff_stride = 4 * num_4x4_blocks_wide_lookup[plane_bsize];
-  int i, j;
   const int16_t *src_diff;
-  txfrm_block_to_raster_xy(plane_bsize, tx_size, block, &i, &j);
-  src_diff = &p->src_diff[4 * (j * diff_stride + i)];
+  const int block_step = (1 << tx_size);
+  const int diff_stride = 4 * block_step;
+  src_diff = p->src_diff;
 
 #if CONFIG_VP9_HIGHBITDEPTH
   if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
@@ -590,7 +588,7 @@ static void encode_block(int plane, int block, BLOCK_SIZE plane_bsize,
   struct optimize_ctx *const ctx = args->ctx;
   struct macroblock_plane *const p = &x->plane[plane];
   struct macroblockd_plane *const pd = &xd->plane[plane];
-  tran_low_t *const dqcoeff = BLOCK_OFFSET(pd->dqcoeff, block);
+  tran_low_t *dqcoeff = BLOCK_OFFSET(pd->dqcoeff, block);
   int i, j;
   uint8_t *dst;
   ENTROPY_CONTEXT *a, *l;
@@ -616,7 +614,17 @@ static void encode_block(int plane, int block, BLOCK_SIZE plane_bsize,
         *a = *l = 0;
         return;
       } else {
-        vp9_xform_quant_fp(x, plane, block, plane_bsize, tx_size);
+        uint8_t *src;
+        int16_t *src_diff;
+        const int block_step = (1 << tx_size);
+        const int diff_stride = 4 * block_step;
+
+        dqcoeff = pd->dqcoeff;
+        src = &p->src.buf[4 * (j * p->src.stride + i)];
+        src_diff = p->src_diff;
+        vpx_subtract_block(diff_stride, diff_stride, src_diff, diff_stride,
+                           src, p->src.stride, dst, pd->dst.stride);
+        vp9_xform_quant_fp(x, plane, block, tx_size);
       }
     } else {
       if (max_txsize_lookup[plane_bsize] == tx_size) {
@@ -746,7 +754,7 @@ void vp9_encode_sb(MACROBLOCK *x, BLOCK_SIZE bsize) {
     return;
 
   for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
-    if (!x->skip_recode)
+    if (!x->skip_recode && !x->quant_fp)
       vp9_subtract_plane(x, bsize, plane);
 
     if (x->optimize && (!x->skip_recode || !x->skip_optimize)) {
