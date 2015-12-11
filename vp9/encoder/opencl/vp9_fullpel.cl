@@ -102,7 +102,8 @@ void vp9_full_pixel_search(__global uchar *ref,
                            __global GPU_OUTPUT_ME *gpu_output_me,
                            __global GPU_RD_PARAMETERS *rd_parameters,
                            int mi_rows,
-                           int mi_cols) {
+                           int mi_cols,
+                           int padding_offset) {
   __local int intermediate_sad[9];
   __local short best_site_shared;
   int group_col = get_group_id(0);
@@ -113,7 +114,7 @@ void vp9_full_pixel_search(__global uchar *ref,
   int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * stride) +
                       (group_col * BLOCK_SIZE_IN_PIXELS) +
                       ((local_col >> 2) * NUM_PIXELS_PER_WORKITEM);
-  global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
+  global_offset += padding_offset;
 #if BLOCK_SIZE_IN_PIXELS == 64
   GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
   int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *

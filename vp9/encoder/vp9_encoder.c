@@ -1657,6 +1657,7 @@ VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
   cm->alloc_mi = vp9_enc_alloc_mi;
   cm->free_mi = vp9_enc_free_mi;
   cm->setup_mi = vp9_enc_setup_mi;
+  cm->byte_alignment = VP9_ENC_ALIGNMENT;
 
   CHECK_MEM_ERROR(cm, cm->fc,
                   (FRAME_CONTEXT *)vpx_calloc(1, sizeof(*cm->fc)));

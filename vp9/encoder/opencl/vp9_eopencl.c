@@ -90,11 +90,17 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
   cl_mem *gpu_ip = &eopencl->gpu_input.opencl_mem;
   cl_mem *gpu_op_me = &eopencl->gpu_output_me;
   cl_mem *gpu_scratch = &eopencl->gpu_scratch;
-  cl_int y_stride = cpi->scaled_source.y_stride;
-  int64_t yplane_size = (cpi->scaled_source.y_height +
-      2 * cpi->scaled_source.border) * (uint64_t) y_stride;
-  int64_t uvplane_size = (cpi->scaled_source.uv_height +
-      2 * (cpi->scaled_source.border >> 1)) * (uint64_t) (y_stride >> 1);
+  struct lookahead_ctx *ctx = cpi->lookahead;
+  YV12_BUFFER_CONFIG *source_yuv = &ctx->buf[0].img;
+  cl_int y_stride = source_yuv->y_stride;
+  // TODO(Karthick) : There is huge assumption being made here. We assume all
+  // the YUV buffers will be aligned to the same byte boundary. In case of Intel
+  // Graphics and ARM Mali, we have verified that all the buffers are aligned to
+  // 4096 bytes(page boundary). So no problems so far..
+  // But an ideal fix to remove this assumption could affect performance.
+  cl_int padding_offset = source_yuv->y_buffer - source_yuv->buffer_alloc;
+  int64_t yplane_size = source_yuv->u_buffer - source_yuv->y_buffer;
+  int64_t uvplane_size = source_yuv->v_buffer - source_yuv->u_buffer;
   cl_int mi_rows = cm->mi_rows;
   cl_int mi_cols = cm->mi_cols;
   cl_int op_stride;
@@ -114,6 +120,8 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
                            &eopencl->src_1d_set[1]);
   status |= clSetKernelArg(eopencl->col_row_projection, 6, sizeof(cl_mem),
                            &eopencl->pred_1d_set[1]);
+  status |= clSetKernelArg(eopencl->col_row_projection, 7, sizeof(cl_int),
+                           &padding_offset);
   assert(status == CL_SUCCESS);
 
   // vector match x, y
@@ -130,6 +138,8 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
   // Pro Motion Estimation
   status = clSetKernelArg(eopencl->pro_motion_estimation, 2, sizeof(cl_int),
                           &y_stride);
+  status |= clSetKernelArg(eopencl->pro_motion_estimation, 4, sizeof(cl_int),
+                           &padding_offset);
   assert(status == CL_SUCCESS);
 
   // color sensitivity
@@ -139,6 +149,8 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
                            &yplane_size);
   status |= clSetKernelArg(eopencl->color_sensitivity, 5, sizeof(cl_long),
                            &uvplane_size);
+  status |= clSetKernelArg(eopencl->color_sensitivity, 6, sizeof(cl_int),
+                           &padding_offset);
   assert(status == CL_SUCCESS);
 
   // choose partitions
@@ -149,6 +161,8 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
   op_stride = cm->sb_cols * num_mxn_blocks_high_lookup[BLOCK_32X32];
   status |= clSetKernelArg(eopencl->choose_partitions, 6, sizeof(cl_int),
                            &op_stride);
+  status |= clSetKernelArg(eopencl->choose_partitions, 7, sizeof(cl_int),
+                           &padding_offset);
   assert(status == CL_SUCCESS);
 
   // ME KERNELS
@@ -163,6 +177,8 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
                              sizeof(cl_long), &yplane_size);
     status |= clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 7,
                              sizeof(cl_long), &uvplane_size);
+    status |= clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 8,
+                             sizeof(cl_int), &padding_offset);
     assert(status == CL_SUCCESS);
 
     status  = clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 2,
@@ -175,6 +191,8 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
                              sizeof(cl_int), &mi_rows);
     status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 7,
                              sizeof(cl_int), &mi_cols);
+    status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 8,
+                             sizeof(cl_int), &padding_offset);
     assert(status == CL_SUCCESS);
 
     status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 2,
@@ -185,6 +203,8 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
                              sizeof(cl_mem), gpu_op_me);
     status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 5,
                              sizeof(cl_mem), gpu_scratch);
+    status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 6,
+                             sizeof(cl_int), &padding_offset);
     assert(status == CL_SUCCESS);
 
     status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 2,
@@ -195,6 +215,8 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
                              sizeof(cl_mem), gpu_op_me);
     status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 5,
                              sizeof(cl_mem), gpu_scratch);
+    status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 6,
+                             sizeof(cl_int), &padding_offset);
     assert(status == CL_SUCCESS);
 
     status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 2,
@@ -205,6 +227,8 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
                              sizeof(cl_mem), gpu_op_me);
     status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 5,
                              sizeof(cl_mem), gpu_scratch);
+    status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 6,
+                             sizeof(cl_int), &padding_offset);
     assert(status == CL_SUCCESS);
 
     status |= clSetKernelArg(eopencl->rd_calculation_newmv[gpu_bsize], 0,

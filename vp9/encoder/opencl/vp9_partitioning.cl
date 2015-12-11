@@ -383,7 +383,8 @@ void vp9_col_row_projection(__global uchar *src_frame,
                             __global ushort *src_proj_r,
                             __global ushort *ref_proj_r,
                             __global ushort *src_proj_c,
-                            __global ushort *ref_proj_c) {
+                            __global ushort *ref_proj_c,
+                            int padding_offset) {
   int global_row = get_global_id(1);
   int local_col = get_local_id(0);
   int group_col = get_group_id(0);
@@ -394,7 +395,7 @@ void vp9_col_row_projection(__global uchar *src_frame,
   __global uchar *src, *ref;
 
   // Column projection
-  global_offset += (VP9_ENC_BORDER_IN_PIXELS * in_stride) + VP9_ENC_BORDER_IN_PIXELS;
+  global_offset += padding_offset;
 
   src = src_frame + global_offset;
   src_proj_c[group_col * out_stride + (global_row * BLOCK_SIZE_IN_PIXELS) + local_col] =
@@ -413,7 +414,7 @@ void vp9_col_row_projection(__global uchar *src_frame,
   int row_offset = ((global_row * BLOCK_SIZE_IN_PIXELS) +
       ((local_col & 3) * (BLOCK_SIZE_IN_PIXELS / 4))) * in_stride;
   global_offset = row_offset + col_offset;
-  global_offset += VP9_ENC_BORDER_IN_PIXELS * in_stride + VP9_ENC_BORDER_IN_PIXELS;
+  global_offset += padding_offset;
   out_stride = get_num_groups(0) * BLOCK_SIZE_IN_PIXELS;
 
   src = src_frame + global_offset;
@@ -487,7 +488,8 @@ __kernel
 void vp9_pro_motion_estimation(__global uchar *cur,
                                __global uchar *ref,
                                int stride,
-                               __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me) {
+                               __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me,
+                               int padding_offset) {
   short global_row = get_global_id(1);
 
   short group_col = get_group_id(0);
@@ -498,7 +500,7 @@ void vp9_pro_motion_estimation(__global uchar *cur,
                       (group_col * BLOCK_SIZE_IN_PIXELS) +
                       ((local_col >> 2) * NUM_PIXELS_PER_WORKITEM);
 
-  global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
+  global_offset += padding_offset;
 
   int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
       group_stride + (group_col));
@@ -594,7 +596,8 @@ void vp9_color_sensitivity(__global uchar *src,
                            int stride,
                            __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me,
                            int64_t yplane_size,
-                           int64_t uvplane_size) {
+                           int64_t uvplane_size,
+                           int padding_offset) {
   __local int intermediate_int[1];
   int group_col = get_group_id(0);
   int group_row = get_group_id(1);
@@ -609,8 +612,7 @@ void vp9_color_sensitivity(__global uchar *src,
   int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * (stride >> 1)) +
                       (group_col * (BLOCK_SIZE_IN_PIXELS >> 1)) +
                       (local_col * NUM_PIXELS_PER_WORKITEM);
-  global_offset += ((VP9_ENC_BORDER_IN_PIXELS >> 1) * (stride >> 1)) +
-      (VP9_ENC_BORDER_IN_PIXELS >> 1);
+  global_offset += padding_offset;
 
   gpu_output_pro_me += (global_row / ((BLOCK_SIZE_IN_PIXELS >> 1) / PIXEL_ROWS_PER_WORKITEM)) *
       group_stride + group_col;
@@ -659,7 +661,8 @@ void vp9_choose_partitions(__global uchar *src,
                            __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me,
                            __global GPU_RD_PARAMETERS *rd_parameters,
                            __global GPU_INPUT *gpu_input,
-                           int gpu_input_stride) {
+                           int gpu_input_stride,
+                           int padding_offset) {
   __local int sum[64 + 16 + 4 + 1];
   __local uint32_t sse[64 + 16 + 4 + 1];
   __local int *sum_array[4];
@@ -676,7 +679,7 @@ void vp9_choose_partitions(__global uchar *src,
   int local_row = get_local_id(1);
   int global_offset = (global_row * 8 * stride) +
       (group_col * BLOCK_SIZE_IN_PIXELS) + (local_col * NUM_PIXELS_PER_WORKITEM);
-  global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
+  global_offset += padding_offset;
 
   gpu_output_pro_me += (global_row / (BLOCK_SIZE_IN_PIXELS / 8)) * group_stride + group_col;
 

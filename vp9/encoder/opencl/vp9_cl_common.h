@@ -139,7 +139,6 @@ typedef uint8_t INTERP_FILTER;
 #define MV_COST_WEIGHT      108
 
 #define VP9_INTERP_EXTEND 4
-#define VP9_ENC_BORDER_IN_PIXELS    160
 #define MI_SIZE 8
 
 #define SKIP_TXFM_NONE 0

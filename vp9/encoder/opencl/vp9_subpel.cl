@@ -161,7 +161,8 @@ void vp9_sub_pixel_search_halfpel_filtering(__global uchar *ref_frame,
     int stride,
     __global GPU_INPUT *gpu_input,
     __global GPU_OUTPUT_ME *gpu_output_me,
-    __global subpel_sum_sse *gpu_scratch) {
+    __global subpel_sum_sse *gpu_scratch,
+    int padding_offset) {
   short global_row = get_global_id(1);
 
   short group_col = get_group_id(0);
@@ -171,7 +172,7 @@ void vp9_sub_pixel_search_halfpel_filtering(__global uchar *ref_frame,
   int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * stride) +
                       ((group_col) * BLOCK_SIZE_IN_PIXELS) +
                       ((local_col >> 3) * NUM_PIXELS_PER_WORKITEM);
-  global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
+  global_offset += padding_offset;
 
 #if BLOCK_SIZE_IN_PIXELS == 64
   GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;
@@ -275,7 +276,8 @@ void vp9_sub_pixel_search_quarterpel_filtering(__global uchar *ref_frame,
     int stride,
     __global GPU_INPUT *gpu_input,
     __global GPU_OUTPUT_ME *gpu_output_me,
-    __global subpel_sum_sse *gpu_scratch) {
+    __global subpel_sum_sse *gpu_scratch,
+    int padding_offset) {
   short global_row = get_global_id(1);
 
   short group_col = get_group_id(0);
@@ -285,7 +287,7 @@ void vp9_sub_pixel_search_quarterpel_filtering(__global uchar *ref_frame,
   int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * stride) +
                       ((group_col) * BLOCK_SIZE_IN_PIXELS) +
                       ((local_col >> 3) * NUM_PIXELS_PER_WORKITEM);
-  global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
+  global_offset += padding_offset;
 
 #if BLOCK_SIZE_IN_PIXELS == 64
   GPU_BLOCK_SIZE gpu_bsize = GPU_BLOCK_64X64;

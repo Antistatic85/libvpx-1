@@ -71,7 +71,6 @@ struct lookahead_ctx *vp9_lookahead_init(VP9_COMMON *cm,
   // Allocate the lookahead structures
   ctx = calloc(1, sizeof(*ctx));
   if (ctx) {
-    const int legacy_byte_alignment = 0;
     unsigned int i;
     vpx_get_frame_buffer_cb_fn_t cb = NULL;
     vpx_codec_frame_buffer_t *codec_frame_buffer = NULL;
@@ -104,7 +103,7 @@ struct lookahead_ctx *vp9_lookahead_init(VP9_COMMON *cm,
                                      cm->use_highbitdepth,
 #endif
                                      VP9_ENC_BORDER_IN_PIXELS,
-                                     legacy_byte_alignment,
+                                     cm->byte_alignment,
                                      codec_frame_buffer, cb, cb_priv)) {
           goto bail;
         }
@@ -208,7 +207,7 @@ int vp9_lookahead_push(struct lookahead_ctx *ctx, YV12_BUFFER_CONFIG *src,
                                  use_highbitdepth,
 #endif
                                  VP9_ENC_BORDER_IN_PIXELS,
-                                 0))
+                                 VP9_ENC_ALIGNMENT))
           return 1;
       vp9_free_frame_buffer(&buf->img);
       buf->img = new_img;

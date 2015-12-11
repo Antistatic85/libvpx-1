@@ -613,7 +613,8 @@ void vp9_zero_motion_search(__global uchar *ref,
                             __global GPU_INPUT *gpu_input,
                             __global GPU_OUTPUT_ME *gpu_output_me,
                             __global GPU_RD_PARAMETERS *rd_parameters,
-                            int64_t yplane_size, int64_t uvplane_size) {
+                            int64_t yplane_size, int64_t uvplane_size,
+                            int padding_offset) {
   __global uchar *ref_frame = ref;
   __global uchar *cur_frame = cur;
   uint sse_tmp;
@@ -658,7 +659,7 @@ void vp9_zero_motion_search(__global uchar *ref,
   int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * stride) +
                       (group_col * BLOCK_SIZE_IN_PIXELS) +
                       (local_col * NUM_PIXELS_PER_WORKITEM);
-  global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
+  global_offset += padding_offset;
 
   cur += global_offset;
   ref += global_offset;
@@ -755,7 +756,7 @@ void vp9_zero_motion_search(__global uchar *ref,
     global_offset = (global_row * (PIXEL_ROWS_PER_WORKITEM >> 1) * (stride >> 1)) +
                     (group_col * (BLOCK_SIZE_IN_PIXELS >> 1)) +
                     ((local_col >> 1) * NUM_PIXELS_PER_WORKITEM);
-    global_offset += (VP9_ENC_BORDER_IN_PIXELS >> 1) * (stride >> 1) + (VP9_ENC_BORDER_IN_PIXELS >> 1);
+    global_offset += padding_offset;
 
     short uv_idx = (local_col & 1);
     global_offset += yplane_size + uv_idx * uvplane_size;
@@ -817,7 +818,8 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
                                   int stride,
                                   __global GPU_INPUT *gpu_input,
                                   __global GPU_OUTPUT_ME *gpu_output_me,
-                                  __global GPU_SCRATCH *gpu_scratch) {
+                                  __global GPU_SCRATCH *gpu_scratch,
+                                  int padding_offset) {
   __local uchar8 intermediate_uchar8[(BLOCK_SIZE_IN_PIXELS * (BLOCK_SIZE_IN_PIXELS + 8)) / NUM_PIXELS_PER_WORKITEM];
   __local int *intermediate_int = (__local int *)intermediate_uchar8;
   int global_row = get_global_id(1);
@@ -864,7 +866,7 @@ void vp9_inter_prediction_and_sse(__global uchar *ref_frame,
   int global_offset = (global_row * stride * PIXEL_ROWS_PER_WORKITEM) +
       ((group_col >> 1) * BLOCK_SIZE_IN_PIXELS) + (local_col * NUM_PIXELS_PER_WORKITEM);
 
-  global_offset += (VP9_ENC_BORDER_IN_PIXELS * stride) + VP9_ENC_BORDER_IN_PIXELS;
+  global_offset += padding_offset;
 
   if (filter_type != EIGHTTAP && !horz_subpel && !vert_subpel)
     goto exit;
