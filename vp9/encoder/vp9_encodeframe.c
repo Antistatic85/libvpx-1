@@ -4554,9 +4554,7 @@ static void encode_superblock(VP9_COMP *cpi, ThreadData *td,
     if (!(cpi->sf.reuse_inter_pred_sby && ctx->pred_pixel_ready) || seg_skip)
       vp9_build_inter_predictors_sby(xd, mi_row, mi_col, MAX(bsize, BLOCK_8X8));
 
-    vp9_build_inter_predictors_sbuv(xd, mi_row, mi_col, MAX(bsize, BLOCK_8X8));
-
-    vp9_encode_sb(x, MAX(bsize, BLOCK_8X8));
+    vp9_encode_sb(x, MAX(bsize, BLOCK_8X8), mi_row, mi_col);
     vp9_tokenize_sb(cpi, td, t, !output_enabled, MAX(bsize, BLOCK_8X8));
   }
 

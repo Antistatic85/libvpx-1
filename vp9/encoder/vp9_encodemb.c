@@ -741,7 +741,7 @@ void vp9_encode_sby_pass1(MACROBLOCK *x, BLOCK_SIZE bsize) {
                                          encode_block_pass1, x);
 }
 
-void vp9_encode_sb(MACROBLOCK *x, BLOCK_SIZE bsize) {
+void vp9_encode_sb(MACROBLOCK *x, BLOCK_SIZE bsize, int mi_row, int mi_col) {
   MACROBLOCKD *const xd = &x->e_mbd;
   struct optimize_ctx ctx;
   MB_MODE_INFO *mbmi = &xd->mi[0]->mbmi;
@@ -750,10 +750,13 @@ void vp9_encode_sb(MACROBLOCK *x, BLOCK_SIZE bsize) {
 
   mbmi->skip = 1;
 
-  if (x->skip)
-    return;
-
   for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
+    if (plane)
+      vp9_build_inter_predictors_sbp(xd, mi_row, mi_col, bsize, plane);
+
+    if (x->skip)
+      continue;
+
     if (!x->skip_recode && !x->quant_fp)
       vp9_subtract_plane(x, bsize, plane);
 
