@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define EOSB_TOKEN 127     // Not signalled, encoder only
+#define EOSB_TOKEN 15     // Not signalled, encoder only
 
 #if CONFIG_VP9_HIGHBITDEPTH
   typedef int32_t EXTRABIT;
@@ -35,10 +35,18 @@ typedef struct {
 } TOKENVALUE;
 
 typedef struct {
-  const vpx_prob *context_tree;
+  uint8_t token : 4;
+  // coeff_type ranges from 0 - PLANE_TYPES
+  uint8_t coeff_type : 1;
+  // coeff_band ranges from 0 - COEF_BANDS
+  uint8_t coeff_band : 3;
+  // coeff_ctx ranges from 0 - COEFF_CONTEXTS * UNCONSTRAINED_NODES
+  uint8_t coeff_ctx  : 5;
+  // tx_size ranges from 0 - TX_SIZES
+  uint8_t tx_size : 2;
+  uint8_t skip_eob_node : 1;
+
   EXTRABIT extra;
-  uint8_t token;
-  uint8_t skip_eob_node;
 } TOKENEXTRA;
 
 typedef struct {

@@ -121,7 +121,8 @@ static void update_switchable_interp_probs(VP9_COMMON *cm, vpx_writer *w,
 
 static void pack_mb_tokens(vpx_writer *w,
                            TOKENEXTRA **tp, const TOKENEXTRA *const stop,
-                           vpx_bit_depth_t bit_depth) {
+                           vpx_bit_depth_t bit_depth, const FRAME_CONTEXT *fc,
+                           int ref) {
   TOKENEXTRA *p = *tp;
 
   while (p < stop && p->token != EOSB_TOKEN) {
@@ -130,6 +131,9 @@ static void pack_mb_tokens(vpx_writer *w,
     int i = 0;
     int v = a->value;
     int n = a->len;
+    const vpx_prob (*coef_probs)[COEFF_CONTEXTS][UNCONSTRAINED_NODES] =
+        fc->coef_probs[p->tx_size][p->coeff_type][ref];
+    const vpx_prob *context_tree;
 #if CONFIG_VP9_HIGHBITDEPTH
     const vp9_extra_bit *b;
     if (bit_depth == VPX_BITS_12)
@@ -157,15 +161,16 @@ static void pack_mb_tokens(vpx_writer *w,
     // is split into two treed writes.  The first treed write takes care of the
     // unconstrained nodes.  The second treed write takes care of the
     // constrained nodes.
+    context_tree = coef_probs[p->coeff_band][p->coeff_ctx];
     if (t >= TWO_TOKEN && t < EOB_TOKEN) {
       int len = UNCONSTRAINED_NODES - p->skip_eob_node;
       int bits = v >> (n - len);
-      vp9_write_tree(w, vp9_coef_tree, p->context_tree, bits, len, i);
+      vp9_write_tree(w, vp9_coef_tree, context_tree, bits, len, i);
       vp9_write_tree(w, vp9_coef_con_tree,
-                     vp9_pareto8_full[p->context_tree[PIVOT_NODE] - 1],
+                     vp9_pareto8_full[context_tree[PIVOT_NODE] - 1],
                      v, n - len, 0);
     } else {
-      vp9_write_tree(w, vp9_coef_tree, p->context_tree, v, n, i);
+      vp9_write_tree(w, vp9_coef_tree, context_tree, v, n, i);
     }
 
     if (b->base_val) {
@@ -399,7 +404,8 @@ static void write_modes_b(VP9_COMP *cpi, const TileInfo *const tile,
   }
 
   assert(*tok < tok_end);
-  pack_mb_tokens(w, tok, tok_end, cm->bit_depth);
+  pack_mb_tokens(w, tok, tok_end, cm->bit_depth, cm->fc,
+                 is_inter_block(&m->mbmi));
 }
 
 static void write_partition(const VP9_COMMON *const cm,
