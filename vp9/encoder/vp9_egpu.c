@@ -147,7 +147,8 @@ static void vp9_read_partition_info(VP9_COMP *cpi, ThreadData *td,
   int mi_row, mi_col;
 
   x->data_parallel_processing = 1;
-  if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT) {
+  if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT &&
+      MAX_SUB_FRAMES > 2) {
     int q = cpi->rc.q_prediction_curr;
     if (cm->base_qindex != q) {
       vp9_gpu_rewrite_quant_info(cpi, x, q);
@@ -161,7 +162,7 @@ static void vp9_read_partition_info(VP9_COMP *cpi, ThreadData *td,
     }
   }
   if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT &&
-      cm->base_qindex != base_qindex) {
+      MAX_SUB_FRAMES > 2 && cm->base_qindex != base_qindex) {
     vp9_gpu_rewrite_quant_info(cpi, x, base_qindex);
   }
   x->data_parallel_processing = 0;
