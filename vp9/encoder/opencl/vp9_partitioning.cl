@@ -14,16 +14,11 @@
 
 #define CR_SEGMENT_ID_BASE    0
 
-typedef struct {
-  short sum8x8[64];
-}SUM8X8;
-
 struct GPU_OUTPUT_PRO_ME {
-  SUM8X8 sum8x8;
+  char block_type[64];
   int_mv pred_mv;
   int pred_mv_sad;
   char color_sensitivity;
-  char block_size;
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT_PRO_ME GPU_OUTPUT_PRO_ME;
 
@@ -122,6 +117,67 @@ uint32_t vp9_avg_8x8(__global uchar *buffer, int stride) {
   final_sum = convert_ushort4(sum.s0123) + convert_ushort4(sum.s4567);
   final_sum.s01 = final_sum.s01 + final_sum.s23;
   return (final_sum.s0 + final_sum.s1 + 32) >> 6;
+}
+
+int set_vt_partitioning(__local int *var,
+                        __local int *sum_array,
+                        __local uint32_t *sse_array,
+                        int stride, int log2_count,
+                        BLOCK_SIZE bsize,
+                        __global char *block_sz,
+                        int threshold,
+                        BLOCK_SIZE bsize_min,
+                        int force_split) {
+  int var1, var2;
+  int sum_1, sum_2;
+  uint32_t sse_1, sse_2;
+
+  if (force_split == 1)
+    return 0;
+
+  if (bsize == bsize_min) {
+    if (*var < threshold) {
+      *block_sz = bsize;
+      return 1;
+    }
+    return 0;
+  } else if (bsize > bsize_min) {
+    if (*var < threshold) {
+      *block_sz = bsize;
+      return 1;
+    }
+
+    // Check vertical split.
+    sse_1 = sse_array[0] + sse_array[stride];
+    sum_1 = sum_array[0] + sum_array[stride];
+    sse_2 = sse_array[1] + sse_array[stride + 1];
+    sum_2 = sum_array[1] + sum_array[stride + 1];
+    var1 = get_variance(sse_1, sum_1, log2_count);
+    var2 = get_variance(sse_2, sum_2, log2_count);
+    if (var1 < threshold && var2 < threshold) {
+      int block_width = num_8x8_blocks_wide_lookup[bsize] >> 1;
+      *block_sz = bsize - 2;
+      *(block_sz + block_width * block_width) = bsize - 2;
+      return 1;
+    }
+
+    // Check horizontal split.
+    sse_1 = sse_array[0] + sse_array[1];
+    sum_1 = sum_array[0] + sum_array[1];
+    sse_2 = sse_array[stride] + sse_array[stride + 1];
+    sum_2 = sum_array[stride] + sum_array[stride + 1];
+    var1 = get_variance(sse_1, sum_1, log2_count);
+    var2 = get_variance(sse_2, sum_2, log2_count);
+    if (var1 < threshold && var2 < threshold) {
+      int block_width = num_8x8_blocks_wide_lookup[bsize] >> 1;
+      *block_sz = bsize - 1;
+      *(block_sz + block_width * block_width * 2) = bsize - 1;
+      return 1;
+    }
+
+    return 0;
+  }
+  return 0;
 }
 
 void var_filter_block2d_bil_both(__global uchar *ref_data,
@@ -456,7 +512,7 @@ void vp9_vector_match(__global ushort *proj_src_h,
   MV thismv;
 
   gpu_output_pro_me += global_row * group_stride + group_col;
-  __global int *intermediate_int = (__global int *)&gpu_output_pro_me->sum8x8;
+  __global int *intermediate_int = (__global int *)&gpu_output_pro_me->block_type;
 
   {
     int stride_h = (get_num_groups(0) + 1) * BLOCK_SIZE_IN_PIXELS;
@@ -490,31 +546,29 @@ void vp9_pro_motion_estimation(__global uchar *cur,
                                int stride,
                                __global GPU_OUTPUT_PRO_ME *gpu_output_pro_me,
                                int padding_offset) {
-  short global_row = get_global_id(1);
-
-  short group_col = get_group_id(0);
+  __global int *intermediate_sad;
+  int global_row = get_global_id(1);
+  int group_col = get_group_id(0);
   int group_stride = get_num_groups(0);
-
   int local_col = get_local_id(0);
-  int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * stride) +
-                      (group_col * BLOCK_SIZE_IN_PIXELS) +
-                      ((local_col >> 2) * NUM_PIXELS_PER_WORKITEM);
-
-  global_offset += padding_offset;
-
   int group_offset = (global_row / (BLOCK_SIZE_IN_PIXELS / PIXEL_ROWS_PER_WORKITEM) *
-      group_stride + (group_col));
+        group_stride + (group_col));
+  int sad;
+  int top, bottom;
+  int left, right;
+  MV best_mv, this_mv, next_mv;
+  int buffer_offset;
+  unsigned int bestsad;
+  int global_offset = (global_row * PIXEL_ROWS_PER_WORKITEM * stride) +
+      (group_col * BLOCK_SIZE_IN_PIXELS) +
+      ((local_col >> 2) * NUM_PIXELS_PER_WORKITEM);
+  global_offset += padding_offset;
 
   gpu_output_pro_me += group_offset;
 
-  int sad;
+  intermediate_sad = (__global int *)&gpu_output_pro_me->block_type;
 
-  MV best_mv, this_mv;
   best_mv = this_mv = gpu_output_pro_me->pred_mv.as_mv;
-  int buffer_offset;
-  unsigned int bestsad;
-
-  __global int *intermediate_sad = (__global int *)&gpu_output_pro_me->sum8x8;
 
   // Compute sad for pred MV and zero MV
   int idx = (local_col & 3);
@@ -522,16 +576,15 @@ void vp9_pro_motion_estimation(__global uchar *cur,
   int local_offset = (idx >> 1) * (PIXEL_ROWS_PER_WORKITEM / 2) * stride;
   __global uchar *cur_frame = cur + (global_offset + local_offset);
   __global uchar *ref_frame = ref + (global_offset + local_offset);
-  if (tmp_idx)
+  if (tmp_idx) {
     this_mv = 0;
+  }
 
   sad = calculate_sad_rows(&this_mv, ref_frame, cur_frame, stride,
                            PIXEL_ROWS_PER_WORKITEM / 2);
   atomic_add(intermediate_sad + tmp_idx, sad);
   barrier(CLK_GLOBAL_MEM_FENCE);
-
   bestsad = intermediate_sad[0];
-
   if (bestsad >= intermediate_sad[1]) {
     best_mv = 0;
     bestsad = intermediate_sad[1];
@@ -550,30 +603,29 @@ void vp9_pro_motion_estimation(__global uchar *cur,
 
   // Check which among the 4 diamond points are best
   this_mv = best_mv;
-  MV next_mv = best_mv;
+  next_mv = best_mv;
 
-  int top, bottom;
   CHECK_BETTER(top, 0);
   CHECK_BETTER(bottom, 1);
-  if (top < bottom)
+  if (top < bottom) {
     next_mv.row -= 1;
-  else
+  } else {
     next_mv.row += 1;
+  }
 
-  int left, right;
   CHECK_BETTER(left, 2);
   CHECK_BETTER(right, 3);
-  if (left < right)
+  if (left < right) {
     next_mv.col -= 1;
-  else
+  } else {
     next_mv.col += 1;
+  }
 
   // Compute SAD for diagonal point
   local_offset = idx * (PIXEL_ROWS_PER_WORKITEM / 4) * stride;
   cur_frame = cur + global_offset + local_offset;
   ref_frame = ref + global_offset + local_offset;
-  sad = calculate_sad_rows(&next_mv, ref_frame, cur_frame, stride,
-                           PIXEL_ROWS_PER_WORKITEM / 4);
+  sad = calculate_sad_rows(&next_mv, ref_frame, cur_frame, stride, PIXEL_ROWS_PER_WORKITEM / 4);
   atomic_add(intermediate_sad + 4, sad);
   barrier(CLK_GLOBAL_MEM_FENCE);
 
@@ -587,7 +639,6 @@ void vp9_pro_motion_estimation(__global uchar *cur,
     gpu_output_pro_me->pred_mv.as_mv.row = best_mv.row << 3;
     gpu_output_pro_me->pred_mv_sad = bestsad;
   }
-
 }
 
 __kernel
@@ -668,6 +719,8 @@ void vp9_choose_partitions(__global uchar *src,
   __local int *sum_array[4];
   __local uint32_t *sse_array[4];
   __local int force_split[21];
+  __local int var[16 + 4 + 1];
+  __local int *var_array[3];
   uint32_t s_avg, d_avg;
   int variance;
   int segment_id;
@@ -696,7 +749,7 @@ void vp9_choose_partitions(__global uchar *src,
   if (segment_id == CR_SEGMENT_ID_BASE &&
       gpu_output_pro_me->pred_mv_sad < rd_parameters->vbp_threshold_sad) {
     if (local_col == 0 && local_row == 0) {
-      gpu_output_pro_me->block_size = BLOCK_64X64;
+      gpu_output_pro_me->block_type[0] = BLOCK_64X64;
       gpu_input[0].do_compute = GPU_BLOCK_64X64;
       gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
       gpu_input[1].do_compute = GPU_BLOCK_64X64;
@@ -717,10 +770,13 @@ void vp9_choose_partitions(__global uchar *src,
   sse_array[2] = sse + 64 + 16;
   sse_array[3] = sse + 64 + 16 + 4;
 
+  var_array[0] = var;
+  var_array[1] = var + 16;
+  var_array[2] = var + 16 + 4;
+
   s_avg = vp9_avg_8x8(src, stride);
   d_avg = vp9_avg_8x8(ref, stride);
 
-  gpu_output_pro_me->sum8x8.sum8x8[local_row * 8 + local_col] = s_avg - d_avg;
   sum_array[0][local_row * 8 + local_col] = s_avg - d_avg;
   sse_array[0][local_row * 8 + local_col] = (s_avg - d_avg) * (s_avg - d_avg);
 
@@ -737,7 +793,7 @@ void vp9_choose_partitions(__global uchar *src,
   int log2_count = 2;
   int blk_stride = 8;
   int blk_index = 0;
-  while (i < 8) {
+  while (i <= 8) {
     barrier(CLK_LOCAL_MEM_FENCE);
     if (local_col % i == 0 && local_row % i == 0) {
       int j, k;
@@ -755,12 +811,22 @@ void vp9_choose_partitions(__global uchar *src,
                                (local_col / i)] = sum;
       sse_array[blk_index + 1][(local_row / i) * (blk_stride >> 1) +
                                (local_col / i)] = sse;
+      // couldve used continue statement here but intel opencl compiler has
+      // a problem with continue statments
+      if (i == 4 && force_split[1 + ((local_row / 4) * 2 + (local_col / 4))])
+        goto SKIP_VAR_CALC;
+      if (i == 8 && force_split[0])
+        goto SKIP_VAR_CALC;
       variance = get_variance(sse, sum, log2_count);
+      var_array[blk_index][(local_row / i) * (blk_stride >> 1) +
+                           (local_col / i)] = variance;
       if (variance >= rd_parameters->seg_rd_param[segment_id].vbp_thresholds[i >> 2]) {
         if (i < 4)
           force_split[5 + ((local_row / 2) * 4 + (local_col / 2))] = 1; // 16X16
-        force_split[1 + ((local_row / 4) * 2 + (local_col / 4))] = 1; // 32X32
-        force_split[0] = 1; // 64X64
+        if (i < 8) {
+          force_split[1 + ((local_row / 4) * 2 + (local_col / 4))] = 1; // 32X32
+          force_split[0] = 1; // 64X64
+        }
       } else if (i == 2 && segment_id == 0 &&
           variance >= rd_parameters->seg_rd_param[segment_id].vbp_thresholds[1]) {
         int minmax = compute_minmax_8x8(src, ref, stride);
@@ -772,6 +838,7 @@ void vp9_choose_partitions(__global uchar *src,
         }
       }
     }
+SKIP_VAR_CALC:
     blk_index += 1;
     blk_stride >>= 1;
     log2_count += 2;
@@ -781,83 +848,77 @@ void vp9_choose_partitions(__global uchar *src,
 select_partitions:
   barrier(CLK_LOCAL_MEM_FENCE);
   if (local_col == 0 && local_row == 0) {
-    gpu_output_pro_me->block_size = 255;
-    if (force_split[0] == 0) {
-      int sum_1, sum_2;
-      uint32_t sse_1, sse_2;
-
-      // check for 64X64 partitions
-      sse_1 = sse_array[2][0] + sse_array[2][2];
-      sum_1 = sum_array[2][0] + sum_array[2][2];
-      sse_2 = sse_array[2][1] + sse_array[2][3];
-      sum_2 = sum_array[2][1] + sum_array[2][3];
-      variance = get_variance(sse_1 + sse_2, sum_1 + sum_2, 6);
-      if (variance < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2]) {
-        gpu_output_pro_me->block_size = BLOCK_64X64;
-        gpu_input[0].do_compute = GPU_BLOCK_64X64;
-        gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
-        gpu_input[1].do_compute = GPU_BLOCK_64X64;
-        gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_64X64;
-        gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_64X64;
-      }
-      else {
-        int var1, var2;
-
-        force_split[0] = 1;
-        var1 = get_variance(sse_1, sum_1, 5);
-        var2 = get_variance(sse_2, sum_2, 5);
-        if (var1 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2] &&
-            var2 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2]) {
-          gpu_output_pro_me->block_size = BLOCK_32X64;
-          gpu_input[0].do_compute = GPU_BLOCK_INVALID;
-          gpu_input[1].do_compute = GPU_BLOCK_INVALID;
-          gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_INVALID;
-          gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_INVALID;
-          force_split[0] = 0;
-        } else {
-          sse_1 = sse_array[2][0] + sse_array[2][1];
-          sum_1 = sum_array[2][0] + sum_array[2][1];
-          sse_2 = sse_array[2][2] + sse_array[2][3];
-          sum_2 = sum_array[2][2] + sum_array[2][3];
-          var1 = get_variance(sse_1, sum_1, 5);
-          var2 = get_variance(sse_2, sum_2, 5);
-          if (var1 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2] &&
-              var2 < rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2]) {
-            gpu_output_pro_me->block_size = BLOCK_64X32;
-            gpu_input[0].do_compute = GPU_BLOCK_INVALID;
-            gpu_input[1].do_compute = GPU_BLOCK_INVALID;
-            gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_INVALID;
-            gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_INVALID;
-            force_split[0] = 0;
+    // Now go through the entire structure, splitting every block size until
+    // we get to one that's got a variance lower than our threshold.
+    if (!set_vt_partitioning(var_array[2], sum_array[2], sse_array[2],
+                             2, 5, BLOCK_64X64, gpu_output_pro_me->block_type,
+                             rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2],
+                             BLOCK_16X16,
+                             force_split[0])) {
+      for (i = 0; i < 4; ++i) {
+        char x32_idx = (i & 1);
+        char y32_idx = (i >> 1);
+        char j;
+        if (!set_vt_partitioning(&var_array[1][i],
+                                 &sum_array[1][y32_idx * 8 + x32_idx * 2],
+                                 &sse_array[1][y32_idx * 8 + x32_idx * 2],
+                                 4, 3, BLOCK_32X32,
+                                 &gpu_output_pro_me->block_type[i * 16],
+                                 rd_parameters->seg_rd_param[segment_id].vbp_thresholds[1],
+                                 BLOCK_16X16,
+                                 force_split[i + 1])) {
+          for (j = 0; j < 4; ++j) {
+            char x16_idx = (j & 1);
+            char y16_idx = (j >> 1);
+            char k;
+            if (!set_vt_partitioning(&var_array[0][y32_idx * 8 + x32_idx * 2 + y16_idx * 4 + x16_idx],
+                                     &sum_array[0][y32_idx * 32 + x32_idx * 4 + y16_idx * 16 + x16_idx * 2],
+                                     &sse_array[0][y32_idx * 32 + x32_idx * 4 + y16_idx * 16 + x16_idx * 2],
+                                     8, 1, BLOCK_16X16,
+                                     &gpu_output_pro_me->block_type[i * 16 + j * 4],
+                                     rd_parameters->seg_rd_param[segment_id].vbp_thresholds[0],
+                                     BLOCK_16X16,
+                                     force_split[5 + y32_idx * 8 + x32_idx * 2 + y16_idx * 4 + x16_idx])) {
+              for (k = 0; k < 4; ++k) {
+                gpu_output_pro_me->block_type[i * 16 + j * 4 + k] = BLOCK_8X8;
+              }
+            }
           }
         }
       }
     }
 
-    if (force_split[0] == 1) {
-      // check for 32X32 partitions
-      if (force_split[1] == 0) {
+    if (gpu_output_pro_me->block_type[0] == BLOCK_64X64) {
+      gpu_input[0].do_compute = GPU_BLOCK_64X64;
+      gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
+      gpu_input[1].do_compute = GPU_BLOCK_64X64;
+      gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_64X64;
+      gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_64X64;
+    } else if (gpu_output_pro_me->block_type[0] == BLOCK_32X64) {
+      gpu_input[0].do_compute = GPU_BLOCK_INVALID;
+      gpu_input[1].do_compute = GPU_BLOCK_INVALID;
+      gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_INVALID;
+      gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_INVALID;
+    } else {
+      if (gpu_output_pro_me->block_type[0] == BLOCK_32X32) {
         gpu_input[0].do_compute = GPU_BLOCK_32X32;
         gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
       } else {
         gpu_input[0].do_compute = GPU_BLOCK_INVALID;
       }
-
-      if (force_split[2] == 0) {
+      if (gpu_output_pro_me->block_type[16] == BLOCK_32X32) {
         gpu_input[1].do_compute = GPU_BLOCK_32X32;
         gpu_input[1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
       } else {
         gpu_input[1].do_compute = GPU_BLOCK_INVALID;
       }
-
-      if (force_split[3] == 0) {
+      if (gpu_output_pro_me->block_type[32] == BLOCK_32X32) {
         gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_32X32;
         gpu_input[gpu_input_stride].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
       } else {
         gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_INVALID;
       }
-
-      if (force_split[4] == 0) {
+      if (gpu_output_pro_me->block_type[48] == BLOCK_32X32) {
         gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_32X32;
         gpu_input[gpu_input_stride + 1].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
       } else {

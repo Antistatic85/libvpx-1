@@ -61,16 +61,11 @@ struct GPU_OUTPUT_ME {
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT_ME GPU_OUTPUT_ME;
 
-typedef struct {
-  short sum8x8[64];
-}SUM8X8;
-
 struct GPU_OUTPUT_PRO_ME {
-  SUM8X8 sum8x8;
+  char block_type[64];
   int_mv pred_mv;
   int pred_mv_sad;
   char color_sensitivity;
-  char block_size;
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT_PRO_ME GPU_OUTPUT_PRO_ME;
 

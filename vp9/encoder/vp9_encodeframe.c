@@ -638,22 +638,13 @@ static void fill_variance_8x8avg(const uint8_t *s, int sp, const uint8_t *d,
 #endif
                                  int pixels_wide,
                                  int pixels_high,
-                                 int is_key_frame,
-                                 SUM8X8 *sum8x8) {
+                                 int is_key_frame) {
   int k;
-  (void) sum8x8;
   for (k = 0; k < 4; k++) {
     int x8_idx = x16_idx + ((k & 1) << 3);
     int y8_idx = y16_idx + ((k >> 1) << 3);
     unsigned int sse = 0;
     int sum = 0;
-#if CONFIG_GPU_COMPUTE
-    if (sum8x8 != NULL) {
-      sum = sum8x8->sum8x8[(y8_idx >> 3) * 8 + (x8_idx >> 3)];
-      sse = sum * sum;
-      goto gpu_marker;
-    }
-#endif
     if (x8_idx < pixels_wide && y8_idx < pixels_high) {
       int s_avg;
       int d_avg = 128;
@@ -675,12 +666,72 @@ static void fill_variance_8x8avg(const uint8_t *s, int sp, const uint8_t *d,
       sum = s_avg - d_avg;
       sse = sum * sum;
     }
-#if CONFIG_GPU_COMPUTE
-gpu_marker:
-#endif
     fill_variance(sse, sum, 0, &vst->split[k].part_variances.none);
   }
 }
+
+#if CONFIG_GPU_COMPUTE
+static int set_gpu_partitioning(VP9_COMP *cpi, MACROBLOCK *x,
+                                BLOCK_SIZE btype, BLOCK_SIZE bsize,
+                                int mi_row, int mi_col) {
+  MACROBLOCKD *xd = &x->e_mbd;
+  const int block_width = num_8x8_blocks_wide_lookup[bsize];
+  const int block_height = num_8x8_blocks_high_lookup[bsize];
+
+  if (btype == bsize) {
+    set_block_size(cpi, x, xd, mi_row, mi_col, bsize);
+    return 1;
+  } else if (btype == get_subsize(bsize, PARTITION_HORZ)) {
+    BLOCK_SIZE subsize = get_subsize(bsize, PARTITION_HORZ);
+    set_block_size(cpi, x, xd, mi_row, mi_col, subsize);
+    set_block_size(cpi, x, xd, mi_row + block_height / 2, mi_col, subsize);
+    return 1;
+  } else if (btype == get_subsize(bsize, PARTITION_VERT)) {
+    BLOCK_SIZE subsize = get_subsize(bsize, PARTITION_VERT);
+    set_block_size(cpi, x, xd, mi_row, mi_col, subsize);
+    set_block_size(cpi, x, xd, mi_row, mi_col + block_width / 2, subsize);
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+static void vp9_gpu_init_partition_size(VP9_COMP *cpi, MACROBLOCK *x,
+                                        char *block_sz_array, int mi_row,
+                                        int mi_col) {
+  int i, j, k;
+
+  if (!set_gpu_partitioning(cpi, x, block_sz_array[0], BLOCK_64X64, mi_row,
+                            mi_col)) {
+    for (i = 0; i < 4; ++i) {
+      const int x32_idx = ((i & 1) << 2);
+      const int y32_idx = ((i >> 1) << 2);
+      if (!set_gpu_partitioning(cpi, x, block_sz_array[i * 16], BLOCK_32X32,
+                                (mi_row + y32_idx), (mi_col + x32_idx))) {
+        for (j = 0; j < 4; ++j) {
+          const int x16_idx = ((j & 1) << 1);
+          const int y16_idx = ((j >> 1) << 1);
+          if (!set_gpu_partitioning(cpi, x, block_sz_array[i * 16 + 4 * j],
+                                    BLOCK_16X16, mi_row + y32_idx + y16_idx,
+                                    mi_col + x32_idx + x16_idx)) {
+            for (k = 0; k < 4; ++k) {
+              const int x8_idx = (k & 1);
+              const int y8_idx = (k >> 1);
+              if (!set_gpu_partitioning(cpi, x,
+                                        block_sz_array[i * 16 + 4 * j + k],
+                                        BLOCK_8X8,
+                                        mi_row + y32_idx + y16_idx + y8_idx,
+                                        mi_col + x32_idx + x16_idx + x8_idx)) {
+                assert(0);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+#endif
 
 // This function chooses partitioning based on the variance between source and
 // reconstructed last, where variance is computed for down-sampled inputs.
@@ -701,10 +752,6 @@ int choose_partitioning(VP9_COMP *cpi,
   int pixels_wide = 64, pixels_high = 64;
   int64_t thresholds[4] = {cpi->vbp_thresholds[0], cpi->vbp_thresholds[1],
       cpi->vbp_thresholds[2], cpi->vbp_thresholds[3]};
-  SUM8X8 *sum8x8 = NULL;
-#if CONFIG_GPU_COMPUTE
-  int leave = 0;
-#endif
 
   // Always use 4x4 partition for key frame.
   const int is_key_frame = (cm->frame_type == KEY_FRAME);
@@ -724,7 +771,6 @@ int choose_partitioning(VP9_COMP *cpi,
     }
   }
 
-  (void) sum8x8;
   set_offsets(cpi, tile, x, mi_row, mi_col, BLOCK_64X64);
 
   if (xd->mb_to_right_edge < 0)
@@ -750,6 +796,30 @@ int choose_partitioning(VP9_COMP *cpi,
 
     assert(yv12 != NULL);
 
+#if CONFIG_GPU_COMPUTE
+    if (x->use_gpu && !x->data_parallel_processing && bsize == BLOCK_64X64) {
+      const int sb_row_index = mi_row / MI_SIZE;
+      const int sb_col_index = mi_col / MI_SIZE;
+      const int index = ((cm->mi_cols >> MI_BLOCK_SIZE_LOG2) * sb_row_index +
+          sb_col_index);
+      char *block_sz_array = cpi->gpu_output_pro_me_base[index].block_type;
+
+      mbmi->ref_frame[0] = LAST_FRAME;
+      mbmi->ref_frame[1] = NONE;
+      mbmi->sb_type = BLOCK_64X64;
+      mbmi->mv[0].as_int = cpi->gpu_output_pro_me_base[index].pred_mv.as_int;
+      x->pred_mv[LAST_FRAME] = mbmi->mv[0].as_mv;
+      mbmi->interp_filter = BILINEAR;
+      x->color_sensitivity[0] =
+          (cpi->gpu_output_pro_me_base[index].color_sensitivity) & 1;
+      x->color_sensitivity[1] =
+          (cpi->gpu_output_pro_me_base[index].color_sensitivity >> 1) & 1;
+      vp9_gpu_init_partition_size(cpi, x, block_sz_array, mi_row, mi_col);
+
+      return 0;
+    }
+#endif
+
     if (x->use_gpu && !x->data_parallel_processing) {
       const int sb_index = get_sb_index(cm, mi_row, mi_col);
       x->color_sensitivity[0] = cpi->color_sensitivity[0][sb_index];
@@ -758,44 +828,6 @@ int choose_partitioning(VP9_COMP *cpi,
 
       return 0;
     }
-
-#if CONFIG_GPU_COMPUTE
-    if (x->use_gpu && x->data_parallel_processing && bsize == BLOCK_64X64) {
-      const int sb_row_index = mi_row / MI_SIZE;
-      const int sb_col_index = mi_col / MI_SIZE;
-      const int index = ((cm->mi_cols >> MI_BLOCK_SIZE_LOG2) * sb_row_index +
-          sb_col_index);
-
-      mbmi->ref_frame[0] = LAST_FRAME;
-      mbmi->ref_frame[1] = NONE;
-      mbmi->sb_type = BLOCK_64X64;
-      mbmi->mv[0].as_int = cpi->gpu_output_pro_me_base[index].pred_mv.as_int;
-      mbmi->interp_filter = BILINEAR;
-      x->color_sensitivity[0] =
-          (cpi->gpu_output_pro_me_base[index].color_sensitivity) & 1;
-      x->color_sensitivity[1] =
-          (cpi->gpu_output_pro_me_base[index].color_sensitivity >> 1) & 1;
-      y_sad = cpi->gpu_output_pro_me_base[index].pred_mv_sad;
-      sum8x8 = &cpi->gpu_output_pro_me_base[index].sum8x8;
-
-      if (cpi->gpu_output_pro_me_base[index].block_size == BLOCK_64X64) {
-        set_block_size(cpi, x, xd, mi_row, mi_col, BLOCK_64X64);
-        leave = 1;
-      } else if (cpi->gpu_output_pro_me_base[index].block_size == BLOCK_64X32) {
-        const int block_width = num_8x8_blocks_wide_lookup[BLOCK_64X64];
-        set_block_size(cpi, x, xd, mi_row, mi_col, BLOCK_64X32);
-        set_block_size(cpi, x, xd, mi_row + block_width / 2, mi_col, BLOCK_64X32);
-        leave = 1;
-      } else if (cpi->gpu_output_pro_me_base[index].block_size == BLOCK_32X64) {
-        const int block_width = num_8x8_blocks_wide_lookup[BLOCK_64X64];
-        set_block_size(cpi, x, xd, mi_row, mi_col, BLOCK_32X64);
-        set_block_size(cpi, x, xd, mi_row, mi_col + block_width / 2, BLOCK_32X64);
-        leave = 1;
-      }
-
-      goto gpu_marker;
-    }
-#endif
 
     vp9_setup_pre_planes(xd, 0, yv12, mi_row, mi_col,
                          &cm->frame_refs[LAST_FRAME - 1].sf);
@@ -824,9 +856,6 @@ int choose_partitioning(VP9_COMP *cpi,
       x->color_sensitivity[i - 1] = uv_sad > (y_sad >> 2);
     }
 
-#if CONFIG_GPU_COMPUTE
-gpu_marker:
-#endif
     if (x->data_parallel_processing) {
       const int sb_index = get_sb_index(cm, mi_row, mi_col);
 
@@ -840,10 +869,6 @@ gpu_marker:
         vp9_zero(cpi->pred_mv_map[sb_index]);
       }
     }
-
-#if CONFIG_GPU_COMPUTE
-    if (leave) return 0;
-#endif
 
     vp9_setup_pre_planes(xd, 0, cpi->last_frame_buffer, mi_row, mi_col,
                          &cm->frame_refs[LAST_FRAME - 1].sf);
@@ -910,8 +935,7 @@ gpu_marker:
 #endif
                             pixels_wide,
                             pixels_high,
-                            is_key_frame,
-                            sum8x8);
+                            is_key_frame);
         fill_variance_tree(&vt.split[i].split[j], BLOCK_16X16);
         get_variance(&vt.split[i].split[j].part_variances.none);
         if (vt.split[i].split[j].part_variances.none.variance >=
