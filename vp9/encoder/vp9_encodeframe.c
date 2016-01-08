@@ -809,12 +809,7 @@ int choose_partitioning(VP9_COMP *cpi,
 #if CONFIG_GPU_COMPUTE
       char *block_sz_array = cpi->gpu_output_pro_me_base[sb_index].block_type;
 
-      mbmi->ref_frame[0] = LAST_FRAME;
-      mbmi->ref_frame[1] = NONE;
-      mbmi->sb_type = BLOCK_64X64;
-      mbmi->mv[0].as_int = cpi->gpu_output_pro_me_base[sb_index].pred_mv.as_int;
-      x->pred_mv[LAST_FRAME] = mbmi->mv[0].as_mv;
-      mbmi->interp_filter = BILINEAR;
+      x->pred_mv[LAST_FRAME] = cpi->gpu_output_pro_me_base[sb_index].pred_mv.as_mv;
       x->color_sensitivity[0] =
           (cpi->gpu_output_pro_me_base[sb_index].color_sensitivity) & 1;
       x->color_sensitivity[1] =

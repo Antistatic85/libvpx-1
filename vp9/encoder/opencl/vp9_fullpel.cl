@@ -100,7 +100,8 @@ void vp9_full_pixel_search(__global uchar *ref,
                            int stride,
                            __global GPU_INPUT *gpu_input,
                            __global GPU_OUTPUT_ME *gpu_output_me,
-                           __global GPU_RD_PARAMETERS *rd_parameters,
+                           __global GPU_RD_PARAMS_STATIC *rd_params_static,
+                           __global GPU_RD_PARAMS_DYNAMIC *rd_params_dyn,
                            int mi_rows,
                            int mi_cols,
                            int padding_offset) {
@@ -134,12 +135,12 @@ void vp9_full_pixel_search(__global uchar *ref,
     goto exit;
 
   __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
-      &rd_parameters->seg_rd_param[gpu_input->seg_id];
+      &rd_params_dyn->seg_rd_param[gpu_input->seg_id];
 
   int sad_per_bit = seg_rd_params->sad_per_bit;
 
-  __global int *nmvsadcost_0 = rd_parameters->nmvsadcost[0] + MV_MAX;
-  __global int *nmvsadcost_1 = rd_parameters->nmvsadcost[1] + MV_MAX;
+  __global int *nmvsadcost_0 = rd_params_static->nmvsadcost[0] + MV_MAX;
+  __global int *nmvsadcost_1 = rd_params_static->nmvsadcost[1] + MV_MAX;
   MV zero_mv = 0;
   MV pred_mv;
   INIT x;

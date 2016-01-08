@@ -69,6 +69,15 @@ struct GPU_OUTPUT_PRO_ME {
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT_PRO_ME GPU_OUTPUT_PRO_ME;
 
+typedef struct GPU_RD_PARAMS_STATIC {
+  int rd_div;
+  unsigned int inter_mode_cost[GPU_INTER_MODES];
+  int switchable_interp_costs[SWITCHABLE_FILTERS];
+
+  int nmvjointcost[MV_JOINTS];
+  int nmvsadcost[2][MV_VALS];
+} GPU_RD_PARAMS_STATIC;
+
 typedef struct GPU_RD_SEG_PARAMETERS {
   int rd_mult;
   int dc_dequant;
@@ -79,20 +88,13 @@ typedef struct GPU_RD_SEG_PARAMETERS {
   int vbp_thresholds[3];
 } GPU_RD_SEG_PARAMETERS;
 
-typedef struct GPU_RD_PARAMETERS {
-  int rd_div;
-  unsigned int inter_mode_cost[GPU_INTER_MODES];
-  int switchable_interp_costs[SWITCHABLE_FILTERS];
-
-  int nmvjointcost[MV_JOINTS];
-  int nmvsadcost[2][MV_VALS];
-
+typedef struct GPU_RD_PARAMS_DYNAMIC {
   int vbp_threshold_sad;
   int vbp_threshold_minmax;
 
   // Currently supporting only 2 segments in GPU
   GPU_RD_SEG_PARAMETERS seg_rd_param[2];
-} GPU_RD_PARAMETERS;
+} GPU_RD_PARAMS_DYNAMIC;
 
 typedef struct SubFrameInfo {
   int mi_row_start, mi_row_end;
@@ -107,7 +109,8 @@ typedef struct VP9_EGPU {
       int sub_frame_idx);
   void (*acquire_output_pro_me_buffer)(struct VP9_COMP *cpi, void **host_ptr,
       int sub_frame_idx);
-  void (*acquire_rd_param_buffer)(struct VP9_COMP *cpi, void **host_ptr,
+  void (*acquire_rd_param_buffer_static)(struct VP9_COMP *cpi, void **host_ptr);
+  void (*acquire_rd_param_buffer_dynamic)(struct VP9_COMP *cpi, void **host_ptr,
       int index);
   void (*enc_sync_read)(struct VP9_COMP *cpi, int event_id, int offset);
   void (*execute)(struct VP9_COMP *cpi, int sub_frame_idx, int async);

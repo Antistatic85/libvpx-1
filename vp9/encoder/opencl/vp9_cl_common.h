@@ -181,6 +181,15 @@ struct GPU_OUTPUT_ME {
 } __attribute__ ((aligned(32)));
 typedef struct GPU_OUTPUT_ME GPU_OUTPUT_ME;
 
+typedef struct GPU_RD_PARAMS_STATIC {
+  int rd_div;
+  unsigned int inter_mode_cost[GPU_INTER_MODES];
+  int switchable_interp_costs[SWITCHABLE_FILTERS];
+
+  int nmvjointcost[MV_JOINTS];
+  int nmvsadcost[2][MV_VALS];
+} GPU_RD_PARAMS_STATIC;
+
 typedef struct GPU_RD_SEG_PARAMETERS {
   int rd_mult;
   int dc_dequant;
@@ -191,20 +200,13 @@ typedef struct GPU_RD_SEG_PARAMETERS {
   int vbp_thresholds[3];
 } GPU_RD_SEG_PARAMETERS;
 
-typedef struct GPU_RD_PARAMETERS {
-  int rd_div;
-  unsigned int inter_mode_cost[GPU_INTER_MODES];
-  int switchable_interp_costs[SWITCHABLE_FILTERS];
-
-  int nmvjointcost[MV_JOINTS];
-  int nmvsadcost[2][MV_VALS];
-
+typedef struct GPU_RD_PARAMS_DYNAMIC {
   int vbp_threshold_sad;
   int vbp_threshold_minmax;
 
   // Currently supporting only 2 segments in GPU
   GPU_RD_SEG_PARAMETERS seg_rd_param[2];
-} GPU_RD_PARAMETERS;
+} GPU_RD_PARAMS_DYNAMIC;
 
 typedef struct {
   int sum;

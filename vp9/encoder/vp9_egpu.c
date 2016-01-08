@@ -85,43 +85,66 @@ static void vp9_gpu_fill_segment_rd_parameters(VP9_COMP *cpi,
   seg_rd->vbp_thresholds[2] = thresholds[0];
 }
 
-static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi, ThreadData *td,
-                                       int async) {
+static void vp9_gpu_fill_rd_params_dynamic(VP9_COMP *cpi,
+                                           GPU_RD_PARAMS_DYNAMIC *rd_param_ptr,
+                                           int q) {
   VP9_COMMON *const cm = &cpi->common;
-  VP9_EGPU *egpu = &cpi->egpu;
-  MACROBLOCK *const x = &td->mb;
-  GPU_RD_PARAMETERS *rd_param_ptr;
-  int index;
-  int i;
 
-  index = async ? ((cm->current_video_frame + 1) & 1) :
-      (cm->current_video_frame & 1);
-  egpu->acquire_rd_param_buffer(cpi, (void **)&rd_param_ptr, index);
-
-  assert(cpi->common.tx_mode == TX_MODE_SELECT);
-
-  memcpy(rd_param_ptr->nmvsadcost[0], x->nmvsadcost[0] - MV_MAX,
-         sizeof(rd_param_ptr->nmvsadcost[0]));
-  memcpy(rd_param_ptr->nmvsadcost[1], x->nmvsadcost[1] - MV_MAX,
-         sizeof(rd_param_ptr->nmvsadcost[1]));
-  rd_param_ptr->inter_mode_cost[0] =
-      cpi->inter_mode_cost[BOTH_PREDICTED][INTER_OFFSET(ZEROMV)];
-  rd_param_ptr->inter_mode_cost[1] =
-      cpi->inter_mode_cost[BOTH_PREDICTED][INTER_OFFSET(NEWMV)];
-  for(i = 0; i < MV_JOINTS; i++) {
-    rd_param_ptr->nmvjointcost[i] = x->nmvjointcost[i];
-  }
-  rd_param_ptr->rd_div = cpi->rd.RDDIV;
-  for (i = 0; i < SWITCHABLE_FILTERS; i++)
-    rd_param_ptr->switchable_interp_costs[i] =
-        cpi->switchable_interp_costs[SWITCHABLE_FILTERS][i];
-
-  rd_param_ptr->vbp_threshold_sad = cpi->vbp_threshold_sad;
-  rd_param_ptr->vbp_threshold_minmax = cpi->vbp_threshold_minmax;
+  rd_param_ptr->vbp_threshold_sad = (cpi->y_dequant[q][1] << 1) > 1000 ?
+      (cpi->y_dequant[q][1] << 1) : 1000;
+  rd_param_ptr->vbp_threshold_minmax = 15 + (q >> 3);
 
   vp9_gpu_fill_segment_rd_parameters(cpi, &rd_param_ptr->seg_rd_param[0], 0);
   if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ && cm->seg.enabled)
     vp9_gpu_fill_segment_rd_parameters(cpi, &rd_param_ptr->seg_rd_param[1], 1);
+}
+
+static void vp9_gpu_fill_rd_params_static(VP9_COMP *cpi, ThreadData *td,
+                                          GPU_RD_PARAMS_STATIC *rd_param_ptr) {
+  MACROBLOCK *const x = &td->mb;
+  int i;
+
+  rd_param_ptr->rd_div = cpi->rd.RDDIV;
+  rd_param_ptr->inter_mode_cost[0] =
+      cpi->inter_mode_cost[BOTH_PREDICTED][INTER_OFFSET(ZEROMV)];
+  rd_param_ptr->inter_mode_cost[1] =
+      cpi->inter_mode_cost[BOTH_PREDICTED][INTER_OFFSET(NEWMV)];
+  for (i = 0; i < SWITCHABLE_FILTERS; i++)
+    rd_param_ptr->switchable_interp_costs[i] =
+        cpi->switchable_interp_costs[SWITCHABLE_FILTERS][i];
+  for(i = 0; i < MV_JOINTS; i++) {
+    rd_param_ptr->nmvjointcost[i] = x->nmvjointcost[i];
+  }
+  memcpy(rd_param_ptr->nmvsadcost[0], x->nmvsadcost[0] - MV_MAX,
+         sizeof(rd_param_ptr->nmvsadcost[0]));
+  memcpy(rd_param_ptr->nmvsadcost[1], x->nmvsadcost[1] - MV_MAX,
+         sizeof(rd_param_ptr->nmvsadcost[1]));
+}
+
+static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi, ThreadData *td, int async) {
+  VP9_COMMON *const cm = &cpi->common;
+  VP9_EGPU *egpu = &cpi->egpu;
+  GPU_RD_PARAMS_DYNAMIC *rd_param_ptr_dyn;
+  int buff_index, q = cm->base_qindex;
+
+  assert(cpi->common.tx_mode == TX_MODE_SELECT);
+
+  if (cm->current_video_frame <= 2) {
+    GPU_RD_PARAMS_STATIC *rd_param_ptr_static;
+
+    egpu->acquire_rd_param_buffer_static(cpi, (void **) &rd_param_ptr_static);
+    vp9_gpu_fill_rd_params_static(cpi, td, rd_param_ptr_static);
+  }
+
+  buff_index = async ? ((cm->current_video_frame + 1) & 1) :
+      (cm->current_video_frame & 1);
+  if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT &&
+      MAX_SUB_FRAMES > 2) {
+    q = async ? cpi->rc.q_prediction_next : cpi->rc.q_prediction_curr;
+  }
+  egpu->acquire_rd_param_buffer_dynamic(cpi, (void **) &rd_param_ptr_dyn,
+                                        buff_index);
+  vp9_gpu_fill_rd_params_dynamic(cpi, rd_param_ptr_dyn, q);
 }
 
 static void vp9_gpu_fill_seg_id(VP9_COMP *cpi, int mi_row_start, int mi_row_end) {

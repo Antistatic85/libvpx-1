@@ -594,7 +594,7 @@ void vp9_zero_motion_search(__global uchar *ref,
                             int stride,
                             __global GPU_INPUT *gpu_input,
                             __global GPU_OUTPUT_ME *gpu_output_me,
-                            __global GPU_RD_PARAMETERS *rd_parameters,
+                            __global GPU_RD_PARAMS_DYNAMIC *rd_params_dyn,
                             int64_t yplane_size, int64_t uvplane_size,
                             int padding_offset) {
   __global uchar *ref_frame = ref;
@@ -633,7 +633,7 @@ void vp9_zero_motion_search(__global uchar *ref,
     goto exit;
 
   __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
-      &rd_parameters->seg_rd_param[gpu_input->seg_id];
+      &rd_params_dyn->seg_rd_param[gpu_input->seg_id];
 
   int local_col = get_local_id(0);
   int local_row = get_local_id(1);
@@ -874,7 +874,8 @@ exit:
 __kernel
 void vp9_rd_calculation(__global GPU_INPUT *gpu_input,
                         __global GPU_OUTPUT_ME *gpu_output_me,
-                        __global GPU_RD_PARAMETERS *rd_parameters,
+                        __global GPU_RD_PARAMS_STATIC *rd_params_static,
+                        __global GPU_RD_PARAMS_DYNAMIC *rd_params_dyn,
                         __global GPU_SCRATCH *gpu_scratch) {
   uint32_t sse8x8[64], var8x8[64];
   int sum8x8[64];
@@ -902,7 +903,7 @@ void vp9_rd_calculation(__global GPU_INPUT *gpu_input,
     goto exit;
 
   __global GPU_RD_SEG_PARAMETERS *seg_rd_params =
-      &rd_parameters->seg_rd_param[gpu_input->seg_id];
+      &rd_params_dyn->seg_rd_param[gpu_input->seg_id];
   MV out_mv = gpu_output_me->mv.as_mv;
   int mv_row = out_mv.row;
   int mv_col = out_mv.col;
@@ -966,8 +967,8 @@ void vp9_rd_calculation(__global GPU_INPUT *gpu_input,
       MODEL_RD_FOR_SB_Y_LARGE
 
       if (horz_subpel || vert_subpel)
-        actual_rate += rd_parameters->switchable_interp_costs[j];
-      cost = RDCOST(seg_rd_params->rd_mult, rd_parameters->rd_div,
+        actual_rate += rd_params_static->switchable_interp_costs[j];
+      cost = RDCOST(seg_rd_params->rd_mult, rd_params_static->rd_div,
                     actual_rate, actual_dist);
       if (cost < best_cost) {
         best_cost = cost;
