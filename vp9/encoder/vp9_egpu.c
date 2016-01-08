@@ -85,75 +85,6 @@ static void vp9_gpu_fill_segment_rd_parameters(VP9_COMP *cpi,
   seg_rd->vbp_thresholds[2] = thresholds[0];
 }
 
-static void vp9_write_partition_info(VP9_COMP *cpi, ThreadData *td,
-                                     const TileInfo *const tile,
-                                     int mi_row) {
-  VP9_COMMON *const cm = &cpi->common;
-  MACROBLOCK *const x = &td->mb;
-  VP9_EGPU *egpu = &cpi->egpu;
-  GPU_INPUT *gpu_input_base = NULL;
-  int mi_col;
-  const BLOCK_SIZE bsize = get_actual_block_size(0);
-  const int mi_row_step = num_8x8_blocks_high_lookup[bsize];
-  const int mi_col_step = num_8x8_blocks_wide_lookup[bsize];
-
-  egpu->acquire_input_buffer(cpi, (void **) &gpu_input_base);
-
-  for (mi_col = tile->mi_col_start; mi_col < tile->mi_col_end;
-       mi_col += MI_BLOCK_SIZE) {
-    const int idx_str = cm->mi_stride * mi_row + mi_col;
-    MODE_INFO **mi = cm->mi_grid_visible + idx_str;
-    MACROBLOCKD *xd = &x->e_mbd;
-    int i, j;
-
-    choose_partitioning(cpi, tile, x, mi_row, mi_col);
-
-    for (i = 0; i < MI_BLOCK_SIZE; i += mi_row_step) {
-      for (j = 0; j < MI_BLOCK_SIZE; j += mi_col_step) {
-        GPU_INPUT *gpu_input = gpu_input_base +
-            vp9_get_gpu_buffer_index(cpi, mi_row + i, mi_col + j);
-        const int idx_str = cm->mi_stride * (mi_row + i) + (mi_col + j);
-        mi = cm->mi_grid_visible + idx_str;
-
-        if (mi_row + i < cm->mi_rows && mi_col + j < cm->mi_cols) {
-          gpu_input->do_compute = get_gpu_block_size(mi[0]->mbmi.sb_type);
-        } else {
-          gpu_input->do_compute = GPU_BLOCK_INVALID;
-          continue;
-        }
-
-        if (gpu_input->do_compute != GPU_BLOCK_INVALID) {
-          const int sb_index = get_sb_index(cm, mi_row + i, mi_col + j);
-
-          gpu_input->pred_mv.as_mv = cpi->pred_mv_map[sb_index];
-        }
-
-        if ((mi[0]->mbmi.sb_type == BLOCK_64X32 && j == 0) ||
-            (mi[0]->mbmi.sb_type == BLOCK_32X64 && i == 0) ||
-            (mi[0]->mbmi.sb_type == BLOCK_64X64 && i == 0 && j == 0)) {
-          xd->mi = mi;
-          duplicate_mode_info_in_sb(cm, xd, i, j, mi[0]->mbmi.sb_type);
-        }
-      }
-    }
-  }
-}
-
-static void vp9_gpu_write_input_buffers(VP9_COMP *cpi, ThreadData *td,
-                                        const TileInfo *const tile,
-                                        int mi_row) {
-  SPEED_FEATURES * const sf = &cpi->sf;
-
-  switch (sf->partition_search_type) {
-    case VAR_BASED_PARTITION:
-      vp9_write_partition_info(cpi, td, tile, mi_row);
-      break;
-    default:
-      assert(0);
-      break;
-  }
-}
-
 static void vp9_gpu_fill_rd_parameters(VP9_COMP *cpi, ThreadData *td,
                                        int async) {
   VP9_COMMON *const cm = &cpi->common;
@@ -229,39 +160,15 @@ static void vp9_gpu_fill_seg_id(VP9_COMP *cpi, int mi_row_start, int mi_row_end)
 
 void vp9_gpu_mv_compute(VP9_COMP *cpi, ThreadData *td) {
   VP9_COMMON *const cm = &cpi->common;
-  const int tile_cols = 1 << cm->log2_tile_cols;
-  int tile_col, tile_row;
-  int mi_row;
   VP9_EGPU *const egpu = &cpi->egpu;
-  const int mi_cols_g = (cm->mi_cols >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
-  const int mi_rows_g = (cm->mi_rows >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
   int subframe_idx, subframe_idx_start;
   SubFrameInfo subframe;
-  TileInfo tile;
-
-  (void) tile_row;
 
   subframe_idx_start = cpi->b_async;
   vp9_subframe_init(&subframe, cm, subframe_idx_start);
 
   // fill segmentation map
   vp9_gpu_fill_seg_id(cpi, subframe.mi_row_start, cm->mi_rows);
-
-  // fill gpu input buffers for blocks that are not processed in GPU by
-  // prologue kernels.
-  for (mi_row = subframe.mi_row_start; mi_row < cm->mi_rows;
-       mi_row += MI_BLOCK_SIZE) {
-    tile_row = vp9_get_tile_row_index(&tile, cm, mi_row);
-    for (tile_col = 0; tile_col < tile_cols; ++tile_col) {
-      vp9_tile_set_col(&tile, cm, tile_col);
-
-      if (mi_row == mi_rows_g || tile.mi_col_end > mi_cols_g) {
-        if (mi_row != mi_rows_g)
-          tile.mi_col_start = mi_cols_g;
-        vp9_gpu_write_input_buffers(cpi, td, &tile, mi_row);
-      }
-    }
-  }
 
   if (MAX_SUB_FRAMES <= 2 || !cpi->b_async) {
     // fill rd param info
@@ -273,7 +180,6 @@ void vp9_gpu_mv_compute(VP9_COMP *cpi, ThreadData *td) {
     // enqueue kernels for gpu
     egpu->execute(cpi, subframe_idx, 0);
   }
-
 }
 
 void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
@@ -297,20 +203,12 @@ void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
   if (subframe_idx == MAX_SUB_FRAMES - 1) {
     if (cpi->b_async) {
       SubFrameInfo subframe;
-      int tile_col, tile_row;
-      int mi_row;
-      const int tile_cols = 1 << cm->log2_tile_cols;
-      const int mi_cols_g = (cm->mi_cols >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
-      const int mi_rows_g = (cm->mi_rows >> MI_BLOCK_SIZE_LOG2) << MI_BLOCK_SIZE_LOG2;
-      TileInfo tile;
-      YV12_BUFFER_CONFIG *last_source = cpi->Last_Source;
       unsigned char *seg_map = cpi->segmentation_map;
       CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
       double rate_ratio_qdelta = cr->rate_ratio_qdelta;
       int q = cpi->rc.q_prediction_next;
       int base_qindex = cm->base_qindex;
 
-      (void) tile_row;
       vp9_subframe_init(&subframe, cm, 0);
 
       if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
@@ -336,32 +234,6 @@ void vp9_gpu_mv_compute_async(VP9_COMP *cpi, ThreadData *td, int subframe_idx) {
       if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
         cpi->segmentation_map = seg_map;
       }
-
-      // fill gpu input buffers for blocks that are not processed in GPU by
-      // prologue kernels.
-      vp9_swap_mi_and_prev_mi(cm);
-      cpi->Last_Source = cpi->Source;
-      cpi->Source = &next_source->img;
-      cpi->last_frame_buffer = cm->frame_to_show;
-      td->mb.data_parallel_processing = 1;
-      for (mi_row = subframe.mi_row_start; mi_row < subframe.mi_row_end;
-           mi_row += MI_BLOCK_SIZE) {
-        tile_row = vp9_get_tile_row_index(&tile, cm, mi_row);
-        for (tile_col = 0; tile_col < tile_cols; ++tile_col) {
-          vp9_tile_set_col(&tile, cm, tile_col);
-
-          if (mi_row == mi_rows_g || tile.mi_col_end > mi_cols_g) {
-            if (mi_row != mi_rows_g)
-              tile.mi_col_start = mi_cols_g;
-            vp9_gpu_write_input_buffers(cpi, td, &tile, mi_row);
-          }
-        }
-      }
-      vp9_swap_mi_and_prev_mi(cm);
-      cpi->Source = cpi->Last_Source;
-      cpi->Last_Source = last_source;
-      cpi->last_frame_buffer = get_ref_frame_buffer(cpi, LAST_FRAME);
-      td->mb.data_parallel_processing = 0;
 
       // fill rd param info
       vp9_gpu_fill_rd_parameters(cpi, td, 1);

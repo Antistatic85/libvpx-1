@@ -163,6 +163,10 @@ static void vp9_eopencl_set_static_kernel_args(VP9_COMP *cpi) {
                            &op_stride);
   status |= clSetKernelArg(eopencl->choose_partitions, 7, sizeof(cl_int),
                            &padding_offset);
+  status |= clSetKernelArg(eopencl->choose_partitions, 8, sizeof(cl_int),
+                           &mi_rows);
+  status |= clSetKernelArg(eopencl->choose_partitions, 9, sizeof(cl_int),
+                           &mi_cols);
   assert(status == CL_SUCCESS);
 
   // ME KERNELS
@@ -379,8 +383,8 @@ static void vp9_eopencl_alloc_buffers(VP9_COMP *cpi) {
   int subframe_idx;
   int i;
 
-  blocks_in_col = cm->mi_rows >> MI_BLOCK_SIZE_LOG2;
-  blocks_in_row = cm->mi_cols >> MI_BLOCK_SIZE_LOG2;
+  blocks_in_col = cm->sb_rows;
+  blocks_in_row = cm->sb_cols;
   alloc_size = blocks_in_row * blocks_in_col;
 
   // alloc buffer for 1D src and pred buffers for pro motion estimation
@@ -428,8 +432,8 @@ static void vp9_eopencl_alloc_buffers(VP9_COMP *cpi) {
       vp9_subframe_init(&subframe, cm, subframe_idx);
 
       block_row_offset = subframe.mi_row_start >> MI_BLOCK_SIZE_LOG2;
-      block_rows_sf =
-          (subframe.mi_row_end - subframe.mi_row_start) >> MI_BLOCK_SIZE_LOG2;
+      block_rows_sf = (mi_cols_aligned_to_sb(subframe.mi_row_end) -
+          subframe.mi_row_start) >> MI_BLOCK_SIZE_LOG2;
 
       alloc_size_sf = blocks_in_row * block_rows_sf;
 
@@ -705,8 +709,8 @@ static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
 
   (void)status;
 
-  blocks_in_row = cm->mi_cols >> MI_BLOCK_SIZE_LOG2;
-  blocks_in_col = cm->mi_rows >> MI_BLOCK_SIZE_LOG2;
+  blocks_in_row = cm->sb_cols;
+  blocks_in_col = cm->sb_rows;
 
   vp9_eopencl_set_dynamic_kernel_args_pro_me(cpi);
 
@@ -919,9 +923,9 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
 
   //=====   CHOOSE PARTITIONING KERNELS   =====
   //--------------------------------------------
-  blocks_in_row = cm->mi_cols >> MI_BLOCK_SIZE_LOG2;
-  blocks_in_col =
-      (subframe.mi_row_end - subframe.mi_row_start) >> MI_BLOCK_SIZE_LOG2;
+  blocks_in_row = cm->sb_cols;
+  blocks_in_col = (mi_cols_aligned_to_sb(subframe.mi_row_end) -
+      subframe.mi_row_start) >> MI_BLOCK_SIZE_LOG2;
   block_row_offset = subframe.mi_row_start >> MI_BLOCK_SIZE_LOG2;
 
   local_size[0] = 8;

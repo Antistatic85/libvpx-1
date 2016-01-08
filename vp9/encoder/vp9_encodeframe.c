@@ -674,20 +674,26 @@ static void fill_variance_8x8avg(const uint8_t *s, int sp, const uint8_t *d,
 static int set_gpu_partitioning(VP9_COMP *cpi, MACROBLOCK *x,
                                 BLOCK_SIZE btype, BLOCK_SIZE bsize,
                                 int mi_row, int mi_col) {
+  VP9_COMMON *const cm = &cpi->common;
   MACROBLOCKD *xd = &x->e_mbd;
   const int block_width = num_8x8_blocks_wide_lookup[bsize];
   const int block_height = num_8x8_blocks_high_lookup[bsize];
 
+  (void)cm;
   if (btype == bsize) {
+    assert(mi_col + block_width / 2 < cm->mi_cols &&
+           mi_row + block_height / 2 < cm->mi_rows);
     set_block_size(cpi, x, xd, mi_row, mi_col, bsize);
     return 1;
   } else if (btype == get_subsize(bsize, PARTITION_HORZ)) {
     BLOCK_SIZE subsize = get_subsize(bsize, PARTITION_HORZ);
+    assert(mi_col + block_width / 2 < cm->mi_cols);
     set_block_size(cpi, x, xd, mi_row, mi_col, subsize);
     set_block_size(cpi, x, xd, mi_row + block_height / 2, mi_col, subsize);
     return 1;
   } else if (btype == get_subsize(bsize, PARTITION_VERT)) {
     BLOCK_SIZE subsize = get_subsize(bsize, PARTITION_VERT);
+    assert(mi_row + block_height / 2 < cm->mi_rows);
     set_block_size(cpi, x, xd, mi_row, mi_col, subsize);
     set_block_size(cpi, x, xd, mi_row, mi_col + block_width / 2, subsize);
     return 1;
@@ -699,9 +705,11 @@ static int set_gpu_partitioning(VP9_COMP *cpi, MACROBLOCK *x,
 static void vp9_gpu_init_partition_size(VP9_COMP *cpi, MACROBLOCK *x,
                                         char *block_sz_array, int mi_row,
                                         int mi_col) {
+  VP9_COMMON *const cm = &cpi->common;
   int i, j, k;
 
-  if (!set_gpu_partitioning(cpi, x, block_sz_array[0], BLOCK_64X64, mi_row,
+  if ( mi_col + 8 > cm->mi_cols || mi_row + 8 > cm->mi_rows ||
+      !set_gpu_partitioning(cpi, x, block_sz_array[0], BLOCK_64X64, mi_row,
                             mi_col)) {
     for (i = 0; i < 4; ++i) {
       const int x32_idx = ((i & 1) << 2);
@@ -791,41 +799,32 @@ int choose_partitioning(VP9_COMP *cpi,
     const YV12_BUFFER_CONFIG *yv12 = cpi->Last_Source;
 
     unsigned int y_sad;
-    const BLOCK_SIZE bsize = BLOCK_32X32
-        + (mi_col + 4 < cm->mi_cols) * 2 + (mi_row + 4 < cm->mi_rows);
+    const BLOCK_SIZE bsize = x->use_gpu ? BLOCK_64X64 : (BLOCK_32X32 +
+        (mi_col + 4 < cm->mi_cols) * 2 + (mi_row + 4 < cm->mi_rows));
 
     assert(yv12 != NULL);
 
+    if (x->use_gpu && !x->data_parallel_processing) {
+      const int sb_index = get_sb_index(cm, mi_row, mi_col);
 #if CONFIG_GPU_COMPUTE
-    if (x->use_gpu && !x->data_parallel_processing && bsize == BLOCK_64X64) {
-      const int sb_row_index = mi_row / MI_SIZE;
-      const int sb_col_index = mi_col / MI_SIZE;
-      const int index = ((cm->mi_cols >> MI_BLOCK_SIZE_LOG2) * sb_row_index +
-          sb_col_index);
-      char *block_sz_array = cpi->gpu_output_pro_me_base[index].block_type;
+      char *block_sz_array = cpi->gpu_output_pro_me_base[sb_index].block_type;
 
       mbmi->ref_frame[0] = LAST_FRAME;
       mbmi->ref_frame[1] = NONE;
       mbmi->sb_type = BLOCK_64X64;
-      mbmi->mv[0].as_int = cpi->gpu_output_pro_me_base[index].pred_mv.as_int;
+      mbmi->mv[0].as_int = cpi->gpu_output_pro_me_base[sb_index].pred_mv.as_int;
       x->pred_mv[LAST_FRAME] = mbmi->mv[0].as_mv;
       mbmi->interp_filter = BILINEAR;
       x->color_sensitivity[0] =
-          (cpi->gpu_output_pro_me_base[index].color_sensitivity) & 1;
+          (cpi->gpu_output_pro_me_base[sb_index].color_sensitivity) & 1;
       x->color_sensitivity[1] =
-          (cpi->gpu_output_pro_me_base[index].color_sensitivity >> 1) & 1;
+          (cpi->gpu_output_pro_me_base[sb_index].color_sensitivity >> 1) & 1;
       vp9_gpu_init_partition_size(cpi, x, block_sz_array, mi_row, mi_col);
-
-      return 0;
-    }
-#endif
-
-    if (x->use_gpu && !x->data_parallel_processing) {
-      const int sb_index = get_sb_index(cm, mi_row, mi_col);
+#else
       x->color_sensitivity[0] = cpi->color_sensitivity[0][sb_index];
       x->color_sensitivity[1] = cpi->color_sensitivity[1][sb_index];
       x->pred_mv[LAST_FRAME] = cpi->pred_mv_map[sb_index];
-
+#endif
       return 0;
     }
 
@@ -933,8 +932,8 @@ int choose_partitioning(VP9_COMP *cpi,
 #if CONFIG_VP9_HIGHBITDEPTH
                             xd->cur_buf->flags,
 #endif
-                            pixels_wide,
-                            pixels_high,
+                            64,
+                            64,
                             is_key_frame);
         fill_variance_tree(&vt.split[i].split[j], BLOCK_16X16);
         get_variance(&vt.split[i].split[j].part_variances.none);
@@ -955,7 +954,7 @@ int choose_partitioning(VP9_COMP *cpi,
 #if CONFIG_VP9_HIGHBITDEPTH
                                           xd->cur_buf->flags,
 #endif
-                                          pixels_wide, pixels_high);
+                                          64, 64);
           if (minmax > cpi->vbp_threshold_minmax) {
             force_split[split_index] = 1;
             force_split[i + 1] = 1;

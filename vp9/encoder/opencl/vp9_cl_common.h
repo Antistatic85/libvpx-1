@@ -238,6 +238,24 @@ __constant ushort2 vp9_bilinear_filters[16] = {
   {  8, 120}
 };
 
+__constant BLOCK_SIZE ss_size_lookup[BLOCK_SIZES] = {
+// ss_x == 1
+// ss_y == 1
+  BLOCK_INVALID,
+  BLOCK_INVALID,
+  BLOCK_INVALID,
+  BLOCK_4X4,
+  BLOCK_4X8,
+  BLOCK_8X4,
+  BLOCK_8X8,
+  BLOCK_8X16,
+  BLOCK_16X8,
+  BLOCK_16X16,
+  BLOCK_16X32,
+  BLOCK_32X16,
+  BLOCK_32X32,
+};
+
 //=====   FUNCTION MACROS   =====
 //--------------------------------------
 #define RDCOST(RM, DM, R, D) (((128 + ((int64_t)R) * (RM)) >> 8) + (D << DM))

@@ -43,8 +43,8 @@ __constant MV search_pos[4] = {
 
 //=====   FUNCTION DEFINITIONS   =====
 //-------------------------------------------
-int vp9_minmax_8x8(__global uchar *s, __global uchar *d, int stride,
-                   uchar *max_val, uchar *min_val) {
+void vp9_minmax_8x8(__global uchar *s, __global uchar *d, int stride,
+                    uchar *max_val, uchar *min_val) {
   int i, j;
   uchar8 src, pred;
   uchar8 diff;
@@ -127,7 +127,11 @@ int set_vt_partitioning(__local int *var,
                         __global char *block_sz,
                         int threshold,
                         BLOCK_SIZE bsize_min,
-                        int force_split) {
+                        int force_split,
+                        int mi_row, int mi_col,
+                        int mi_rows, int mi_cols) {
+  int block_width = num_8x8_blocks_wide_lookup[bsize];
+  int block_height = num_8x8_blocks_high_lookup[bsize];
   int var1, var2;
   int sum_1, sum_2;
   uint32_t sse_1, sse_2;
@@ -136,43 +140,53 @@ int set_vt_partitioning(__local int *var,
     return 0;
 
   if (bsize == bsize_min) {
-    if (*var < threshold) {
+    if (mi_col + block_width / 2 < mi_cols &&
+        mi_row + block_height / 2 < mi_rows &&
+        *var < threshold) {
       *block_sz = bsize;
       return 1;
     }
     return 0;
   } else if (bsize > bsize_min) {
-    if (*var < threshold) {
+    if (mi_col + block_width / 2 < mi_cols &&
+        mi_row + block_height / 2 < mi_rows &&
+        *var < threshold) {
       *block_sz = bsize;
       return 1;
     }
 
     // Check vertical split.
-    sse_1 = sse_array[0] + sse_array[stride];
-    sum_1 = sum_array[0] + sum_array[stride];
-    sse_2 = sse_array[1] + sse_array[stride + 1];
-    sum_2 = sum_array[1] + sum_array[stride + 1];
-    var1 = get_variance(sse_1, sum_1, log2_count);
-    var2 = get_variance(sse_2, sum_2, log2_count);
-    if (var1 < threshold && var2 < threshold) {
-      int block_width = num_8x8_blocks_wide_lookup[bsize] >> 1;
-      *block_sz = bsize - 2;
-      *(block_sz + block_width * block_width) = bsize - 2;
-      return 1;
+    if (mi_row + block_height / 2 < mi_rows) {
+      sse_1 = sse_array[0] + sse_array[stride];
+      sum_1 = sum_array[0] + sum_array[stride];
+      sse_2 = sse_array[1] + sse_array[stride + 1];
+      sum_2 = sum_array[1] + sum_array[stride + 1];
+      var1 = get_variance(sse_1, sum_1, log2_count);
+      var2 = get_variance(sse_2, sum_2, log2_count);
+      if (var1 < threshold && var2 < threshold &&
+          ss_size_lookup[bsize - 2] < BLOCK_INVALID) {
+        block_width >>= 1;
+        *block_sz = bsize - 2;
+        *(block_sz + block_width * block_width) = bsize - 2;
+        return 1;
+      }
     }
 
     // Check horizontal split.
-    sse_1 = sse_array[0] + sse_array[1];
-    sum_1 = sum_array[0] + sum_array[1];
-    sse_2 = sse_array[stride] + sse_array[stride + 1];
-    sum_2 = sum_array[stride] + sum_array[stride + 1];
-    var1 = get_variance(sse_1, sum_1, log2_count);
-    var2 = get_variance(sse_2, sum_2, log2_count);
-    if (var1 < threshold && var2 < threshold) {
-      int block_width = num_8x8_blocks_wide_lookup[bsize] >> 1;
-      *block_sz = bsize - 1;
-      *(block_sz + block_width * block_width * 2) = bsize - 1;
-      return 1;
+    if (mi_col + block_width / 2 < mi_cols) {
+      sse_1 = sse_array[0] + sse_array[1];
+      sum_1 = sum_array[0] + sum_array[1];
+      sse_2 = sse_array[stride] + sse_array[stride + 1];
+      sum_2 = sum_array[stride] + sum_array[stride + 1];
+      var1 = get_variance(sse_1, sum_1, log2_count);
+      var2 = get_variance(sse_2, sum_2, log2_count);
+      if (var1 < threshold && var2 < threshold &&
+          ss_size_lookup[bsize - 1] < BLOCK_INVALID) {
+        block_width >>= 1;
+        *block_sz = bsize - 1;
+        *(block_sz + block_width * block_width * 2) = bsize - 1;
+        return 1;
+      }
     }
 
     return 0;
@@ -713,7 +727,8 @@ void vp9_choose_partitions(__global uchar *src,
                            __global GPU_RD_PARAMETERS *rd_parameters,
                            __global GPU_INPUT *gpu_input,
                            int gpu_input_stride,
-                           int padding_offset) {
+                           int padding_offset,
+                           int mi_rows, int mi_cols) {
   __local int sum[64 + 16 + 4 + 1];
   __local uint32_t sse[64 + 16 + 4 + 1];
   __local int *sum_array[4];
@@ -730,6 +745,8 @@ void vp9_choose_partitions(__global uchar *src,
   int global_row = get_global_id(1);
   int local_col = get_local_id(0);
   int local_row = get_local_id(1);
+  int mi_row = (global_row >> 3) << 3;
+  int mi_col = group_col << 3;
   int global_offset = (global_row * 8 * stride) +
       (group_col * BLOCK_SIZE_IN_PIXELS) + (local_col * NUM_PIXELS_PER_WORKITEM);
   global_offset += padding_offset;
@@ -747,7 +764,8 @@ void vp9_choose_partitions(__global uchar *src,
   segment_id = gpu_input->seg_id;
 
   if (segment_id == CR_SEGMENT_ID_BASE &&
-      gpu_output_pro_me->pred_mv_sad < rd_parameters->vbp_threshold_sad) {
+      gpu_output_pro_me->pred_mv_sad < rd_parameters->vbp_threshold_sad &&
+      mi_col + 4 < mi_cols && mi_row + 4 < mi_rows) {
     if (local_col == 0 && local_row == 0) {
       gpu_output_pro_me->block_type[0] = BLOCK_64X64;
       gpu_input[0].do_compute = GPU_BLOCK_64X64;
@@ -756,7 +774,6 @@ void vp9_choose_partitions(__global uchar *src,
       gpu_input[gpu_input_stride].do_compute = GPU_BLOCK_64X64;
       gpu_input[gpu_input_stride + 1].do_compute = GPU_BLOCK_64X64;
     }
-
     return;
   }
 
@@ -837,28 +854,28 @@ void vp9_choose_partitions(__global uchar *src,
           force_split[0] = 1;
         }
       }
+      blk_index += 1;
+      blk_stride >>= 1;
+      log2_count += 2;
     }
 SKIP_VAR_CALC:
-    blk_index += 1;
-    blk_stride >>= 1;
-    log2_count += 2;
     i <<= 1;
   }
 
-select_partitions:
   barrier(CLK_LOCAL_MEM_FENCE);
   if (local_col == 0 && local_row == 0) {
     // Now go through the entire structure, splitting every block size until
     // we get to one that's got a variance lower than our threshold.
-    if (!set_vt_partitioning(var_array[2], sum_array[2], sse_array[2],
+    if (mi_col + 8 > mi_cols || mi_row + 8 > mi_rows ||
+        !set_vt_partitioning(var_array[2], sum_array[2], sse_array[2],
                              2, 5, BLOCK_64X64, gpu_output_pro_me->block_type,
                              rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2],
                              BLOCK_16X16,
-                             force_split[0])) {
+                             force_split[0], mi_row, mi_col, mi_rows, mi_cols)) {
       for (i = 0; i < 4; ++i) {
-        char x32_idx = (i & 1);
-        char y32_idx = (i >> 1);
-        char j;
+        int x32_idx = (i & 1);
+        int y32_idx = (i >> 1);
+        int j;
         if (!set_vt_partitioning(&var_array[1][i],
                                  &sum_array[1][y32_idx * 8 + x32_idx * 2],
                                  &sse_array[1][y32_idx * 8 + x32_idx * 2],
@@ -866,11 +883,12 @@ select_partitions:
                                  &gpu_output_pro_me->block_type[i * 16],
                                  rd_parameters->seg_rd_param[segment_id].vbp_thresholds[1],
                                  BLOCK_16X16,
-                                 force_split[i + 1])) {
+                                 force_split[i + 1],
+                                 (mi_row + (y32_idx << 2)), (mi_col + (x32_idx << 2)), mi_rows, mi_cols)) {
           for (j = 0; j < 4; ++j) {
-            char x16_idx = (j & 1);
-            char y16_idx = (j >> 1);
-            char k;
+            int x16_idx = (j & 1);
+            int y16_idx = (j >> 1);
+            int k;
             if (!set_vt_partitioning(&var_array[0][y32_idx * 8 + x32_idx * 2 + y16_idx * 4 + x16_idx],
                                      &sum_array[0][y32_idx * 32 + x32_idx * 4 + y16_idx * 16 + x16_idx * 2],
                                      &sse_array[0][y32_idx * 32 + x32_idx * 4 + y16_idx * 16 + x16_idx * 2],
@@ -878,7 +896,10 @@ select_partitions:
                                      &gpu_output_pro_me->block_type[i * 16 + j * 4],
                                      rd_parameters->seg_rd_param[segment_id].vbp_thresholds[0],
                                      BLOCK_16X16,
-                                     force_split[5 + y32_idx * 8 + x32_idx * 2 + y16_idx * 4 + x16_idx])) {
+                                     force_split[5 + y32_idx * 8 + x32_idx * 2 + y16_idx * 4 + x16_idx],
+                                     (mi_row + (y32_idx << 2) + (y16_idx << 1)),
+                                     (mi_col + (x32_idx << 2) + (x16_idx << 1)),
+                                     mi_rows, mi_cols)) {
               for (k = 0; k < 4; ++k) {
                 gpu_output_pro_me->block_type[i * 16 + j * 4 + k] = BLOCK_8X8;
               }

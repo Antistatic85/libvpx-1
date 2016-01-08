@@ -40,24 +40,6 @@ __constant TX_SIZE max_txsize_lookup[BLOCK_SIZES] = {
   TX_32X32, TX_32X32, TX_32X32, TX_32X32
 };
 
-__constant BLOCK_SIZE ss_size_lookup[BLOCK_SIZES] = {
-// ss_x == 1
-// ss_y == 1
-  BLOCK_INVALID,
-  BLOCK_INVALID,
-  BLOCK_INVALID,
-  BLOCK_4X4,
-  BLOCK_4X8,
-  BLOCK_8X4,
-  BLOCK_8X8,
-  BLOCK_8X16,
-  BLOCK_16X8,
-  BLOCK_16X16,
-  BLOCK_16X32,
-  BLOCK_32X16,
-  BLOCK_32X32,
-};
-
 // NOTE: The tables below must be of the same size.
 
 // The functions described below are sampled at the four most significant
