@@ -85,7 +85,7 @@ void vp9_create_encoding_threads(VP9_COMP *cpi) {
     worker->data2 = NULL;
     if (i < cpi->max_threads - 1 && !winterface->reset(worker)) {
       vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
-                         "Tile decoder thread creation failed");
+                         "encoder thread creation failed");
     }
   }
   // set row encoding hook

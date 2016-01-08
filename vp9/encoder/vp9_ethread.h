@@ -67,6 +67,17 @@ typedef struct thread_context {
   int y_only;
 } thread_context;
 
+typedef struct thread_context_gpu {
+  struct VP9_COMP *cpi;
+
+  // thread specific mb context
+  ThreadData *td;
+
+  // threads shall process rows of the video frame. Below params represent
+  // the list of row id's the thread processes
+  int mi_row;
+} thread_context_gpu;
+
 void vp9_enc_sync_read(struct VP9_COMP *cpi, int sb_row, int sb_col);
 
 void vp9_enc_sync_write(struct VP9_COMP *cpi, int sb_row);

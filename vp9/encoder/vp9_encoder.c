@@ -400,6 +400,7 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
     vp9_gpu_remove(&cpi->common);
     vpx_free(cpi->cr_map);
     vpx_free(cpi->cr_last_coded_q_map);
+    vpx_get_worker_interface()->end(&cpi->egpu_thread_hndl);
 #endif
     vpx_free(cpi->seg_map_pred);
   }
@@ -810,10 +811,13 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
   cpi->td.mb.use_gpu = cm->use_gpu = cpi->oxcf.use_gpu;
   vp9_alloc_compressor_data(cpi);
   if (cm->use_gpu) {
-#if CONFIG_GPU_COMPUTE
     // TODO(karthick-ittiam): If the GPU initialization fails, the calling
     // function signals it as memory allocation error, instead of the error
     // signaled below. This needs to be fixed.
+#if CONFIG_GPU_COMPUTE
+    const VPxWorkerInterface * const winterface = vpx_get_worker_interface();
+    VPxWorker *const worker = &cpi->egpu_thread_hndl;
+
     if (vp9_gpu_init(cm))
       vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
                          "GPU initialization failed");
@@ -823,6 +827,15 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
     cpi->cr_map = vpx_calloc(cm->mi_rows * cm->mi_cols, sizeof(*cpi->cr_map));
     cpi->cr_last_coded_q_map = vpx_malloc(cm->mi_rows * cm->mi_cols *
                                           sizeof(*cpi->cr_last_coded_q_map));
+    winterface->init(worker);
+    worker->data1 = &cpi->egpu_thread_ctxt;
+    worker->data2 = NULL;
+    if (!winterface->reset(worker)) {
+      vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
+                         "EGPU thread creation failed");
+    }
+    winterface->sync(worker);
+    worker->hook = (VPxWorkerHook) vp9_gpu_mv_compute_async;
     assert(ASYNC_FRAME_COUNT_WAIT > 1);
 #endif
     vpx_free(cpi->seg_map_pred);
