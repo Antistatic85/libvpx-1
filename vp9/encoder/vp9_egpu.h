@@ -154,7 +154,8 @@ void vp9_alloc_gpu_interface_buffers(struct VP9_COMP *cpi);
 
 void vp9_free_gpu_interface_buffers(struct VP9_COMP *cpi);
 
-void vp9_enc_sync_gpu(struct VP9_COMP *cpi, struct ThreadData *td, int mi_row);
+void vp9_enc_sync_gpu(struct VP9_COMP *cpi, struct ThreadData *td, int mi_row,
+                      int mi_row_step);
 
 #if CONFIG_GPU_COMPUTE
 

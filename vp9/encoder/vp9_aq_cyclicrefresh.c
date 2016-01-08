@@ -345,10 +345,13 @@ void vp9_cyclic_refresh_check_golden_update(VP9_COMP *const cpi) {
 // 1/CR_SEGMENT_ID_BOOST1 (refresh) for each superblock.
 // Blocks labeled as BOOST1 may later get set to BOOST2 (during the
 // encoding of the superblock).
-void cyclic_refresh_update_map(VP9_COMP *const cpi, int dry_run) {
+void cyclic_refresh_update_map(VP9_COMP *const cpi,
+                               CYCLIC_REFRESH *const cr,
+                               struct segmentation *const seg,
+                               unsigned char *const seg_map,
+                               int base_qindex,
+                               int dry_run) {
   VP9_COMMON *const cm = &cpi->common;
-  CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
-  unsigned char *const seg_map = cpi->segmentation_map;
   int i, block_count, bl_index, sb_rows, sb_cols, sbs_in_frame;
   int xmis, ymis, x, y;
   int target_num_seg_blocks = 0;
@@ -372,7 +375,7 @@ void cyclic_refresh_update_map(VP9_COMP *const cpi, int dry_run) {
     int mi_col = sb_col_index * MI_BLOCK_SIZE;
     int qindex_thresh =
         cpi->oxcf.content == VP9E_CONTENT_SCREEN
-            ? vp9_get_qindex(&cm->seg, CR_SEGMENT_ID_BOOST2, cm->base_qindex)
+            ? vp9_get_qindex(seg, CR_SEGMENT_ID_BOOST2, base_qindex)
             : 0;
     assert(mi_row >= 0 && mi_row < cm->mi_rows);
     assert(mi_col >= 0 && mi_col < cm->mi_cols);
@@ -522,13 +525,20 @@ void vp9_cyclic_refresh_setup(VP9_COMP *const cpi) {
     vp9_set_segdata(seg, CR_SEGMENT_ID_BOOST2, SEG_LVL_ALT_Q, qindex_delta);
 
     // Update the segmentation and refresh map.
-    cyclic_refresh_update_map(cpi, 0);
+    cyclic_refresh_update_map(cpi, cpi->cyclic_refresh, &cm->seg,
+                              cpi->segmentation_map, cm->base_qindex, 0);
 
     if (cpi->b_async) {
       SubFrameInfo subframe;
       vp9_subframe_init(&subframe, cm, 0);
       memcpy(cpi->segmentation_map, cpi->seg_map_pred,
              (subframe.mi_row_end - subframe.mi_row_start) * cm->mi_cols);
+#if CONFIG_GPU_COMPUTE
+      memcpy(cpi->cr_map, cpi->cyclic_refresh->map,
+             cm->mi_rows * cm->mi_cols * sizeof(*cpi->cr_map));
+      memcpy(cpi->cr_last_coded_q_map, cpi->cyclic_refresh->last_coded_q_map,
+             cm->mi_rows * cm->mi_cols * sizeof(*cpi->cr_last_coded_q_map));
+#endif
     }
   }
 }
@@ -545,23 +555,24 @@ void vp9_cyclic_refresh_reset_resize(VP9_COMP *const cpi) {
   cpi->refresh_golden_frame = 1;
 }
 
-void vp9_gpu_cyclic_refresh_qindex_setup(VP9_COMP *const cpi) {
-  VP9_COMMON *const cm = &cpi->common;
-  CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
-  struct segmentation *const seg = &cm->seg;
+void vp9_gpu_cyclic_refresh_qindex_setup(VP9_COMP *const cpi,
+                                         CYCLIC_REFRESH *const cr,
+                                         struct segmentation *const seg,
+                                         int base_qindex) {
   int qindex_delta = 0;
   int qindex2;
 
   // Set the q delta for segment BOOST1.
-  qindex_delta = compute_deltaq(cpi, cm->base_qindex, cr->rate_ratio_qdelta);
+  qindex_delta = compute_deltaq(cpi, base_qindex, cr->rate_ratio_qdelta);
   cr->qindex_delta[1] = qindex_delta;
   // Compute rd-mult for segment BOOST1.
-  qindex2 = clamp(cm->base_qindex + cm->y_dc_delta_q + qindex_delta, 0, MAXQ);
+  // NOTE: assumes cm->y_dc_delta_q = 0
+  qindex2 = clamp(base_qindex + qindex_delta, 0, MAXQ);
   cr->rdmult = vp9_compute_rd_mult(cpi, qindex2);
   vp9_set_segdata(seg, CR_SEGMENT_ID_BOOST1, SEG_LVL_ALT_Q, qindex_delta);
   // Set a more aggressive (higher) q delta for segment BOOST2.
   qindex_delta = compute_deltaq(
-      cpi, cm->base_qindex, MIN(CR_MAX_RATE_TARGET_RATIO,
+      cpi, base_qindex, MIN(CR_MAX_RATE_TARGET_RATIO,
                                 0.1 * cr->rate_boost_fac * cr->rate_ratio_qdelta));
   cr->qindex_delta[2] = qindex_delta;
   vp9_set_segdata(seg, CR_SEGMENT_ID_BOOST2, SEG_LVL_ALT_Q, qindex_delta);

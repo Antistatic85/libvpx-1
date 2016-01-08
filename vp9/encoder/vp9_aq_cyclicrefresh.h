@@ -104,7 +104,12 @@ void vp9_cyclic_refresh_set_golden_update(struct VP9_COMP *const cpi);
 // Check if we should not update golden reference, based on past refresh stats.
 void vp9_cyclic_refresh_check_golden_update(struct VP9_COMP *const cpi);
 
-void cyclic_refresh_update_map(struct VP9_COMP *const cpi, int dry_run);
+void cyclic_refresh_update_map(struct VP9_COMP *const cpi,
+                               CYCLIC_REFRESH *const cr,
+                               struct segmentation *const seg,
+                               unsigned char *const seg_map,
+                               int base_qindex,
+                               int dry_run);
 
 // Set/update global/frame level refresh parameters.
 void vp9_cyclic_refresh_update_parameters(struct VP9_COMP *const cpi);
@@ -116,7 +121,10 @@ int vp9_cyclic_refresh_get_rdmult(const CYCLIC_REFRESH *cr);
 
 void vp9_cyclic_refresh_reset_resize(struct VP9_COMP *const cpi);
 
-void vp9_gpu_cyclic_refresh_qindex_setup(struct VP9_COMP *const cpi);
+void vp9_gpu_cyclic_refresh_qindex_setup(struct VP9_COMP *const cpi,
+                                         CYCLIC_REFRESH *const cr,
+                                         struct segmentation *const seg,
+                                         int base_qindex);
 
 static INLINE int cyclic_refresh_segment_id_boosted(int segment_id) {
   return segment_id == CR_SEGMENT_ID_BOOST1 ||

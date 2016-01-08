@@ -4047,7 +4047,7 @@ static void encode_sb_rows(VP9_COMP *cpi, ThreadData *const td,
   for (mi_row = mi_row_start; mi_row < mi_row_end; mi_row += mi_row_step) {
     const int sb_row = mi_row >> MI_BLOCK_SIZE_LOG2;
     tile_row = vp9_get_tile_row_index(&tile, cm, mi_row);
-    vp9_enc_sync_gpu(cpi, td, mi_row);
+    vp9_enc_sync_gpu(cpi, td, mi_row, mi_row_step);
     for (tile_col = 0; tile_col < tile_cols; ++tile_col) {
       vp9_tile_set_col(&tile, cm, tile_col);
       get_start_tok(cpi, tile_row, tile_col, mi_row, &tok);
@@ -4071,7 +4071,7 @@ void vp9_gpu_rewrite_quant_info(VP9_COMP *cpi, MACROBLOCK *x, int q) {
   }
   vp9_set_quantizer(cm, q);
   if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
-    vp9_gpu_cyclic_refresh_qindex_setup(cpi);
+    vp9_gpu_cyclic_refresh_qindex_setup(cpi, cpi->cyclic_refresh, &cm->seg, q);
   }
   vp9_set_variance_partition_thresholds(cpi, q);
   vp9_frame_init_quantizer(cpi, x);
@@ -4084,30 +4084,31 @@ static void vp9_gpu_compute(VP9_COMP *cpi, ThreadData *td) {
   if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode) {
     vp9_gpu_predict_inter_qp(cpi);
     if (!frame_is_intra_only(cm)) {
+#if CONFIG_GPU_COMPUTE
+      vp9_gpu_mv_compute(cpi, td);
+      if (cm->current_video_frame >= ASYNC_FRAME_COUNT_WAIT &&
+          MAX_SUB_FRAMES > 2) {
+        cpi->b_async = 1;
+      }
+#else
       int base_qindex = cm->base_qindex;
 
       td->mb.data_parallel_processing = 1;
-      if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT &&
-          MAX_SUB_FRAMES > 2) {
+      if (cpi->b_async) {
         int q = cpi->rc.q_prediction_curr;
 
         if (cm->base_qindex != q) {
           vp9_gpu_rewrite_quant_info(cpi, &td->mb, q);
         }
       }
-#if CONFIG_GPU_COMPUTE
-      vp9_gpu_mv_compute(cpi, td);
-#else
       encode_sb_rows(cpi, td, 0, cm->mi_rows, MI_BLOCK_SIZE);
-#endif
-      if (cm->current_video_frame > ASYNC_FRAME_COUNT_WAIT &&
-          MAX_SUB_FRAMES > 2) {
-        cpi->b_async = 1;
+      if (cpi->b_async) {
         if (cm->base_qindex != base_qindex) {
           vp9_gpu_rewrite_quant_info(cpi, &td->mb, base_qindex);
         }
       }
       td->mb.data_parallel_processing = 0;
+#endif
     }
   }
 }

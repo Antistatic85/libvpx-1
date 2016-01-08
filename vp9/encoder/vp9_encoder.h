@@ -484,6 +484,8 @@ typedef struct VP9_COMP {
 
   int b_async;
   unsigned char *seg_map_pred;
+  signed char *cr_map;
+  uint8_t *cr_last_coded_q_map;
 #if CONFIG_GPU_COMPUTE
   VP9_EGPU egpu;
 #endif

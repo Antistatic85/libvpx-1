@@ -398,6 +398,8 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
 #if CONFIG_GPU_COMPUTE
     vp9_egpu_remove(cpi);
     vp9_gpu_remove(&cpi->common);
+    vpx_free(cpi->cr_map);
+    vpx_free(cpi->cr_last_coded_q_map);
 #endif
     vpx_free(cpi->seg_map_pred);
   }
@@ -818,6 +820,9 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
     if (vp9_egpu_init(cpi))
       vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
                          "EGPU initialization failed");
+    cpi->cr_map = vpx_calloc(cm->mi_rows * cm->mi_cols, sizeof(*cpi->cr_map));
+    cpi->cr_last_coded_q_map = vpx_malloc(cm->mi_rows * cm->mi_cols *
+                                          sizeof(*cpi->cr_last_coded_q_map));
     assert(ASYNC_FRAME_COUNT_WAIT > 1);
 #endif
     vpx_free(cpi->seg_map_pred);
