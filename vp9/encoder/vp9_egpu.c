@@ -266,7 +266,7 @@ void vp9_gpu_mv_compute_async(thread_context_gpu *const egpu_thread_ctxt,
   }
 
   vpx_usec_timer_mark(&emr_timer);
-  cpi->time_gpu_compute += vpx_usec_timer_elapsed(&emr_timer);
+  cpi->time_gpu_compute_async += vpx_usec_timer_elapsed(&emr_timer);
 }
 #endif
 
@@ -348,7 +348,9 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
   if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode) {
     SubFrameInfo subframe;
     int subframe_idx;
+    struct vpx_usec_timer emr_timer;
 
+    vpx_usec_timer_start(&emr_timer);
     subframe_idx = vp9_get_subframe_index(cm, mi_row);
     vp9_subframe_init(&subframe, cm, subframe_idx);
 #if CONFIG_GPU_COMPUTE
@@ -432,5 +434,7 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
       cpi->b_async = 1;
     }
 #endif
+    vpx_usec_timer_mark(&emr_timer);
+    cpi->time_gpu_compute += vpx_usec_timer_elapsed(&emr_timer);
   }
 }

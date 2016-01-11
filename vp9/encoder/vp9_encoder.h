@@ -393,6 +393,7 @@ typedef struct VP9_COMP {
   uint64_t time_pick_lpf;
   uint64_t time_encode_sb_row;
   uint64_t time_gpu_compute;
+  uint64_t time_gpu_compute_async;
 
 #if CONFIG_FP_MB_STATS
   int use_fp_mb_stats;

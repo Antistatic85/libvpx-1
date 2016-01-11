@@ -681,19 +681,15 @@ static int set_gpu_partitioning(VP9_COMP *cpi, MACROBLOCK *x,
 
   (void)cm;
   if (btype == bsize) {
-    assert(mi_col + block_width / 2 < cm->mi_cols &&
-           mi_row + block_height / 2 < cm->mi_rows);
     set_block_size(cpi, x, xd, mi_row, mi_col, bsize);
     return 1;
   } else if (btype == get_subsize(bsize, PARTITION_HORZ)) {
     BLOCK_SIZE subsize = get_subsize(bsize, PARTITION_HORZ);
-    assert(mi_col + block_width / 2 < cm->mi_cols);
     set_block_size(cpi, x, xd, mi_row, mi_col, subsize);
     set_block_size(cpi, x, xd, mi_row + block_height / 2, mi_col, subsize);
     return 1;
   } else if (btype == get_subsize(bsize, PARTITION_VERT)) {
     BLOCK_SIZE subsize = get_subsize(bsize, PARTITION_VERT);
-    assert(mi_row + block_height / 2 < cm->mi_rows);
     set_block_size(cpi, x, xd, mi_row, mi_col, subsize);
     set_block_size(cpi, x, xd, mi_row, mi_col + block_width / 2, subsize);
     return 1;
@@ -4343,6 +4339,15 @@ static void encode_frame_internal(VP9_COMP *cpi) {
     } else {
       encode_tiles(cpi);
     }
+
+#if CONFIG_GPU_COMPUTE
+    if (cm->use_gpu) {
+      const VPxWorkerInterface * const winterface = vpx_get_worker_interface();
+      VPxWorker * const worker = &cpi->egpu_thread_hndl;
+
+      winterface->sync(worker);
+    }
+#endif
 
     vpx_usec_timer_mark(&emr_timer);
     cpi->time_encode_sb_row += vpx_usec_timer_elapsed(&emr_timer);
