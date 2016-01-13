@@ -76,6 +76,7 @@ typedef struct thread_context_gpu {
   // threads shall process rows of the video frame. Below params represent
   // the list of row id's the thread processes
   int mi_row;
+  int async;
 } thread_context_gpu;
 
 void vp9_enc_sync_read(struct VP9_COMP *cpi, int sb_row, int sb_col);

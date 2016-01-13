@@ -531,13 +531,11 @@ void vp9_cyclic_refresh_setup(VP9_COMP *const cpi) {
     if (cpi->b_async) {
       SubFrameInfo subframe;
       vp9_subframe_init(&subframe, cm, 0);
-      memcpy(cpi->segmentation_map, cpi->seg_map_pred,
+      memcpy(cpi->segmentation_map, cpi->seg_map_pred[0],
              (subframe.mi_row_end - subframe.mi_row_start) * cm->mi_cols);
 #if CONFIG_GPU_COMPUTE
       memcpy(cpi->cr_map, cpi->cyclic_refresh->map,
              cm->mi_rows * cm->mi_cols * sizeof(*cpi->cr_map));
-      memcpy(cpi->cr_last_coded_q_map, cpi->cyclic_refresh->last_coded_q_map,
-             cm->mi_rows * cm->mi_cols * sizeof(*cpi->cr_last_coded_q_map));
 #endif
     }
   }

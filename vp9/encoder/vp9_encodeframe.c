@@ -4059,6 +4059,7 @@ static void encode_sb_rows(VP9_COMP *cpi, ThreadData *const td,
   }
 }
 
+#if !CONFIG_GPU_COMPUTE
 void vp9_gpu_rewrite_quant_info(VP9_COMP *cpi, MACROBLOCK *x, int q) {
   VP9_COMMON *const cm = &cpi->common;
 
@@ -4073,6 +4074,7 @@ void vp9_gpu_rewrite_quant_info(VP9_COMP *cpi, MACROBLOCK *x, int q) {
   vp9_frame_init_quantizer(cpi, x);
   vp9_initialize_rd_consts(cpi, x);
 }
+#endif
 
 static void vp9_gpu_compute(VP9_COMP *cpi, ThreadData *td) {
   VP9_COMMON *const cm = &cpi->common;
@@ -4081,7 +4083,14 @@ static void vp9_gpu_compute(VP9_COMP *cpi, ThreadData *td) {
     vp9_gpu_predict_inter_qp(cpi);
     if (!frame_is_intra_only(cm)) {
 #if CONFIG_GPU_COMPUTE
-      vp9_gpu_mv_compute(cpi, td);
+      if (!cpi->b_async) {
+        thread_context_gpu egpu_thread_ctxt;
+
+        egpu_thread_ctxt.cpi = cpi;
+        egpu_thread_ctxt.td = td;
+        egpu_thread_ctxt.async = 0;
+        vp9_gpu_mv_compute(&egpu_thread_ctxt, NULL);
+      }
       if (cm->current_video_frame >= ASYNC_FRAME_COUNT_WAIT &&
           MAX_SUB_FRAMES > 2) {
         cpi->b_async = 1;
@@ -4346,6 +4355,49 @@ static void encode_frame_internal(VP9_COMP *cpi) {
       VPxWorker * const worker = &cpi->egpu_thread_hndl;
 
       winterface->sync(worker);
+      if (cpi->b_async) {
+        struct lookahead_entry *next_source;
+
+        // if there are no further frames to be encoded, no further jobs have to
+        // be enqueued to GPU
+        next_source = vp9_lookahead_peek(cpi->lookahead, 0);
+        if (next_source != NULL) {
+          thread_context_gpu *const egpu_thread_ctxt = (thread_context_gpu*)worker->data1;
+          // Enqueue Jobs to GPU
+          // Newmv, Zeromv analysis of remaining sub-frames
+
+          // If Adaptive Cyclic Refresh is enabled, then before Queuing next frame's
+          // jobs to GPU, it is necessary to obtain its segment Info.
+          if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
+            struct segmentation seg;
+            CYCLIC_REFRESH cyclic_refresh;
+
+            memcpy(&seg, &cm->seg, sizeof(seg));
+            memcpy(&cyclic_refresh, cpi->cyclic_refresh, sizeof(CYCLIC_REFRESH));
+            memcpy(cpi->cr_map, cpi->cyclic_refresh->map,
+                   cm->mi_rows * cm->mi_cols * sizeof(*cpi->cr_map));
+            memcpy(cpi->cr_last_coded_q_map, cpi->cyclic_refresh->last_coded_q_map,
+                   cm->mi_rows * cm->mi_cols * sizeof(*cpi->cr_last_coded_q_map));
+            cyclic_refresh.map = cpi->cr_map;
+            cyclic_refresh.last_coded_q_map = cpi->cr_last_coded_q_map;
+            if (cyclic_refresh.percent_refresh > 0 &&
+                (cpi->rc.frames_since_key + 1) >=
+                (4 * cpi->svc.number_temporal_layers) * (100 / cyclic_refresh.percent_refresh)) {
+              cyclic_refresh.rate_ratio_qdelta = 2.0;
+            }
+            vp9_gpu_cyclic_refresh_qindex_setup(cpi, &cyclic_refresh, &seg,
+                                                cpi->rc.q_prediction_next);
+            cyclic_refresh_update_map(cpi, &cyclic_refresh, &seg, cpi->seg_map_pred[1],
+                                      cpi->rc.q_prediction_next, 1);
+          }
+
+          worker->hook = (VPxWorkerHook) vp9_gpu_mv_compute;
+          egpu_thread_ctxt->cpi = cpi;
+          egpu_thread_ctxt->td = td;
+          egpu_thread_ctxt->async = 1;
+          winterface->launch(worker);
+        }
+      }
     }
 #endif
 

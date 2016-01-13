@@ -164,7 +164,8 @@ void vp9_egpu_remove(struct VP9_COMP *cpi);
 
 int vp9_egpu_init(struct VP9_COMP *cpi);
 
-void vp9_gpu_mv_compute(struct VP9_COMP *cpi, struct ThreadData *td);
+void vp9_gpu_mv_compute(struct thread_context_gpu *const egpu_thread_ctxt,
+                        void* data2);
 
 void vp9_gpu_mv_compute_async(struct thread_context_gpu *const egpu_thread_ctxt,
                               void* data2);

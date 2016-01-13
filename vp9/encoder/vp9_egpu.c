@@ -182,26 +182,34 @@ static void vp9_gpu_fill_seg_id(VP9_COMP *cpi, const uint8_t *const map,
   }
 }
 
-void vp9_gpu_mv_compute(VP9_COMP *cpi, ThreadData *td) {
+void vp9_gpu_mv_compute(thread_context_gpu *const egpu_thread_ctxt,
+                        void* data2) {
+  VP9_COMP *cpi = egpu_thread_ctxt->cpi;
+  ThreadData *td = egpu_thread_ctxt->td;
   VP9_COMMON *const cm = &cpi->common;
   VP9_EGPU *const egpu = &cpi->egpu;
-  const uint8_t *const map = cm->seg.update_map ? cpi->segmentation_map :
-              cm->last_frame_seg_map;
+  const uint8_t *const map = egpu_thread_ctxt->async ? cpi->seg_map_pred[1] :
+      cpi->segmentation_map;
   int subframe_idx, subframe_idx_start;
   SubFrameInfo subframe;
 
+  (void) data2;
+  // subframes to process
   subframe_idx_start = cpi->b_async;
   vp9_subframe_init(&subframe, cm, subframe_idx_start);
 
+  // fill segment info.
   vp9_gpu_fill_seg_id(cpi, map, subframe.mi_row_start, cm->mi_rows);
 
-  if (MAX_SUB_FRAMES <= 2 || !cpi->b_async) {
-    vp9_gpu_fill_rd_parameters(cpi, td, &cm->seg, 0);
+  // fill rd param info.
+  if (!cpi->b_async) {
+    vp9_gpu_fill_rd_parameters(cpi, td, &cm->seg, egpu_thread_ctxt->async);
   }
 
+  // enqueue jobs to gpu
   for (subframe_idx = subframe_idx_start; subframe_idx < MAX_SUB_FRAMES;
        subframe_idx++) {
-    egpu->execute(cpi, subframe_idx, 0);
+    egpu->execute(cpi, subframe_idx, egpu_thread_ctxt->async);
   }
 }
 
@@ -216,53 +224,68 @@ void vp9_gpu_mv_compute_async(thread_context_gpu *const egpu_thread_ctxt,
   struct lookahead_entry *next_source = NULL;
   struct vpx_usec_timer emr_timer;
 
-  (void) data2;
-
-  vpx_usec_timer_start(&emr_timer);
-
+  // if there are no further frames to be encoded, no further jobs have to
+  // be enqueued to GPU
   next_source = vp9_lookahead_peek(cpi->lookahead, 0);
   if (next_source == NULL)
     return;
 
+  (void) data2;
+  vpx_usec_timer_start(&emr_timer);
+
   vp9_subframe_init(&subframe, cm, MAX_SUB_FRAMES - 1);
-
   if (mi_row == 0) {
-    // enqueue prologue kernels for gpu
+    // Enqueue Jobs to GPU
+    // Projection Motion Estimation & Compute Color Sensitivity
     egpu->execute_prologue(cpi);
-  } else if (mi_row == subframe.mi_row_start) {
-    // enqueue me kernels for gpu
-    if (cpi->b_async) {
-      struct segmentation seg;
-      CYCLIC_REFRESH cyclic_refresh;
+  } else if (mi_row == subframe.mi_row_start && cpi->b_async) {
+    // Enqueue Jobs to GPU
+    // Quadtree Decomposition, Newmv, Zeromv analysis of first sub-frame
+    struct segmentation seg;
+    CYCLIC_REFRESH cyclic_refresh;
 
-      if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
-        memcpy(&seg, &cm->seg, sizeof(seg));
-        memcpy(&cyclic_refresh, cpi->cyclic_refresh, sizeof(CYCLIC_REFRESH));
-        memcpy(cpi->cr_map, cpi->cyclic_refresh->map,
-               subframe.mi_row_start * cm->mi_cols * sizeof(*cpi->cr_map));
-        memcpy(cpi->cr_last_coded_q_map, cpi->cyclic_refresh->last_coded_q_map,
-               subframe.mi_row_start * cm->mi_cols * sizeof(*cpi->cr_last_coded_q_map));
-        cyclic_refresh.map = cpi->cr_map;
-        cyclic_refresh.last_coded_q_map = cpi->cr_last_coded_q_map;
-        if (cyclic_refresh.percent_refresh > 0 &&
-            (cpi->rc.frames_since_key + 1) >=
-            (4 * cpi->svc.number_temporal_layers) * (100 / cyclic_refresh.percent_refresh)) {
-          cyclic_refresh.rate_ratio_qdelta = 2.0;
-        }
-        vp9_gpu_cyclic_refresh_qindex_setup(cpi, &cyclic_refresh, &seg,
-                                            cpi->rc.q_prediction_next);
-        cyclic_refresh_update_map(cpi, &cyclic_refresh, &seg, cpi->seg_map_pred,
-                                  cpi->rc.q_prediction_next, 1);
+    // If Adaptive Cyclic Refresh is enabled, then before Queuing next frame's
+    // jobs to GPU, it is necessary to obtain its segment Info. Now, Segment
+    // Info of next frame is only attained after completely encoding the current
+    // frame. So we predict the segment info of the future frame with the info
+    // of SB's already encoded.
+    memcpy(&seg, &cm->seg, sizeof(seg));
+    if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
+      memcpy(&cyclic_refresh, cpi->cyclic_refresh, sizeof(CYCLIC_REFRESH));
+      memcpy(cpi->cr_map, cpi->cyclic_refresh->map,
+             subframe.mi_row_start * cm->mi_cols * sizeof(*cpi->cr_map));
+      memcpy(
+          cpi->cr_last_coded_q_map,
+          cpi->cyclic_refresh->last_coded_q_map,
+          subframe.mi_row_start * cm->mi_cols
+          * sizeof(*cpi->cr_last_coded_q_map));
+      cyclic_refresh.map = cpi->cr_map;
+      cyclic_refresh.last_coded_q_map = cpi->cr_last_coded_q_map;
+      if (cyclic_refresh.percent_refresh > 0 &&
+          (cpi->rc.frames_since_key + 1) >=
+          (4 * cpi->svc.number_temporal_layers) * (100 / cyclic_refresh.percent_refresh)) {
+        cyclic_refresh.rate_ratio_qdelta = 2.0;
       }
-
-      vp9_subframe_init(&subframe, cm, 0);
-      vp9_gpu_fill_seg_id(cpi, cpi->seg_map_pred,
-                          subframe.mi_row_start, subframe.mi_row_end);
-
-      vp9_gpu_fill_rd_parameters(cpi, td, &seg, 1);
-
-      egpu->execute(cpi, 0, 1);
+      vp9_gpu_cyclic_refresh_qindex_setup(cpi, &cyclic_refresh, &seg,
+                                          cpi->rc.q_prediction_next);
+      // Predict Cyclic refresh map of next frame
+      cyclic_refresh_update_map(cpi, &cyclic_refresh, &seg,
+                                cpi->seg_map_pred[0], cpi->rc.q_prediction_next,
+                                1);
     }
+
+    // sub frames to process
+    vp9_subframe_init(&subframe, cm, 0);
+
+    // fill segment info.
+    vp9_gpu_fill_seg_id(cpi, cpi->seg_map_pred[0], subframe.mi_row_start,
+                        subframe.mi_row_end);
+
+    // fill rd param info.
+    vp9_gpu_fill_rd_parameters(cpi, td, &seg, 1);
+
+    // enqueue jobs to gpu
+    egpu->execute(cpi, 0, 1);
   }
 
   vpx_usec_timer_mark(&emr_timer);
@@ -378,6 +401,7 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
           thread_context_gpu *const egpu_thread_ctxt = (thread_context_gpu*)worker->data1;
 
           winterface->sync(worker);
+          worker->hook = (VPxWorkerHook) vp9_gpu_mv_compute_async;
           egpu_thread_ctxt->cpi = cpi;
           egpu_thread_ctxt->td = td;
           egpu_thread_ctxt->mi_row = mi_row - mi_row_step;
@@ -404,6 +428,7 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
         thread_context_gpu *const egpu_thread_ctxt = (thread_context_gpu*)worker->data1;
 
         winterface->sync(worker);
+        worker->hook = (VPxWorkerHook) vp9_gpu_mv_compute_async;
         egpu_thread_ctxt->cpi = cpi;
         egpu_thread_ctxt->td = td;
         egpu_thread_ctxt->mi_row = mi_row - mi_row_step;
@@ -413,24 +438,24 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
 #else
     if (MAX_SUB_FRAMES > 2 &&
         cm->current_video_frame >= ASYNC_FRAME_COUNT_WAIT &&
-        cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ &&
         subframe_idx == MAX_SUB_FRAMES - 1 &&
         mi_row == subframe.mi_row_start &&
         !x->data_parallel_processing) {
-      unsigned char *seg_map = cpi->segmentation_map;
+      if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
+        unsigned char *seg_map = cpi->segmentation_map;
 
-      if (cpi->max_threads > 1) {
-        const int sb_row = subframe.mi_row_start >> MI_BLOCK_SIZE_LOG2;
-        const int sb_col = cm->mi_cols >> MI_BLOCK_SIZE_LOG2;
+        if (cpi->max_threads > 1) {
+          const int sb_row = subframe.mi_row_start >> MI_BLOCK_SIZE_LOG2;
+          const int sb_col = cm->mi_cols >> MI_BLOCK_SIZE_LOG2;
 
-        vp9_enc_sync_read(cpi, sb_row, sb_col);
+          vp9_enc_sync_read(cpi, sb_row, sb_col);
+        }
+        assert(cpi->oxcf.content != VP9E_CONTENT_SCREEN);
+        cpi->segmentation_map = cpi->seg_map_pred[0];
+        cyclic_refresh_update_map(cpi, cpi->cyclic_refresh, &cm->seg,
+                                  cpi->segmentation_map, cm->base_qindex, 1);
+        cpi->segmentation_map = seg_map;
       }
-
-      assert(cpi->oxcf.content != VP9E_CONTENT_SCREEN);
-      cpi->segmentation_map = cpi->seg_map_pred;
-      cyclic_refresh_update_map(cpi, cpi->cyclic_refresh, &cm->seg,
-                                cpi->segmentation_map, cm->base_qindex, 1);
-      cpi->segmentation_map = seg_map;
       cpi->b_async = 1;
     }
 #endif
