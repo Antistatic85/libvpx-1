@@ -140,17 +140,17 @@ int set_vt_partitioning(__local int *var,
     return 0;
 
   if (bsize == bsize_min) {
-    if (mi_col + block_width / 2 < mi_cols &&
-        mi_row + block_height / 2 < mi_rows &&
-        *var < threshold) {
+    if ((mi_col + block_width / 2 < mi_cols) &
+        (mi_row + block_height / 2 < mi_rows) &
+        (*var < threshold)) {
       *block_sz = bsize;
       return 1;
     }
     return 0;
   } else if (bsize > bsize_min) {
-    if (mi_col + block_width / 2 < mi_cols &&
-        mi_row + block_height / 2 < mi_rows &&
-        *var < threshold) {
+    if ((mi_col + block_width / 2 < mi_cols) &
+        (mi_row + block_height / 2 < mi_rows) &
+        (*var < threshold)) {
       *block_sz = bsize;
       return 1;
     }
@@ -163,8 +163,8 @@ int set_vt_partitioning(__local int *var,
       sum_2 = sum_array[1] + sum_array[stride + 1];
       var1 = get_variance(sse_1, sum_1, log2_count);
       var2 = get_variance(sse_2, sum_2, log2_count);
-      if (var1 < threshold && var2 < threshold &&
-          ss_size_lookup[bsize - 2] < BLOCK_INVALID) {
+      if ((var1 < threshold) & (var2 < threshold) &
+          (ss_size_lookup[bsize - 2] < BLOCK_INVALID)) {
         block_width >>= 1;
         *block_sz = bsize - 2;
         *(block_sz + block_width * block_width) = bsize - 2;
@@ -180,8 +180,8 @@ int set_vt_partitioning(__local int *var,
       sum_2 = sum_array[stride] + sum_array[stride + 1];
       var1 = get_variance(sse_1, sum_1, log2_count);
       var2 = get_variance(sse_2, sum_2, log2_count);
-      if (var1 < threshold && var2 < threshold &&
-          ss_size_lookup[bsize - 1] < BLOCK_INVALID) {
+      if ((var1 < threshold) & (var2 < threshold) &
+          (ss_size_lookup[bsize - 1] < BLOCK_INVALID)) {
         block_width >>= 1;
         *block_sz = bsize - 1;
         *(block_sz + block_width * block_width * 2) = bsize - 1;
@@ -360,7 +360,7 @@ int vector_match(__global ushort *proj_ref,
   for (d = -8; d <= 8; d += 16) {
     int this_pos = offset + d;
     // check limit
-    if (this_pos < 0 || this_pos > bw)
+    if ((this_pos < 0) | (this_pos > bw))
       continue;
     this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl,
                               intermediate_int);
@@ -374,7 +374,7 @@ int vector_match(__global ushort *proj_ref,
   for (d = -4; d <= 4; d += 8) {
     int this_pos = offset + d;
     // check limit
-    if (this_pos < 0 || this_pos > bw)
+    if ((this_pos < 0) | (this_pos > bw))
       continue;
     this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl,
                               intermediate_int);
@@ -388,7 +388,7 @@ int vector_match(__global ushort *proj_ref,
   for (d = -2; d <= 2; d += 4) {
     int this_pos = offset + d;
     // check limit
-    if (this_pos < 0 || this_pos > bw)
+    if ((this_pos < 0) | (this_pos > bw))
       continue;
     this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl,
                               intermediate_int);
@@ -402,7 +402,7 @@ int vector_match(__global ushort *proj_ref,
   for (d = -1; d <= 1; d += 2) {
     int this_pos = offset + d;
     // check limit
-    if (this_pos < 0 || this_pos > bw)
+    if ((this_pos < 0) | (this_pos > bw))
       continue;
     this_sad = get_vector_var(proj_ref + this_pos, proj_src, bwl,
                               intermediate_int);
@@ -498,7 +498,7 @@ void vp9_col_row_projection(__global uchar *src_frame,
 barrier_sync:
   barrier(CLK_LOCAL_MEM_FENCE);
 
-  if (((local_col & 3) == 0) && local_col < 32) {
+  if (((local_col & 3) == 0) & (local_col < 32)) {
     int local_offset = 2 * local_col;
     ushort8 sum = intermediate_sum[local_offset] + intermediate_sum[local_offset + 2] +
         intermediate_sum[local_offset + 4] + intermediate_sum[local_offset + 6];
@@ -648,7 +648,7 @@ void vp9_pro_motion_estimation(__global uchar *cur,
     bestsad = intermediate_sad[4];
   }
 
-  if (get_local_id(0) == 0 && get_local_id(1) == 0) {
+  if ((get_local_id(0) == 0) & (get_local_id(1) == 0)) {
     gpu_output_pro_me->pred_mv.as_mv.col = best_mv.col << 3;
     gpu_output_pro_me->pred_mv.as_mv.row = best_mv.row << 3;
     gpu_output_pro_me->pred_mv_sad = bestsad;
@@ -685,7 +685,7 @@ void vp9_color_sensitivity(__global uchar *src,
   thismv = gpu_output_pro_me->pred_mv.as_mv;
   y_sad = gpu_output_pro_me->pred_mv_sad;
 
-  if (((thismv.col & 15) == 0) && ((thismv.row & 15) == 0)) {
+  if (((thismv.col & 15) == 0) & ((thismv.row & 15) == 0)) {
     thismv.col = thismv.col >> 4;
     thismv.row = thismv.row >> 4;
 
@@ -763,10 +763,10 @@ void vp9_choose_partitions(__global uchar *src,
 
   segment_id = gpu_input->seg_id;
 
-  if (segment_id == CR_SEGMENT_ID_BASE &&
-      gpu_output_pro_me->pred_mv_sad < rd_parameters->vbp_threshold_sad &&
-      mi_col + 4 < mi_cols && mi_row + 4 < mi_rows) {
-    if (local_col == 0 && local_row == 0) {
+  if ((segment_id == CR_SEGMENT_ID_BASE) &
+      (gpu_output_pro_me->pred_mv_sad < rd_parameters->vbp_threshold_sad) &
+      (mi_col + 4 < mi_cols) & (mi_row + 4 < mi_rows)) {
+    if ((local_col == 0) & (local_row == 0)) {
       gpu_output_pro_me->block_type[0] = BLOCK_64X64;
       gpu_input[0].do_compute = GPU_BLOCK_64X64;
       gpu_input[0].pred_mv.as_int = gpu_output_pro_me->pred_mv.as_int;
@@ -797,13 +797,13 @@ void vp9_choose_partitions(__global uchar *src,
   sum_array[0][local_row * 8 + local_col] = s_avg - d_avg;
   sse_array[0][local_row * 8 + local_col] = (s_avg - d_avg) * (s_avg - d_avg);
 
-  if (local_col == 0 && local_row == 0)
+  if ((local_col == 0) & (local_row == 0))
     force_split[0] = 0;
 
-  if (local_col < 2 && local_row < 2)
+  if ((local_col < 2) & (local_row < 2))
     force_split[1 + local_row * 2 + local_col] = 0;
 
-  if (local_col < 4 && local_row < 4)
+  if ((local_col < 4) & (local_row < 4))
     force_split[5 + local_row * 4 + local_col] = 0;
 
   int i = 2;
@@ -812,7 +812,7 @@ void vp9_choose_partitions(__global uchar *src,
   int blk_index = 0;
   while (i <= 8) {
     barrier(CLK_LOCAL_MEM_FENCE);
-    if (local_col % i == 0 && local_row % i == 0) {
+    if (((local_col % i) == 0) & ((local_row % i) == 0)) {
       int j, k;
       int sum = 0;
       uint32_t sse = 0;
@@ -830,9 +830,9 @@ void vp9_choose_partitions(__global uchar *src,
                                (local_col / i)] = sse;
       // couldve used continue statement here but intel opencl compiler has
       // a problem with continue statments
-      if (i == 4 && force_split[1 + ((local_row / 4) * 2 + (local_col / 4))])
+      if ((i == 4) & force_split[1 + ((local_row / 4) * 2 + (local_col / 4))])
         goto SKIP_VAR_CALC;
-      if (i == 8 && force_split[0])
+      if ((i == 8) & force_split[0])
         goto SKIP_VAR_CALC;
       variance = get_variance(sse, sum, log2_count);
       var_array[blk_index][(local_row / i) * (blk_stride >> 1) +
@@ -844,8 +844,8 @@ void vp9_choose_partitions(__global uchar *src,
           force_split[1 + ((local_row / 4) * 2 + (local_col / 4))] = 1; // 32X32
           force_split[0] = 1; // 64X64
         }
-      } else if (i == 2 && segment_id == 0 &&
-          variance >= rd_parameters->seg_rd_param[segment_id].vbp_thresholds[1]) {
+      } else if ((i == 2) & (segment_id == 0) &
+          (variance >= rd_parameters->seg_rd_param[segment_id].vbp_thresholds[1])) {
         int minmax = compute_minmax_8x8(src, ref, stride);
 
         if (minmax > rd_parameters->vbp_threshold_minmax) {
@@ -863,10 +863,10 @@ SKIP_VAR_CALC:
   }
 
   barrier(CLK_LOCAL_MEM_FENCE);
-  if (local_col == 0 && local_row == 0) {
+  if ((local_col == 0) & (local_row == 0)) {
     // Now go through the entire structure, splitting every block size until
     // we get to one that's got a variance lower than our threshold.
-    if (mi_col + 8 > mi_cols || mi_row + 8 > mi_rows ||
+    if ((mi_col + 8 > mi_cols) | (mi_row + 8 > mi_rows) |
         !set_vt_partitioning(var_array[2], sum_array[2], sse_array[2],
                              2, 5, BLOCK_64X64, gpu_output_pro_me->block_type,
                              rd_parameters->seg_rd_param[segment_id].vbp_thresholds[2],

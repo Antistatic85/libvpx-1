@@ -4122,16 +4122,8 @@ static void encode_tiles(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
   ThreadData *const td = &cpi->td;
 
-  {
-    struct vpx_usec_timer emr_timer;
-    vpx_usec_timer_start(&emr_timer);
-
-    // enable gpu processing
-    vp9_gpu_compute(cpi, td);
-
-    vpx_usec_timer_mark(&emr_timer);
-    cpi->time_gpu_compute += vpx_usec_timer_elapsed(&emr_timer);
-  }
+  // enable gpu processing
+  vp9_gpu_compute(cpi, td);
 
   // encode superblock rows
   encode_sb_rows(cpi, td, 0, cm->mi_rows, MI_BLOCK_SIZE);
@@ -4349,6 +4341,9 @@ static void encode_frame_internal(VP9_COMP *cpi) {
       encode_tiles(cpi);
     }
 
+    vpx_usec_timer_mark(&emr_timer);
+    cpi->time_encode_sb_row += vpx_usec_timer_elapsed(&emr_timer);
+
 #if CONFIG_GPU_COMPUTE
     if (cm->use_gpu) {
       const VPxWorkerInterface * const winterface = vpx_get_worker_interface();
@@ -4400,9 +4395,6 @@ static void encode_frame_internal(VP9_COMP *cpi) {
       }
     }
 #endif
-
-    vpx_usec_timer_mark(&emr_timer);
-    cpi->time_encode_sb_row += vpx_usec_timer_elapsed(&emr_timer);
   }
 
   sf->skip_encode_frame = sf->skip_encode_sb ?
