@@ -68,7 +68,7 @@ typedef struct VP9_EOPENCL {
   cl_kernel choose_partitions;
 
   // gpu profiling code
-  cl_event event[2 * MAX_SUB_FRAMES];
+  cl_event event[NUM_PING_PONG_BUFFERS][MAX_SUB_FRAMES];
 #if OPENCL_PROFILING
   cl_ulong total_time_taken_pro_me[NUM_KERNELS_PRO_ME];
   cl_ulong total_time_taken_me[GPU_BLOCK_SIZES][NUM_KERNELS_ME];

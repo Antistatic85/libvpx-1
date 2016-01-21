@@ -381,52 +381,10 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
     subframe_idx = vp9_get_subframe_index(cm, mi_row);
     vp9_subframe_init(&subframe, cm, subframe_idx);
 #if CONFIG_GPU_COMPUTE
-    if (!frame_is_intra_only(cm)) {
-      if (!x->data_parallel_processing && x->use_gpu) {
-        VP9_EGPU *egpu = &cpi->egpu;
-
-        egpu->enc_sync_read(cpi, subframe_idx, 0);
-        egpu->acquire_output_pro_me_buffer(
-            cpi, (void **)&cpi->gpu_output_pro_me_base, 0);
-        if (mi_row == subframe.mi_row_start) {
-          GPU_OUTPUT_PRO_ME *gpu_output_buffer;
-          const int sb_row = mi_row >> MI_BLOCK_SIZE_LOG2;
-          const int size = cm->sb_cols * sb_row;
-
-          (void) size;
-          egpu->acquire_output_pro_me_buffer(cpi, (void **) &gpu_output_buffer,
-                                             subframe_idx);
-          assert(gpu_output_buffer - cpi->gpu_output_pro_me_base == size);
-        }
-        if (mi_row - mi_row_step == subframe.mi_row_start &&
-            (subframe_idx == 0 || subframe_idx == MAX_SUB_FRAMES - 1)) {
-          const VPxWorkerInterface *const winterface = vpx_get_worker_interface();
-          VPxWorker *const worker = &cpi->egpu_thread_hndl;
-          thread_context_gpu *const egpu_thread_ctxt = (thread_context_gpu*)worker->data1;
-
-          winterface->sync(worker);
-          worker->hook = (VPxWorkerHook) vp9_gpu_mv_compute_async;
-          egpu_thread_ctxt->cpi = cpi;
-          egpu_thread_ctxt->td = td;
-          egpu_thread_ctxt->mi_row = mi_row - mi_row_step;
-          winterface->launch(worker);
-        }
-        egpu->enc_sync_read(cpi, subframe_idx, MAX_SUB_FRAMES);
-        egpu->acquire_output_me_buffer(
-            cpi, (void **) &cpi->gpu_output_me_base, 0);
-        if (mi_row == subframe.mi_row_start) {
-          GPU_OUTPUT_ME *gpu_output_buffer;
-          const int size = vp9_get_gpu_buffer_index(cpi, subframe.mi_row_start, 0);
-
-          (void)size;
-          egpu->acquire_output_me_buffer(cpi, (void **) &gpu_output_buffer,
-                                         subframe_idx);
-          assert(gpu_output_buffer - cpi->gpu_output_me_base == size);
-        }
-      }
-    } else {
-      if (mi_row - mi_row_step == subframe.mi_row_start &&
-          (subframe_idx == 0 || subframe_idx == MAX_SUB_FRAMES - 1)) {
+    if (!x->data_parallel_processing && x->use_gpu) {
+      if (mi_row == 0 ||
+          ((mi_row - mi_row_step == subframe.mi_row_start - MI_BLOCK_SIZE) &&
+              subframe_idx == MAX_SUB_FRAMES - 1)) {
         const VPxWorkerInterface *const winterface = vpx_get_worker_interface();
         VPxWorker *const worker = &cpi->egpu_thread_hndl;
         thread_context_gpu *const egpu_thread_ctxt = (thread_context_gpu*)worker->data1;
@@ -435,8 +393,35 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
         worker->hook = (VPxWorkerHook) vp9_gpu_mv_compute_async;
         egpu_thread_ctxt->cpi = cpi;
         egpu_thread_ctxt->td = td;
-        egpu_thread_ctxt->mi_row = mi_row - mi_row_step;
+        egpu_thread_ctxt->mi_row = subframe.mi_row_start;
         winterface->launch(worker);
+      }
+    }
+    if (!frame_is_intra_only(cm)) {
+      if (!x->data_parallel_processing && x->use_gpu) {
+        VP9_EGPU *egpu = &cpi->egpu;
+        egpu->enc_sync_read(cpi, subframe_idx);
+        egpu->acquire_output_pro_me_buffer(
+            cpi, (void **)&cpi->gpu_output_pro_me_base, 0);
+        egpu->acquire_output_me_buffer(
+            cpi, (void **) &cpi->gpu_output_me_base, 0);
+        if (mi_row == subframe.mi_row_start) {
+          GPU_OUTPUT_PRO_ME *gpu_output_prome_buffer;
+          GPU_OUTPUT_ME *gpu_output_me_buffer;
+          int sb_row, size;
+
+          (void)size;
+          sb_row = mi_row >> MI_BLOCK_SIZE_LOG2;
+          size = cm->sb_cols * sb_row;
+          egpu->acquire_output_pro_me_buffer(
+              cpi, (void **) &gpu_output_prome_buffer, subframe_idx);
+          assert(gpu_output_prome_buffer - cpi->gpu_output_pro_me_base == size);
+
+          size = vp9_get_gpu_buffer_index(cpi, subframe.mi_row_start, 0);
+          egpu->acquire_output_me_buffer(
+              cpi, (void **) &gpu_output_me_buffer, subframe_idx);
+          assert(gpu_output_me_buffer - cpi->gpu_output_me_base == size);
+        }
       }
     }
 #else
@@ -449,7 +434,7 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
         unsigned char *seg_map = cpi->segmentation_map;
 
         if (cpi->max_threads > 1) {
-          const int sb_row = subframe.mi_row_start >> MI_BLOCK_SIZE_LOG2;
+          const int sb_row = mi_row >> MI_BLOCK_SIZE_LOG2;
           const int sb_col = cm->mi_cols >> MI_BLOCK_SIZE_LOG2;
 
           vp9_enc_sync_read(cpi, sb_row, sb_col);

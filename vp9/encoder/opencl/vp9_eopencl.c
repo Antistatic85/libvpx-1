@@ -701,13 +701,14 @@ static void vp9_eopencl_acquire_output_pro_me_buffer(VP9_COMP *cpi,
   assert(0);
 }
 
-static void vp9_eopencl_enc_sync_read(VP9_COMP *cpi, cl_int event_id,
-                                      cl_int offset) {
+static void vp9_eopencl_enc_sync_read(VP9_COMP *cpi, cl_int event_id) {
   VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
+  VP9_COMMON *const cm = &cpi->common;
+  const int buffer_id = cm->current_video_frame & 1;
   cl_int status;
 
   assert(event_id < MAX_SUB_FRAMES);
-  status = clWaitForEvents(1, &eopencl->event[offset + event_id]);
+  status = clWaitForEvents(1, &eopencl->event[buffer_id][event_id]);
   if (status != CL_SUCCESS)
     vpx_internal_error(&cpi->common.error, VPX_CODEC_ERROR,
                        "Wait for event failed");
@@ -873,6 +874,9 @@ static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
     assert(status == CL_SUCCESS);
   }
 
+  status = clFlush(opencl->cmd_queue);
+  assert(status == CL_SUCCESS);
+
   return;
 }
 
@@ -881,14 +885,13 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
   VP9_OPENCL *const opencl = eopencl->opencl;
   VP9_COMMON *const cm = &cpi->common;
   YV12_BUFFER_CONFIG *frm_ref = get_ref_frame_buffer(cpi, LAST_FRAME);
+  int buffer_set = cm->current_video_frame & 1;
   opencl_buffer *gpu_output_pro_me_sub_buffer =
-      &eopencl->gpu_output_pro_me_sub_buf[cm->current_video_frame & 1]
-                                         [sub_frame_idx];
+      &eopencl->gpu_output_pro_me_sub_buf[buffer_set][sub_frame_idx];
   opencl_buffer *gpu_output_me_sub_buffer =
       &eopencl->gpu_output_me_sub_buf[sub_frame_idx];
   opencl_buffer *rdopt_params_static = &eopencl->rdopt_params_static;
-  opencl_buffer *rdopt_params_dyn =
-      &eopencl->rdopt_params_dyn[cm->current_video_frame & 1];
+  opencl_buffer *rdopt_params_dyn = &eopencl->rdopt_params_dyn[buffer_set];
   SubFrameInfo subframe;
   int subframe_height;
   int blocks_in_col, blocks_in_row;
@@ -916,12 +919,11 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
   (void)status;
 
   if (async) {
+    buffer_set = (cm->current_video_frame + 1) & 1;
     frm_ref = get_frame_new_buffer(cm);
     gpu_output_pro_me_sub_buffer =
-        &eopencl->gpu_output_pro_me_sub_buf[(cm->current_video_frame + 1) & 1]
-                                            [sub_frame_idx];
-    rdopt_params_dyn =
-          &eopencl->rdopt_params_dyn[(cm->current_video_frame + 1) & 1];
+        &eopencl->gpu_output_pro_me_sub_buf[buffer_set][sub_frame_idx];
+    rdopt_params_dyn = &eopencl->rdopt_params_dyn[buffer_set];
   }
 
   // before launching kernels make sure the buffers needed by GPU are cache
@@ -990,15 +992,6 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
                          0, gpu_output_pro_me_sub_buffer->size, 0,
                          NULL, NULL, &status);
   assert(status == CL_SUCCESS);
-
-  if (eopencl->event[sub_frame_idx] != NULL) {
-    status = clReleaseEvent(eopencl->event[sub_frame_idx]);
-    eopencl->event[sub_frame_idx] = NULL;
-    assert(status == CL_SUCCESS);
-  }
-  status = clEnqueueMarker(opencl->cmd_queue, &eopencl->event[sub_frame_idx]);
-  assert(status == CL_SUCCESS);
-
 
   //=====   MOTION ESTIMATION KERNELS   =====
   //--------------------------------------------
@@ -1219,14 +1212,14 @@ skip_execution:
   status = clFlush(opencl->cmd_queue);
   assert(status == CL_SUCCESS);
 
-  if (eopencl->event[MAX_SUB_FRAMES + sub_frame_idx] != NULL) {
-    status = clReleaseEvent(eopencl->event[MAX_SUB_FRAMES + sub_frame_idx]);
-    eopencl->event[MAX_SUB_FRAMES + sub_frame_idx] = NULL;
+  if (eopencl->event[buffer_set][sub_frame_idx] != NULL) {
+    status = clReleaseEvent(eopencl->event[buffer_set][sub_frame_idx]);
+    eopencl->event[buffer_set][sub_frame_idx] = NULL;
     assert(status == CL_SUCCESS);
   }
 
   status = clEnqueueMarker(opencl->cmd_queue,
-                           &eopencl->event[MAX_SUB_FRAMES + sub_frame_idx]);
+                           &eopencl->event[buffer_set][sub_frame_idx]);
   assert(status == CL_SUCCESS);
 
   return;
@@ -1236,18 +1229,20 @@ void vp9_eopencl_remove(VP9_COMP *cpi) {
   VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
   GPU_BLOCK_SIZE gpu_bsize;
   cl_int status;
-  int i;
+  int i, j;
 #if OPENCL_PROFILING
   cl_ulong total[NUM_KERNELS_ME] = {0};
   cl_ulong grand_total = 0;
   fprintf(stdout, "\nOPENCL PROFILE RESULTS\n");
 #endif
 
-  for (i = 0; i < 2 * MAX_SUB_FRAMES; i++) {
-    if (eopencl->event[i] != NULL) {
-      status = clReleaseEvent(eopencl->event[i]);
-      eopencl->event[i] = NULL;
-      assert(status == CL_SUCCESS);
+  for (j = 0; j < NUM_PING_PONG_BUFFERS; j++) {
+    for (i = 0; i < MAX_SUB_FRAMES; i++) {
+      if (eopencl->event[j][i] != NULL) {
+        status = clReleaseEvent(eopencl->event[j][i]);
+        eopencl->event[j][i] = NULL;
+        assert(status == CL_SUCCESS);
+      }
     }
   }
 
