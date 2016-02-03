@@ -398,12 +398,9 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
 #if CONFIG_GPU_COMPUTE
     vp9_egpu_remove(cpi);
     vp9_gpu_remove(&cpi->common);
-    vpx_free(cpi->cr_map);
-    vpx_free(cpi->cr_last_coded_q_map);
     vpx_get_worker_interface()->end(&cpi->egpu_thread_hndl);
 #endif
-    vpx_free(cpi->seg_map_pred[0]);
-    vpx_free(cpi->seg_map_pred[1]);
+    vpx_free(cpi->seg_map_pred);
   }
 
   vp9_free_pc_tree(&cpi->td);
@@ -848,9 +845,6 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
     if (vp9_egpu_init(cpi))
       vpx_internal_error(&cm->error, VPX_CODEC_ERROR,
                          "EGPU initialization failed");
-    cpi->cr_map = vpx_calloc(cm->mi_rows * cm->mi_cols, sizeof(*cpi->cr_map));
-    cpi->cr_last_coded_q_map = vpx_malloc(cm->mi_rows * cm->mi_cols *
-                                          sizeof(*cpi->cr_last_coded_q_map));
     winterface->init(worker);
     worker->data1 = &cpi->egpu_thread_ctxt;
     worker->data2 = NULL;
@@ -862,11 +856,8 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
     worker->hook = (VPxWorkerHook) vp9_gpu_mv_compute_async;
     assert(ASYNC_FRAME_COUNT_WAIT > 1);
 #endif
-    vpx_free(cpi->seg_map_pred[0]);
-    CHECK_MEM_ERROR(cm, cpi->seg_map_pred[0],
-                    vpx_calloc(cm->mi_rows * cm->mi_cols, 1));
-    vpx_free(cpi->seg_map_pred[1]);
-    CHECK_MEM_ERROR(cm, cpi->seg_map_pred[1],
+    vpx_free(cpi->seg_map_pred);
+    CHECK_MEM_ERROR(cm, cpi->seg_map_pred,
                     vpx_calloc(cm->mi_rows * cm->mi_cols, 1));
   }
 
