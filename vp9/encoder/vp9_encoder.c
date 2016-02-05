@@ -747,6 +747,24 @@ static void set_tile_limits(VP9_COMP *cpi) {
                                min_log2_tile_cols, max_log2_tile_cols);
     cm->log2_tile_rows = cpi->oxcf.tile_rows;
   }
+
+  // Set the output buffer pointer for each tile
+  if (cpi->max_threads > 1) {
+    const int tile_rows = 1 << cm->log2_tile_rows;
+    const int tile_cols = 1 << cm->log2_tile_cols;
+    const int num_tiles = tile_rows * tile_cols;
+    const int out_buffer_size_per_tile = cpi->out_buffer_size / num_tiles;
+    uint8_t *data = cpi->out_buffer_tiles[0][0];
+    int tile_row, tile_col;
+
+    for (tile_row = 0; tile_row < tile_rows; tile_row++) {
+      for (tile_col = 0; tile_col < tile_cols; tile_col++) {
+        const int idx = tile_row * tile_cols + tile_col;
+        cpi->out_buffer_tiles[tile_row][tile_col] =
+            data + (idx * out_buffer_size_per_tile);
+      }
+    }
+  }
 }
 
 static void update_frame_size(VP9_COMP *cpi) {
@@ -2126,6 +2144,7 @@ void vp9_remove_compressor(VP9_COMP *cpi) {
     vpx_free(cpi->enc_thread_hndl);
     vpx_free(cpi->enc_thread_ctxt);
     vpx_free(cpi->cur_sb_col);
+    vp9_entropy_dealloc(cpi);
   }
 
   dealloc_compressor_data(cpi);

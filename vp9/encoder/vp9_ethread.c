@@ -57,6 +57,26 @@ static int get_sync_range(int width) {
     return 8;
 }
 
+void vp9_entropy_alloc(VP9_COMP *cpi) {
+  VP9_COMMON *const cm = &cpi->common;
+
+  pthread_mutex_init(&cpi->entropy_mutex, NULL);
+  {
+    // mb_rows, cols are in units of 16 pixels. We assume 4 planes all at full
+    // resolution and high bit depth
+    const int out_buffer_size = cm->MBs * 256 * 3 * 2;
+
+    cpi->out_buffer_tiles[0][0] = malloc(out_buffer_size *
+                                         sizeof(*cpi->out_buffer_tiles[0][0]));
+    cpi->out_buffer_size = out_buffer_size;
+  }
+}
+
+void vp9_entropy_dealloc(VP9_COMP *cpi) {
+  pthread_mutex_destroy(&cpi->entropy_mutex);
+  free(cpi->out_buffer_tiles[0][0]);
+}
+
 void vp9_create_encoding_threads(VP9_COMP *cpi) {
   VP9_COMMON * const cm = &cpi->common;
   const VPxWorkerInterface * const winterface = vpx_get_worker_interface();
@@ -99,6 +119,8 @@ void vp9_create_encoding_threads(VP9_COMP *cpi) {
   memset(cpi->cur_sb_col, -1, (sizeof(*cpi->cur_sb_col) * cm->sb_rows));
   // set up nsync (currently unused).
   cpi->sync_range = get_sync_range(cpi->oxcf.width);
+
+  vp9_entropy_alloc(cpi);
 }
 
 void vp9_accumulate_rd_opt(ThreadData *td, ThreadData *td_t) {

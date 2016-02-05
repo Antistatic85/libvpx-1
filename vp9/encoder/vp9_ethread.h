@@ -83,6 +83,10 @@ void vp9_enc_sync_read(struct VP9_COMP *cpi, int sb_row, int sb_col);
 
 void vp9_enc_sync_write(struct VP9_COMP *cpi, int sb_row);
 
+void vp9_entropy_alloc(struct VP9_COMP *cpi);
+
+void vp9_entropy_dealloc(struct VP9_COMP *cpi);
+
 void vp9_create_encoding_threads(struct VP9_COMP *cpi);
 
 void vp9_accumulate_rd_opt(ThreadData *td, ThreadData *td_t);

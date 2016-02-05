@@ -383,6 +383,11 @@ typedef struct VP9_COMP {
   int *cur_sb_col;
   // minimum spatial distance (in SB) between encoding threads
   int sync_range;
+  int entropy_tilecol;
+  pthread_mutex_t entropy_mutex;
+  int out_buffer_size;
+  uint8_t *out_buffer_tiles[4][1 << 6];
+  uint32_t out_bitstream_size[4][1 << 6];
 
   fractional_mv_step_fp *find_fractional_mv_step;
   vp9_full_search_fn_t full_search_sad;
