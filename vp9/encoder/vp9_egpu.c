@@ -421,6 +421,8 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
           egpu->acquire_output_me_buffer(
               cpi, (void **) &gpu_output_me_buffer, subframe_idx);
           assert(gpu_output_me_buffer - cpi->gpu_output_me_base == size);
+
+          egpu->enc_profile(cpi, subframe_idx);
         }
       }
     }

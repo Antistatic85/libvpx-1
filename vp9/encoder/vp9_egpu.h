@@ -113,10 +113,11 @@ typedef struct VP9_EGPU {
   void (*acquire_rd_param_buffer_static)(struct VP9_COMP *cpi, void **host_ptr);
   void (*acquire_rd_param_buffer_dynamic)(struct VP9_COMP *cpi, void **host_ptr,
       int index);
-  void (*enc_sync_read)(struct VP9_COMP *cpi, int event_id);
+  void (*enc_sync_read)(struct VP9_COMP *cpi, int sub_frame_idx);
   void (*execute)(struct VP9_COMP *cpi, int sub_frame_idx, int async);
   void (*execute_prologue)(struct VP9_COMP *cpi);
   void (*remove)(struct VP9_COMP *cpi);
+  void (*enc_profile)(struct VP9_COMP *cpi, int sub_frame_idx);
 } VP9_EGPU;
 
 extern const BLOCK_SIZE vp9_actual_block_size_lookup[GPU_BLOCK_SIZES];

@@ -20,9 +20,6 @@ extern "C" {
 
 #define NUM_PIXELS_PER_WORKITEM 8
 
-#define NUM_KERNELS_ME 6
-#define NUM_KERNELS_PRO_ME 5
-
 typedef struct {
   int sum;
   unsigned int sse;
@@ -67,11 +64,15 @@ typedef struct VP9_EOPENCL {
   cl_kernel color_sensitivity;
   cl_kernel choose_partitions;
 
-  // gpu profiling code
+  // gpu cpu sync handlers
   cl_event event[NUM_PING_PONG_BUFFERS][MAX_SUB_FRAMES];
+
+  // gpu profiling code
 #if OPENCL_PROFILING
-  cl_ulong total_time_taken_pro_me[NUM_KERNELS_PRO_ME];
-  cl_ulong total_time_taken_me[GPU_BLOCK_SIZES][NUM_KERNELS_ME];
+  cl_event event_prome[NUM_PING_PONG_BUFFERS][4];
+  cl_event event_me[NUM_PING_PONG_BUFFERS][MAX_SUB_FRAMES][11];
+  cl_ulong total_time_taken_pro_me[4];
+  cl_ulong total_time_taken_me[MAX_SUB_FRAMES];
 #endif
 } VP9_EOPENCL;
 

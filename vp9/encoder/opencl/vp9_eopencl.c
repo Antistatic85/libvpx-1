@@ -71,16 +71,16 @@ static char *read_src(const char *src_file_name) {
 }
 
 #if OPENCL_PROFILING
-static cl_ulong get_event_time_elapsed(cl_event event) {
-  cl_ulong startTime, endTime;
+static cl_ulong get_event_time_elapsed(cl_event event, cl_ulong *startTime,
+                                       cl_ulong *endTime) {
   cl_int status = 0;
 
   status  = clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START,
-                                   sizeof(cl_ulong), &startTime, NULL);
+                                   sizeof(cl_ulong), startTime, NULL);
   status |= clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END,
-                                    sizeof(cl_ulong), &endTime, NULL);
+                                    sizeof(cl_ulong), endTime, NULL);
   assert(status == CL_SUCCESS);
-  return (endTime - startTime);
+  return (*endTime - *startTime);
 }
 #endif
 
@@ -714,6 +714,42 @@ static void vp9_eopencl_enc_sync_read(VP9_COMP *cpi, cl_int event_id) {
                        "Wait for event failed");
 }
 
+static void vp9_eopencl_enc_profile(VP9_COMP *cpi, cl_int sub_frame_idx) {
+#if OPENCL_PROFILING
+  VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
+  VP9_COMMON *const cm = &cpi->common;
+  const int buffer_id = cm->current_video_frame & 1;
+  cl_int status;
+  int i;
+  cl_ulong startTime, endTime;
+  cl_ulong time_elapsed;
+
+  (void) status;
+  if (sub_frame_idx == 0) {
+    for (i = 0; i < 4; i++) {
+      time_elapsed = get_event_time_elapsed(eopencl->event_prome[buffer_id][i],
+                                            &startTime, &endTime);
+      eopencl->total_time_taken_pro_me[i] += time_elapsed / 1000;
+      status = clReleaseEvent(eopencl->event_prome[buffer_id][i]);
+      eopencl->event_prome[buffer_id][i] = NULL;
+      assert(status == CL_SUCCESS);
+    }
+  }
+  for (i = 0; i < 11; i++) {
+    time_elapsed =
+        get_event_time_elapsed(eopencl->event_me[buffer_id][sub_frame_idx][i],
+                               &startTime, &endTime);
+    eopencl->total_time_taken_me[sub_frame_idx] += time_elapsed / 1000;
+    status = clReleaseEvent(eopencl->event_me[buffer_id][sub_frame_idx][i]);
+    eopencl->event_me[buffer_id][sub_frame_idx][i] = NULL;
+    assert(status == CL_SUCCESS);
+  }
+#else
+  (void) cpi;
+  (void) sub_frame_idx;
+#endif
+}
+
 static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
   VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
   VP9_OPENCL *const opencl = eopencl->opencl;
@@ -729,15 +765,12 @@ static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
   size_t global_size[2];
   size_t global_offset[2];
   cl_int status = CL_SUCCESS;
-#if OPENCL_PROFILING
-  cl_event event[NUM_KERNELS_PRO_ME - 1];
-#endif
-  cl_event *event_ptr[NUM_KERNELS_PRO_ME - 1];
+  cl_event *event_ptr[4];
   int i;
 
-  for (i = 0; i < NUM_KERNELS_PRO_ME - 1; i++) {
+  for (i = 0; i < 4; i++) {
 #if OPENCL_PROFILING
-    event_ptr[i] = &event[i];
+    event_ptr[i] = &eopencl->event_prome[(cm->current_video_frame + 1) & 1][i];
 #else
     event_ptr[i] = NULL;
 #endif
@@ -845,18 +878,6 @@ static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
                                   0, NULL, event_ptr[3]);
   assert(status == CL_SUCCESS);
 
-#if OPENCL_PROFILING
-  for (i = 0; i < NUM_KERNELS_PRO_ME - 1; i++) {
-    cl_ulong time_elapsed;
-    status = clWaitForEvents(1, event_ptr[i]);
-    assert(status == CL_SUCCESS);
-    time_elapsed = get_event_time_elapsed(*event_ptr[i]);
-    eopencl->total_time_taken_pro_me[i] += time_elapsed / 1000;
-    status = clReleaseEvent(*event_ptr[i]);
-    assert(status == CL_SUCCESS);
-  }
-#endif
-
   // acquire current & last source buffer
   if (img_src->buffer_alloc_dup == NULL) {
     img_src->buffer_alloc_dup =
@@ -901,20 +922,10 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
   size_t global_offset[2];
   const size_t workitem_size[2] = {NUM_PIXELS_PER_WORKITEM, 1};
   cl_int status = CL_SUCCESS;
-#if OPENCL_PROFILING
-  cl_event event[NUM_KERNELS_ME + 1];
-#endif
-  cl_event *event_ptr[NUM_KERNELS_ME + 1];
+  cl_event *event_ptr[11];
+  int event_id = 0;
   GPU_BLOCK_SIZE gpu_bsize;
   int i;
-
-  for (i = 0; i < NUM_KERNELS_ME + 1; i++) {
-#if OPENCL_PROFILING
-    event_ptr[i] = &event[i];
-#else
-    event_ptr[i] = NULL;
-#endif
-  }
 
   (void)status;
 
@@ -924,6 +935,14 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
     gpu_output_pro_me_sub_buffer =
         &eopencl->gpu_output_pro_me_sub_buf[buffer_set][sub_frame_idx];
     rdopt_params_dyn = &eopencl->rdopt_params_dyn[buffer_set];
+  }
+
+  for (i = 0; i < 11; i++) {
+#if OPENCL_PROFILING
+    event_ptr[i] = &eopencl->event_me[buffer_set][sub_frame_idx][i];
+#else
+    event_ptr[i] = NULL;
+#endif
   }
 
   // before launching kernels make sure the buffers needed by GPU are cache
@@ -981,7 +1000,7 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
   status = clEnqueueNDRangeKernel(opencl->cmd_queue,
                                   eopencl->choose_partitions,
                                   2, global_offset, global_size, local_size,
-                                  0, NULL, event_ptr[NUM_KERNELS_ME]);
+                                  0, NULL, event_ptr[event_id++]);
   assert(status == CL_SUCCESS);
 
   gpu_output_pro_me_sub_buffer->mapped_pointer =
@@ -1044,7 +1063,7 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
                                     eopencl->rd_calculation_zeromv[gpu_bsize],
                                     2, global_offset, global_size,
                                     local_size_zeromv,
-                                    0, NULL, event_ptr[0]);
+                                    0, NULL, event_ptr[event_id++]);
     assert(status == CL_SUCCESS);
 
     // launch full pixel search new mv analysis kernel
@@ -1062,7 +1081,7 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
                                     eopencl->full_pixel_search[gpu_bsize],
                                     2, global_offset, global_size,
                                     local_size_full_pixel,
-                                    0, NULL, event_ptr[1]);
+                                    0, NULL, event_ptr[event_id++]);
     assert(status == CL_SUCCESS);
 
     // launch sub pixel search kernel (half pel)
@@ -1082,7 +1101,7 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
                                     eopencl->hpel_search[gpu_bsize],
                                     2, global_offset, global_size,
                                     local_size_sub_pixel,
-                                    0, NULL, event_ptr[2]);
+                                    0, NULL, event_ptr[event_id++]);
     assert(status == CL_SUCCESS);
 
     // launch sub pixel search kernel (quarter pel)
@@ -1096,20 +1115,8 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
                                     eopencl->qpel_search[gpu_bsize],
                                     2, global_offset, global_size,
                                     local_size_sub_pixel,
-                                    0, NULL, event_ptr[3]);
+                                    0, NULL, event_ptr[event_id++]);
     assert(status == CL_SUCCESS);
-
-#if OPENCL_PROFILING
-    for (i = 0; i < NUM_KERNELS_ME - 2; i++) {
-      cl_ulong time_elapsed;
-      status = clWaitForEvents(1, event_ptr[i]);
-      assert(status == CL_SUCCESS);
-      time_elapsed = get_event_time_elapsed(*event_ptr[i]);
-      eopencl->total_time_taken_me[gpu_bsize][i] += time_elapsed / 1000;
-      status = clReleaseEvent(*event_ptr[i]);
-      assert(status == CL_SUCCESS);
-    }
-#endif
   }
 
   // Lowest GPU Block size selected for the merged kernels
@@ -1150,7 +1157,7 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
                                     eopencl->inter_prediction_and_sse[gpu_bsize],
                                     2, global_offset, global_size,
                                     local_size_inter_pred,
-                                    0, NULL, event_ptr[4]);
+                                    0, NULL, event_ptr[event_id++]);
     assert(status == CL_SUCCESS);
 
     // launch rd compute kernel
@@ -1163,31 +1170,8 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
     status = clEnqueueNDRangeKernel(opencl->cmd_queue,
                                     eopencl->rd_calculation_newmv[gpu_bsize],
                                     2, global_offset, global_size, NULL,
-                                    0, NULL, event_ptr[5]);
+                                    0, NULL, event_ptr[event_id++]);
     assert(status == CL_SUCCESS);
-
-#if OPENCL_PROFILING
-    for ( ; i < NUM_KERNELS_ME; i++) {
-      cl_ulong time_elapsed;
-      status = clWaitForEvents(1, event_ptr[i]);
-      assert(status == CL_SUCCESS);
-      time_elapsed = get_event_time_elapsed(*event_ptr[i]);
-      eopencl->total_time_taken_me[gpu_bsize][i] += time_elapsed / 1000;
-      status = clReleaseEvent(*event_ptr[i]);
-      assert(status == CL_SUCCESS);
-    }
-
-    {
-      cl_ulong time_elapsed;
-      status = clWaitForEvents(1, event_ptr[i]);
-      assert(status == CL_SUCCESS);
-      time_elapsed = get_event_time_elapsed(*event_ptr[i]);
-      eopencl->total_time_taken_pro_me[NUM_KERNELS_PRO_ME - 1] +=
-          time_elapsed / 1000;
-      status = clReleaseEvent(*event_ptr[i]);
-      assert(status == CL_SUCCESS);
-    }
-#endif
   }
 
 skip_execution:
@@ -1231,9 +1215,7 @@ void vp9_eopencl_remove(VP9_COMP *cpi) {
   cl_int status;
   int i, j;
 #if OPENCL_PROFILING
-  cl_ulong total[NUM_KERNELS_ME] = {0};
   cl_ulong grand_total = 0;
-  fprintf(stdout, "\nOPENCL PROFILE RESULTS\n");
 #endif
 
   for (j = 0; j < NUM_PING_PONG_BUFFERS; j++) {
@@ -1266,23 +1248,7 @@ void vp9_eopencl_remove(VP9_COMP *cpi) {
   if (status != CL_SUCCESS)
     goto fail;
 
-#if OPENCL_PROFILING
-  fprintf(stdout, "\nPRO ME KERNELS\n");
-  for (i = 0; i < NUM_KERNELS_PRO_ME; i++) {
-    fprintf(stdout, "\tKernel %d - TOTAL = %"PRIu64" microseconds\n", i,
-            eopencl->total_time_taken_pro_me[i]);
-  }
-#endif
-
   for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
-#if OPENCL_PROFILING
-    fprintf(stdout, "\nBlock size idx = %d\n", gpu_bsize);
-    for (i = 0; i < NUM_KERNELS_ME; i++) {
-      total[i] += eopencl->total_time_taken_me[gpu_bsize][i];
-      fprintf(stdout, "\tKernel %d - TOTAL = %"PRIu64" microseconds\n", i,
-              eopencl->total_time_taken_me[gpu_bsize][i]);
-    }
-#endif
     status = clReleaseKernel(eopencl->rd_calculation_zeromv[gpu_bsize]);
     if (status != CL_SUCCESS)
       goto fail;
@@ -1304,19 +1270,39 @@ void vp9_eopencl_remove(VP9_COMP *cpi) {
   }
 
 #if OPENCL_PROFILING
-  fprintf(stdout, "\nTOTAL FOR ALL BLOCK SIZES\n");
-  for (i = 0; i < NUM_KERNELS_ME; i++) {
-    grand_total += total[i];
-    fprintf(stdout,
-            "\tKernel %d - TOTAL ALL BLOCK SIZES = %"PRIu64" microseconds\n",
-            i, total[i]);
+  for (i = 0; i < NUM_PING_PONG_BUFFERS; i++) {
+    int k;
+    for (j = 0; j < 4; j++) {
+      if (eopencl->event_prome[i][j] != NULL) {
+        status = clReleaseEvent(eopencl->event_prome[i][j]);
+        eopencl->event_prome[i][j] = NULL;
+        assert(status == CL_SUCCESS);
+      }
+    }
+    for (j = 0; j < MAX_SUB_FRAMES; j++) {
+      for (k = 0; k < 11; k++) {
+        if (eopencl->event_me[i][j][k] != NULL) {
+          status = clReleaseEvent(eopencl->event_me[i][j][k]);
+          eopencl->event_me[i][j][k] = NULL;
+          assert(status == CL_SUCCESS);
+        }
+      }
+    }
   }
-  total[0] = 0;
-  for (i = 0; i < NUM_KERNELS_PRO_ME; i++) {
-    total[0] += eopencl->total_time_taken_pro_me[i];
+  fprintf(stdout, "\nOPENCL PROFILE RESULTS :: \n");
+  fprintf(stdout, "\nPRO ME KERNELS :: \n");
+  for (i = 0; i < 4; i++) {
+    fprintf(stdout, "\tKernel %d - TOTAL = %"PRIu64" microseconds\n", i,
+            eopencl->total_time_taken_pro_me[i]);
+    grand_total += eopencl->total_time_taken_pro_me[i];
   }
-  fprintf(stdout, "\nPRO ME TOTAL = %"PRIu64"\n", total[0]);
-  grand_total += total[0];
+  fprintf(stdout, "\nPRO ME TOTAL = %"PRIu64"\n", grand_total);
+  fprintf(stdout, "\nSUB FRAMES :: \n");
+  for (j = 0; j < MAX_SUB_FRAMES; j++) {
+    fprintf(stdout, "\tSubframe %d - TOTAL = %"PRIu64" microseconds\n", j,
+            eopencl->total_time_taken_me[j]);
+    grand_total += eopencl->total_time_taken_me[j];
+  }
   fprintf(stdout, "\nGRAND TOTAL = %"PRIu64"\n", grand_total);
 #endif
 
@@ -1793,6 +1779,7 @@ int vp9_eopencl_init(VP9_COMP *cpi) {
   egpu->execute = vp9_eopencl_execute;
   egpu->execute_prologue = vp9_eopencl_execute_prologue;
   egpu->remove = vp9_eopencl_remove;
+  egpu->enc_profile = vp9_eopencl_enc_profile;
   eopencl = egpu->compute_framework;
   eopencl->opencl = opencl;
 
