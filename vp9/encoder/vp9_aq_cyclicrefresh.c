@@ -530,14 +530,25 @@ void vp9_cyclic_refresh_setup(VP9_COMP *const cpi) {
 
     if (cpi->b_async) {
       SubFrameInfo subframe;
+      // In asynchronous encoding, the segment map for first subframe is
+      // predicted so that GPU can start processing it ahead.
+      // Now during the actual encode, make sure this predicted segment map is
+      // used for the first sub frame rows.
       vp9_subframe_init(&subframe, cm, 0);
       memcpy(cpi->segmentation_map, cpi->seg_map_pred[0],
              (subframe.mi_row_end - subframe.mi_row_start) * cm->mi_cols);
+    }
 #if CONFIG_GPU_COMPUTE
+    if (cm->use_gpu && cm->current_video_frame >= ASYNC_FRAME_COUNT_WAIT &&
+        MAX_SUB_FRAMES > 2) {
+      // prepare cr_map and last_coded_q_map for predicting the segment map
+      // for future frame.
       memcpy(cpi->cr_map, cpi->cyclic_refresh->map,
              cm->mi_rows * cm->mi_cols * sizeof(*cpi->cr_map));
-#endif
+      memcpy(cpi->cr_last_coded_q_map, cpi->cyclic_refresh->last_coded_q_map,
+             cm->mi_rows * cm->mi_cols * sizeof(*cpi->cr_last_coded_q_map));
     }
+#endif
   }
 }
 

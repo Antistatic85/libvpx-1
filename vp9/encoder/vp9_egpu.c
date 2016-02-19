@@ -332,7 +332,8 @@ void vp9_gpu_set_mvinfo_offsets(VP9_COMP *const cpi, MACROBLOCK *const x,
 }
 
 static int get_subframe_offset(int idx, int mi_rows, int sb_rows) {
-  const int offset = ((idx * sb_rows) / MAX_SUB_FRAMES) << MI_BLOCK_SIZE_LOG2;
+  const int offset = ((idx * sb_rows + (MAX_SUB_FRAMES - 1)) / MAX_SUB_FRAMES)
+                     << MI_BLOCK_SIZE_LOG2;
   return MIN(offset, mi_rows);
 }
 
@@ -386,14 +387,14 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
   (void) mi_row_step;
   // When gpu is enabled, before encoding the current row, make sure the
   // necessary dependencies are met.
-  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode) {
+  if (x->use_gpu && cpi->sf.use_nonrd_pick_mode) {
     SubFrameInfo subframe;
     int subframe_idx;
 
     subframe_idx = vp9_get_subframe_index(cm, mi_row);
     vp9_subframe_init(&subframe, cm, subframe_idx);
 #if CONFIG_GPU_COMPUTE
-    if (!x->data_parallel_processing && x->use_gpu) {
+    if (!x->data_parallel_processing) {
       if (mi_row == 0 ||
           ((mi_row - mi_row_step == subframe.mi_row_start - MI_BLOCK_SIZE) &&
               subframe_idx == MAX_SUB_FRAMES - 1)) {
@@ -410,7 +411,7 @@ void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step
       }
     }
     if (!frame_is_intra_only(cm)) {
-      if (!x->data_parallel_processing && x->use_gpu) {
+      if (!x->data_parallel_processing) {
         VP9_EGPU *egpu = &cpi->egpu;
 
         egpu->enc_sync_read(cpi, subframe_idx);

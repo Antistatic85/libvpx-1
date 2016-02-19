@@ -38,6 +38,7 @@
 #include "vp9/encoder/vp9_ratectrl.h"
 #include "vp9/encoder/vp9_rd.h"
 #include "vp9/encoder/vp9_tokenize.h"
+#include "vp9/encoder/vp9_encodeframe.h"
 
 #define RD_THRESH_POW      1.25
 #define RD_MULT_EPB_RATIO  64
@@ -330,6 +331,26 @@ void vp9_initialize_rd_consts(VP9_COMP *cpi, MACROBLOCK *const x) {
     }
   }
 }
+
+#if !CONFIG_GPU_COMPUTE
+void vp9_gpu_rewrite_quant_info(VP9_COMP *cpi, MACROBLOCK *x, int q) {
+  VP9_COMMON *const cm = &cpi->common;
+  RD_OPT *const rd = &cpi->rd;
+
+  vp9_set_quantizer(cm, q);
+  if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
+    vp9_gpu_cyclic_refresh_qindex_setup(cpi, cpi->cyclic_refresh, &cm->seg, q);
+  }
+  vp9_set_variance_partition_thresholds(cpi, q);
+  vp9_frame_init_quantizer(cpi, x);
+  rd->RDDIV = RDDIV_BITS;  // In bits (to multiply D by 128).
+  rd->RDMULT = vp9_compute_rd_mult(cpi, cm->base_qindex + cm->y_dc_delta_q);
+
+  x->errorperbit = rd->RDMULT / RD_MULT_EPB_RATIO;
+  x->errorperbit += (x->errorperbit == 0);
+  set_block_thresholds(cm, rd);
+}
+#endif
 
 static void model_rd_norm(int xsq_q10, int *r_q10, int *d_q10) {
   // NOTE: The tables below must be of the same size.

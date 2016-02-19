@@ -52,8 +52,6 @@ int choose_partitioning(struct VP9_COMP *cpi,
                         const TileInfo *const tile,
                         struct macroblock *x,
                         int mi_row, int mi_col);
-void vp9_gpu_rewrite_quant_info(struct VP9_COMP *cpi, struct macroblock *x, int q);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

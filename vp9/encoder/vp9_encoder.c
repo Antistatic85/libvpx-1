@@ -827,7 +827,9 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
   // flag. For example, when the current frame's resolution is different from
   // the previous frame, then 'use_gpu' should be set to '0'. All similar
   // conditions needs to be identified and added.
-  cpi->td.mb.use_gpu = cm->use_gpu = cpi->oxcf.use_gpu;
+  if (cm->height >= 480) {
+    cpi->td.mb.use_gpu = cm->use_gpu = cpi->oxcf.use_gpu;
+  }
   vp9_alloc_compressor_data(cpi);
   if (cm->use_gpu) {
     // TODO(karthick-ittiam): If the GPU initialization fails, the calling
@@ -3934,7 +3936,7 @@ static void encode_frame_to_data_rate(VP9_COMP *cpi,
   vp9_pack_bitstream(cpi, dest, size);
 
 #if CONFIG_GPU_COMPUTE
-    if (cm->use_gpu && cpi->b_async) {
+    if (cpi->td.mb.use_gpu && cpi->b_async) {
       // Before we start tweaking the encoder, common contexts for next frame,
       // make sure the GPU thread has finished its task
       const VPxWorkerInterface * const winterface = vpx_get_worker_interface();

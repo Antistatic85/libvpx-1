@@ -184,6 +184,11 @@ void vp9_setup_pred_block(const struct macroblockd *xd,
 int vp9_get_intra_cost_penalty(int qindex, int qdelta,
                                vpx_bit_depth_t bit_depth);
 
+#if !CONFIG_GPU_COMPUTE
+void vp9_gpu_rewrite_quant_info(struct VP9_COMP *cpi, struct macroblock *x,
+                                int q);
+#endif
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

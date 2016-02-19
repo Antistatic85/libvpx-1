@@ -701,11 +701,9 @@ static int set_gpu_partitioning(VP9_COMP *cpi, MACROBLOCK *x,
 static void vp9_gpu_init_partition_size(VP9_COMP *cpi, MACROBLOCK *x,
                                         char *block_sz_array, int mi_row,
                                         int mi_col) {
-  VP9_COMMON *const cm = &cpi->common;
   int i, j, k;
 
-  if ( mi_col + 8 > cm->mi_cols || mi_row + 8 > cm->mi_rows ||
-      !set_gpu_partitioning(cpi, x, block_sz_array[0], BLOCK_64X64, mi_row,
+  if (!set_gpu_partitioning(cpi, x, block_sz_array[0], BLOCK_64X64, mi_row,
                             mi_col)) {
     for (i = 0; i < 4; ++i) {
       const int x32_idx = ((i & 1) << 2);
@@ -1818,7 +1816,7 @@ static void update_state_rt(VP9_COMP *cpi, ThreadData *td,
     }
   }
 
-  if (cm->use_prev_frame_mvs || x->use_gpu) {
+  if (cm->use_prev_frame_mvs) {
     MV_REF *const frame_mvs =
         cm->cur_frame->mvs + mi_row * cm->mi_cols + mi_col;
     int w, h;
@@ -4067,27 +4065,10 @@ static void encode_sb_rows(VP9_COMP *cpi, ThreadData *const td,
   }
 }
 
-#if !CONFIG_GPU_COMPUTE
-void vp9_gpu_rewrite_quant_info(VP9_COMP *cpi, MACROBLOCK *x, int q) {
-  VP9_COMMON *const cm = &cpi->common;
-
-  if (!frame_is_intra_only(cm)) {
-    vp9_set_high_precision_mv(cpi, q < HIGH_PRECISION_MV_QTHRESH);
-  }
-  vp9_set_quantizer(cm, q);
-  if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
-    vp9_gpu_cyclic_refresh_qindex_setup(cpi, cpi->cyclic_refresh, &cm->seg, q);
-  }
-  vp9_set_variance_partition_thresholds(cpi, q);
-  vp9_frame_init_quantizer(cpi, x);
-  vp9_initialize_rd_consts(cpi, x);
-}
-#endif
-
 static void vp9_gpu_compute(VP9_COMP *cpi, ThreadData *td) {
   VP9_COMMON *const cm = &cpi->common;
 
-  if (cm->use_gpu && cpi->sf.use_nonrd_pick_mode) {
+  if (cpi->td.mb.use_gpu && cpi->sf.use_nonrd_pick_mode) {
     vp9_gpu_predict_inter_qp(cpi);
     if (!frame_is_intra_only(cm)) {
 #if CONFIG_GPU_COMPUTE
@@ -4353,7 +4334,7 @@ static void encode_frame_internal(VP9_COMP *cpi) {
     cpi->time_encode_sb_row += vpx_usec_timer_elapsed(&emr_timer);
 
 #if CONFIG_GPU_COMPUTE
-    if (cm->use_gpu) {
+    if (x->use_gpu) {
       const VPxWorkerInterface * const winterface = vpx_get_worker_interface();
       VPxWorker * const worker = &cpi->egpu_thread_hndl;
 
