@@ -801,17 +801,25 @@ int choose_partitioning(VP9_COMP *cpi,
     assert(yv12 != NULL);
 
     if (x->use_gpu && !x->data_parallel_processing) {
-      const int sb_index = get_sb_index(cm, mi_row, mi_col);
 #if CONFIG_GPU_COMPUTE
-      char *block_sz_array = cpi->gpu_output_pro_me_base[sb_index].block_type;
+      SubFrameInfo subframe;
+      int subframe_idx;
+      char *block_sz_array;
+      int sb_index;
 
-      x->pred_mv[LAST_FRAME] = cpi->gpu_output_pro_me_base[sb_index].pred_mv.as_mv;
+      subframe_idx = vp9_get_subframe_index(cm, mi_row);
+      vp9_subframe_init(&subframe, cm, subframe_idx);
+      sb_index = get_sb_index(cm, mi_row - subframe.mi_row_start, mi_col);
+      block_sz_array = cpi->gpu_output_pro_me[subframe_idx][sb_index].block_type;
+      x->pred_mv[LAST_FRAME] = cpi->gpu_output_pro_me[subframe_idx][sb_index].pred_mv.as_mv;
       x->color_sensitivity[0] =
-          (cpi->gpu_output_pro_me_base[sb_index].color_sensitivity) & 1;
+          (cpi->gpu_output_pro_me[subframe_idx][sb_index].color_sensitivity) & 1;
       x->color_sensitivity[1] =
-          (cpi->gpu_output_pro_me_base[sb_index].color_sensitivity >> 1) & 1;
+          (cpi->gpu_output_pro_me[subframe_idx][sb_index].color_sensitivity >> 1) & 1;
       vp9_gpu_init_partition_size(cpi, x, block_sz_array, mi_row, mi_col);
 #else
+      const int sb_index = get_sb_index(cm, mi_row, mi_col);
+
       x->color_sensitivity[0] = cpi->color_sensitivity[0][sb_index];
       x->color_sensitivity[1] = cpi->color_sensitivity[1][sb_index];
       x->pred_mv[LAST_FRAME] = cpi->pred_mv_map[sb_index];
