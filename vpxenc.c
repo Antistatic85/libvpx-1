@@ -32,10 +32,10 @@
 #include "./ivfenc.h"
 #include "./tools_common.h"
 
-#if CONFIG_VP8_ENCODER || CONFIG_VP9_ENCODER
+#if CONFIG_VP8_ENCODER || CONFIG_VP9_ENCODER || CONFIG_VP10_ENCODER
 #include "vpx/vp8cx.h"
 #endif
-#if CONFIG_VP8_DECODER || CONFIG_VP9_DECODER
+#if CONFIG_VP8_DECODER || CONFIG_VP9_DECODER || CONFIG_VP10_ENCODER
 #include "vpx/vp8dx.h"
 #endif
 
@@ -201,7 +201,7 @@ static const arg_def_t disable_warning_prompt = ARG_DEF(
     "y", "disable-warning-prompt", 0,
     "Display warnings, but do not prompt user to continue.");
 
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
 static const arg_def_t test16bitinternalarg = ARG_DEF(
     NULL, "test-16bit-internal", 0, "Force use of 16 bit internal buffer");
 #endif
@@ -211,7 +211,7 @@ static const arg_def_t *main_args[] = {
   &outputfile, &codecarg, &passes, &pass_arg, &fpf_name, &limit, &skip,
   &deadline, &best_dl, &good_dl, &rt_dl,
   &quietarg, &verbosearg, &psnrarg, &use_webm, &use_ivf, &out_part, &q_hist_n,
-  &rate_hist_n, &disable_warnings, &disable_warning_prompt,
+  &rate_hist_n, &disable_warnings, &disable_warning_prompt, &recontest,
   NULL
 };
 
@@ -253,7 +253,7 @@ static const arg_def_t *global_args[] = {
 #endif
   &timebase, &framerate,
   &error_resilient,
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
   &test16bitinternalarg,
 #endif
   &lag_in_frames, NULL, &gpu,
@@ -376,7 +376,7 @@ static const int vp8_arg_ctrl_map[] = {
 };
 #endif
 
-#if CONFIG_VP9_ENCODER
+#if CONFIG_VP9_ENCODER || CONFIG_VP10_ENCODER
 static const arg_def_t cpu_used_vp9 = ARG_DEF(
     NULL, "cpu-used", 1, "CPU Used (-8..8)");
 static const arg_def_t tile_cols = ARG_DEF(
@@ -421,7 +421,7 @@ static const arg_def_t input_color_space = ARG_DEF_ENUM(
     NULL, "color-space", 1,
     "The color space of input content:", color_space_enum);
 
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
 static const struct arg_enum_list bitdepth_enum[] = {
   {"8",  VPX_BITS_8},
   {"10", VPX_BITS_10},
@@ -445,7 +445,9 @@ static const struct arg_enum_list tune_content_enum[] = {
 
 static const arg_def_t tune_content = ARG_DEF_ENUM(
     NULL, "tune-content", 1, "Tune content type", tune_content_enum);
+#endif
 
+#if CONFIG_VP9_ENCODER
 static const arg_def_t *vp9_args[] = {
   &cpu_used_vp9, &auto_altref, &sharpness, &static_thresh,
   &tile_cols, &tile_rows, &arnr_maxframes, &arnr_strength, &arnr_type,
@@ -454,12 +456,35 @@ static const arg_def_t *vp9_args[] = {
   &frame_parallel_decoding, &aq_mode, &frame_periodic_boost,
   &noise_sens, &tune_content, &input_color_space,
   &min_gf_interval, &max_gf_interval,
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
-  &bitdeptharg, &inbitdeptharg,
-#endif
   NULL
 };
 static const int vp9_arg_ctrl_map[] = {
+  VP8E_SET_CPUUSED, VP8E_SET_ENABLEAUTOALTREF,
+  VP8E_SET_SHARPNESS, VP8E_SET_STATIC_THRESHOLD,
+  VP9E_SET_TILE_COLUMNS, VP9E_SET_TILE_ROWS,
+  VP8E_SET_ARNR_MAXFRAMES, VP8E_SET_ARNR_STRENGTH, VP8E_SET_ARNR_TYPE,
+  VP8E_SET_TUNING, VP8E_SET_CQ_LEVEL, VP8E_SET_MAX_INTRA_BITRATE_PCT,
+  VP9E_SET_MAX_INTER_BITRATE_PCT, VP9E_SET_GF_CBR_BOOST_PCT,
+  VP9E_SET_LOSSLESS, VP9E_SET_FRAME_PARALLEL_DECODING, VP9E_SET_AQ_MODE,
+  VP9E_SET_FRAME_PERIODIC_BOOST, VP9E_SET_NOISE_SENSITIVITY,
+  VP9E_SET_TUNE_CONTENT, VP9E_SET_COLOR_SPACE,
+  VP9E_SET_MIN_GF_INTERVAL, VP9E_SET_MAX_GF_INTERVAL,
+  0
+};
+#endif
+
+#if CONFIG_VP10_ENCODER
+static const arg_def_t *vp10_args[] = {
+  &cpu_used_vp9, &auto_altref, &sharpness, &static_thresh,
+  &tile_cols, &tile_rows, &arnr_maxframes, &arnr_strength, &arnr_type,
+  &tune_ssim, &cq_level, &max_intra_rate_pct, &max_inter_rate_pct,
+  &gf_cbr_boost_pct, &lossless,
+  &frame_parallel_decoding, &aq_mode, &frame_periodic_boost,
+  &noise_sens, &tune_content, &input_color_space,
+  &min_gf_interval, &max_gf_interval,
+  NULL
+};
+static const int vp10_arg_ctrl_map[] = {
   VP8E_SET_CPUUSED, VP8E_SET_ENABLEAUTOALTREF,
   VP8E_SET_SHARPNESS, VP8E_SET_STATIC_THRESHOLD,
   VP9E_SET_TILE_COLUMNS, VP9E_SET_TILE_ROWS,
@@ -501,6 +526,10 @@ void usage_exit(void) {
   fprintf(stderr, "\nVP9 Specific Options:\n");
   arg_show_usage(stderr, vp9_args);
 #endif
+#if CONFIG_VP10_ENCODER
+  fprintf(stderr, "\nVP10 Specific Options:\n");
+  arg_show_usage(stderr, vp10_args);
+#endif
   fprintf(stderr, "\nStream timebase (--timebase):\n"
           "  The desired precision of timestamps in the output, expressed\n"
           "  in fractional seconds. Default is 1/1000.\n");
@@ -521,7 +550,7 @@ void usage_exit(void) {
 
 #define mmin(a, b)  ((a) < (b) ? (a) : (b))
 
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
 static void find_mismatch_high(const vpx_image_t *const img1,
                                const vpx_image_t *const img2,
                                int yloc[4], int uloc[4], int vloc[4]) {
@@ -719,7 +748,7 @@ static int compare_img(const vpx_image_t *const img1,
   match &= (img1->fmt == img2->fmt);
   match &= (img1->d_w == img2->d_w);
   match &= (img1->d_h == img2->d_h);
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
   if (img1->fmt & VPX_IMG_FMT_HIGHBITDEPTH) {
     l_w *= 2;
     c_w *= 2;
@@ -746,14 +775,12 @@ static int compare_img(const vpx_image_t *const img1,
 
 
 #define NELEMENTS(x) (sizeof(x)/sizeof(x[0]))
-#define MAX(x,y) ((x)>(y)?(x):(y))
-#if CONFIG_VP8_ENCODER && !CONFIG_VP9_ENCODER
-#define ARG_CTRL_CNT_MAX NELEMENTS(vp8_arg_ctrl_map)
-#elif !CONFIG_VP8_ENCODER && CONFIG_VP9_ENCODER
+#if CONFIG_VP10_ENCODER
+#define ARG_CTRL_CNT_MAX NELEMENTS(vp10_arg_ctrl_map)
+#elif CONFIG_VP9_ENCODER
 #define ARG_CTRL_CNT_MAX NELEMENTS(vp9_arg_ctrl_map)
 #else
-#define ARG_CTRL_CNT_MAX MAX(NELEMENTS(vp8_arg_ctrl_map), \
-                             NELEMENTS(vp9_arg_ctrl_map))
+#define ARG_CTRL_CNT_MAX NELEMENTS(vp8_arg_ctrl_map)
 #endif
 
 #if !CONFIG_WEBM_IO
@@ -774,7 +801,7 @@ struct stream_config {
   int                       arg_ctrl_cnt;
   int                       write_webm;
   int                       have_kf_max_dist;
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
   // whether to use 16bit internal buffers
   int                       use_16bit_internal;
 #endif
@@ -920,7 +947,7 @@ static void parse_global_config(struct VpxEncoderConfig *global, char **argv) {
   }
   /* Validate global config */
   if (global->passes == 0) {
-#if CONFIG_VP9_ENCODER
+#if CONFIG_VP9_ENCODER || CONFIG_VP10_ENCODER
     // Make default VP9 passes = 2 until there is a better quality 1-pass
     // encoder
     if (global->codec != NULL && global->codec->name != NULL)
@@ -1062,7 +1089,7 @@ static int parse_stream_params(struct VpxEncoderConfig *global,
   static const int        *ctrl_args_map = NULL;
   struct stream_config    *config = &stream->config;
   int                      eos_mark_found = 0;
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
   int                      test_16bit_internal = 0;
 #endif
 
@@ -1077,6 +1104,13 @@ static int parse_stream_params(struct VpxEncoderConfig *global,
   } else if (strcmp(global->codec->name, "vp9") == 0) {
     ctrl_args = vp9_args;
     ctrl_args_map = vp9_arg_ctrl_map;
+#endif
+#if CONFIG_VP10_ENCODER
+  } else if (strcmp(global->codec->name, "vp10") == 0) {
+    // TODO(jingning): Reuse VP9 specific encoder configuration parameters.
+    // Consider to expand this set for VP10 encoder control.
+    ctrl_args = vp10_args;
+    ctrl_args_map = vp10_arg_ctrl_map;
 #endif
   }
 
@@ -1118,7 +1152,7 @@ static int parse_stream_params(struct VpxEncoderConfig *global,
       config->cfg.g_w = arg_parse_uint(&arg);
     } else if (arg_match(&arg, &height, argi)) {
       config->cfg.g_h = arg_parse_uint(&arg);
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
     } else if (arg_match(&arg, &bitdeptharg, argi)) {
       config->cfg.g_bit_depth = arg_parse_enum_or_int(&arg);
     } else if (arg_match(&arg, &inbitdeptharg, argi)) {
@@ -1192,9 +1226,10 @@ static int parse_stream_params(struct VpxEncoderConfig *global,
       config->have_kf_max_dist = 1;
     } else if (arg_match(&arg, &kf_disabled, argi)) {
       config->cfg.kf_mode = VPX_KF_DISABLED;
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
     } else if (arg_match(&arg, &test16bitinternalarg, argi)) {
-      if (strcmp(global->codec->name, "vp9") == 0) {
+      if (strcmp(global->codec->name, "vp9") == 0 ||
+          strcmp(global->codec->name, "vp10") == 0) {
         test_16bit_internal = 1;
       }
 #endif
@@ -1227,8 +1262,9 @@ static int parse_stream_params(struct VpxEncoderConfig *global,
         argj++;
     }
   }
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
-  if (strcmp(global->codec->name, "vp9") == 0) {
+#if CONFIG_VP9_HIGHBITDEPTH
+  if (strcmp(global->codec->name, "vp9") == 0 ||
+      strcmp(global->codec->name, "vp10") == 0) {
     config->use_16bit_internal = test_16bit_internal |
                                  (config->cfg.g_profile > 1);
   }
@@ -1518,7 +1554,7 @@ static void initialize_encoder(struct stream_state *stream,
 
   flags |= global->show_psnr ? VPX_CODEC_USE_PSNR : 0;
   flags |= global->out_part ? VPX_CODEC_USE_OUTPUT_PARTITION : 0;
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
   flags |= stream->config.use_16bit_internal ? VPX_CODEC_USE_HIGHBITDEPTH : 0;
 #endif
 
@@ -1566,7 +1602,7 @@ static void encode_frame(struct stream_state *stream,
                      / cfg->g_timebase.num / global->framerate.num;
 
   /* Scale if necessary */
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
   if (img) {
     if ((img->fmt & VPX_IMG_FMT_HIGHBITDEPTH) &&
         (img->d_w != cfg->g_w || img->d_h != cfg->g_h)) {
@@ -1817,7 +1853,7 @@ static void test_decode(struct stream_state  *stream,
     enc_img = ref_enc.img;
     vpx_codec_control(&stream->decoder, VP9_GET_REFERENCE, &ref_dec);
     dec_img = ref_dec.img;
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
     if ((enc_img.fmt & VPX_IMG_FMT_HIGHBITDEPTH) !=
         (dec_img.fmt & VPX_IMG_FMT_HIGHBITDEPTH)) {
       if (enc_img.fmt & VPX_IMG_FMT_HIGHBITDEPTH) {
@@ -1838,7 +1874,7 @@ static void test_decode(struct stream_state  *stream,
 
   if (!compare_img(&enc_img, &dec_img)) {
     int y[4], u[4], v[4];
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
     if (enc_img.fmt & VPX_IMG_FMT_HIGHBITDEPTH) {
       find_mismatch_high(&enc_img, &dec_img, y, u, v);
     } else {
@@ -1888,7 +1924,7 @@ static void print_time(const char *label, int64_t etl) {
 int main(int argc, const char **argv_) {
   int pass;
   vpx_image_t raw;
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
   vpx_image_t raw_shift;
   int allocated_raw_shift = 0;
   int use_16bit_internal = 0;
@@ -2075,8 +2111,9 @@ int main(int argc, const char **argv_) {
                                     &input.pixel_aspect_ratio));
     FOREACH_STREAM(initialize_encoder(stream, &global));
 
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
-    if (strcmp(global.codec->name, "vp9") == 0) {
+#if CONFIG_VP9_HIGHBITDEPTH
+    if (strcmp(global.codec->name, "vp9") == 0 ||
+        strcmp(global.codec->name, "vp10") == 0) {
       // Check to see if at least one stream uses 16 bit internal.
       // Currently assume that the bit_depths for all streams using
       // highbitdepth are the same.
@@ -2131,7 +2168,7 @@ int main(int argc, const char **argv_) {
         frame_avail = 0;
 
       if (frames_in > global.skip_frames) {
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
         vpx_image_t *frame_to_encode;
         if (input_shift || (use_16bit_internal && input.bit_depth == 8)) {
           assert(use_16bit_internal);
@@ -2292,7 +2329,7 @@ int main(int argc, const char **argv_) {
     });
 #endif
 
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
+#if CONFIG_VP9_HIGHBITDEPTH
   if (allocated_raw_shift)
     vpx_img_free(&raw_shift);
 #endif

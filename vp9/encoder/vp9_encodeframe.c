@@ -1156,7 +1156,7 @@ static void update_state(VP9_COMP *cpi, ThreadData *td,
 
   x->skip = ctx->skip;
   memcpy(x->zcoeff_blk[mbmi->tx_size], ctx->zcoeff_blk,
-         sizeof(uint8_t) * ctx->num_4x4_blk);
+         sizeof(ctx->zcoeff_blk[0]) * ctx->num_4x4_blk);
 
   if (!output_enabled)
     return;
@@ -4588,8 +4588,6 @@ static void encode_superblock(VP9_COMP *cpi, ThreadData *td,
   if (x->skip_encode)
     return;
 
-  set_ref_ptrs(cm, xd, mbmi->ref_frame[0], mbmi->ref_frame[1]);
-
   if (!is_inter_block(mbmi)) {
     int plane;
     mbmi->skip = 1;
@@ -4601,6 +4599,7 @@ static void encode_superblock(VP9_COMP *cpi, ThreadData *td,
   } else {
     int ref;
     const int is_compound = has_second_ref(mbmi);
+    set_ref_ptrs(cm, xd, mbmi->ref_frame[0], mbmi->ref_frame[1]);
     for (ref = 0; ref < 1 + is_compound; ++ref) {
       YV12_BUFFER_CONFIG *cfg = get_ref_frame_buffer(cpi,
                                                      mbmi->ref_frame[ref]);
