@@ -45,7 +45,7 @@ struct vp9_extracfg {
   vpx_bit_depth_t             bit_depth;
   vp9e_tune_content           content;
   vpx_color_space_t           color_space;
-  int                         color_range;
+  vpx_color_range_t           color_range;
   int                         render_width;
   int                         render_height;
 };
@@ -327,7 +327,8 @@ static vpx_codec_err_t validate_config(vpx_codec_alg_priv_t *ctx,
     ERROR("Codec bit-depth 8 not supported in profile > 1");
   }
   RANGE_CHECK(extra_cfg, color_space, VPX_CS_UNKNOWN, VPX_CS_SRGB);
-  RANGE_CHECK(extra_cfg, color_range, 0, 2);
+  RANGE_CHECK(extra_cfg, color_range,
+              VPX_CR_STUDIO_RANGE, VPX_CR_FULL_RANGE);
   return VPX_CODEC_OK;
 }
 
@@ -1271,30 +1272,6 @@ static vpx_image_t *encoder_get_preview(vpx_codec_alg_priv_t *ctx) {
   }
 }
 
-static vpx_codec_err_t ctrl_update_entropy(vpx_codec_alg_priv_t *ctx,
-                                           va_list args) {
-  const int update = va_arg(args, int);
-
-  vp9_update_entropy(ctx->cpi, update);
-  return VPX_CODEC_OK;
-}
-
-static vpx_codec_err_t ctrl_update_reference(vpx_codec_alg_priv_t *ctx,
-                                             va_list args) {
-  const int ref_frame_flags = va_arg(args, int);
-
-  vp9_update_reference(ctx->cpi, ref_frame_flags);
-  return VPX_CODEC_OK;
-}
-
-static vpx_codec_err_t ctrl_use_reference(vpx_codec_alg_priv_t *ctx,
-                                          va_list args) {
-  const int reference_flag = va_arg(args, int);
-
-  vp9_use_as_reference(ctx->cpi, reference_flag);
-  return VPX_CODEC_OK;
-}
-
 static vpx_codec_err_t ctrl_set_roi_map(vpx_codec_alg_priv_t *ctx,
                                         va_list args) {
   (void)ctx;
@@ -1378,6 +1355,7 @@ static vpx_codec_err_t ctrl_set_svc_layer_id(vpx_codec_alg_priv_t *ctx,
   SVC *const svc = &cpi->svc;
 
   svc->first_spatial_layer_to_encode = data->spatial_layer_id;
+  svc->spatial_layer_to_encode = data->spatial_layer_id;
   svc->temporal_layer_id = data->temporal_layer_id;
   // Checks on valid layer_id input.
   if (svc->temporal_layer_id < 0 ||
@@ -1486,9 +1464,6 @@ static vpx_codec_err_t ctrl_set_render_size(vpx_codec_alg_priv_t *ctx,
 
 static vpx_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   {VP8_COPY_REFERENCE,                ctrl_copy_reference},
-  {VP8E_UPD_ENTROPY,                  ctrl_update_entropy},
-  {VP8E_UPD_REFERENCE,                ctrl_update_reference},
-  {VP8E_USE_REFERENCE,                ctrl_use_reference},
 
   // Setters
   {VP8_SET_REFERENCE,                 ctrl_set_reference},

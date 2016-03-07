@@ -1816,6 +1816,11 @@ void vp9_set_target_rate(VP9_COMP *cpi) {
   RATE_CONTROL *const rc = &cpi->rc;
   int target_rate = rc->base_frame_target;
 
+  if (cpi->common.frame_type == KEY_FRAME)
+    target_rate = vp9_rc_clamp_iframe_target_size(cpi, target_rate);
+  else
+    target_rate = vp9_rc_clamp_pframe_target_size(cpi, target_rate);
+
   // Correction to rate target based on prior over or under shoot.
   if (cpi->oxcf.rc_mode == VPX_VBR || cpi->oxcf.rc_mode == VPX_CQ)
     vbr_rate_correction(cpi, &target_rate);
@@ -1828,6 +1833,8 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
   const VP9_COMMON *const cm = &cpi->common;
   RATE_CONTROL *const rc = &cpi->rc;
   RESIZE_ACTION resize_action = NO_RESIZE;
+  int avg_qp_thr1 = 70;
+  int avg_qp_thr2 = 50;
   cpi->resize_scale_num = 1;
   cpi->resize_scale_den = 1;
   // Don't resize on key frame; reset the counters on key frame.
@@ -1836,6 +1843,15 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
     cpi->resize_count = 0;
     return 0;
   }
+
+#if CONFIG_VP9_TEMPORAL_DENOISING
+  // If denoiser is on, apply a smaller qp threshold.
+  if (cpi->oxcf.noise_sensitivity > 0) {
+    avg_qp_thr1 = 60;
+    avg_qp_thr2 = 40;
+  }
+#endif
+
   // Resize based on average buffer underflow and QP over some window.
   // Ignore samples close to key frame, since QP is usually high after key.
   if (cpi->rc.frames_since_key > 1 * cpi->framerate) {
@@ -1852,11 +1868,7 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
       // Resize back up if average QP is low, and we are currently in a resized
       // down state, i.e. 1/2 or 3/4 of original resolution.
       // Currently, use a flag to turn 3/4 resizing feature on/off.
-      if (cpi->resize_state == ORIG &&
-          cpi->resize_buffer_underflow > (cpi->resize_count >> 1)) {
-        resize_action = DOWN_ONEHALF;
-        cpi->resize_state = ONE_HALF;
-      } else if (cpi->resize_buffer_underflow > (cpi->resize_count >> 2)) {
+      if (cpi->resize_buffer_underflow > (cpi->resize_count >> 2)) {
         if (cpi->resize_state == THREE_QUARTER) {
           resize_action = DOWN_ONEHALF;
           cpi->resize_state = ONE_HALF;
@@ -1865,9 +1877,9 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
           cpi->resize_state = ONEHALFONLY_RESIZE ? ONE_HALF : THREE_QUARTER;
         }
       } else if (cpi->resize_state != ORIG &&
-                 avg_qp < 60 * cpi->rc.worst_quality / 100) {
+                 avg_qp < avg_qp_thr1 * cpi->rc.worst_quality / 100) {
         if (cpi->resize_state == THREE_QUARTER ||
-            avg_qp < 40 * cpi->rc.worst_quality / 100 ||
+            avg_qp < avg_qp_thr2 * cpi->rc.worst_quality / 100 ||
             ONEHALFONLY_RESIZE) {
           resize_action = UP_ORIG;
           cpi->resize_state = ORIG;
@@ -1905,9 +1917,6 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
     rc->buffer_level = rc->optimal_buffer_level;
     rc->bits_off_target = rc->optimal_buffer_level;
     rc->this_frame_target = calc_pframe_target_size_one_pass_cbr(cpi);
-    // Reset cyclic refresh parameters.
-    if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ && cm->seg.enabled)
-      vp9_cyclic_refresh_reset_resize(cpi);
     // Get the projected qindex, based on the scaled target frame size (scaled
     // so target_bits_per_mb in vp9_rc_regulate_q will be correct target).
     target_bits_per_frame = (resize_action >= 0) ?

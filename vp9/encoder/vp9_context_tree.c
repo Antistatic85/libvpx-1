@@ -32,13 +32,13 @@ static void alloc_mode_context(VP9_COMMON *cm, int num_4x4_blk,
       CHECK_MEM_ERROR(cm, ctx->src_diff[i][k],
                       vpx_memalign(16, num_pix * sizeof(*ctx->src_diff[i][k])));
       CHECK_MEM_ERROR(cm, ctx->coeff[i][k],
-                      vpx_memalign(16, num_pix * sizeof(*ctx->coeff[i][k])));
+                      vpx_memalign(32, num_pix * sizeof(*ctx->coeff[i][k])));
       CHECK_MEM_ERROR(cm, ctx->qcoeff[i][k],
-                      vpx_memalign(16, num_pix * sizeof(*ctx->qcoeff[i][k])));
+                      vpx_memalign(32, num_pix * sizeof(*ctx->qcoeff[i][k])));
       CHECK_MEM_ERROR(cm, ctx->dqcoeff[i][k],
-                      vpx_memalign(16, num_pix * sizeof(*ctx->dqcoeff[i][k])));
+                      vpx_memalign(32, num_pix * sizeof(*ctx->dqcoeff[i][k])));
       CHECK_MEM_ERROR(cm, ctx->eobs[i][k],
-                      vpx_memalign(16, num_blk * sizeof(*ctx->eobs[i][k])));
+                      vpx_memalign(32, num_blk * sizeof(*ctx->eobs[i][k])));
       ctx->src_diff_pbuf[i][k]= ctx->src_diff[i][k];
       ctx->coeff_pbuf[i][k]   = ctx->coeff[i][k];
       ctx->qcoeff_pbuf[i][k]  = ctx->qcoeff[i][k];

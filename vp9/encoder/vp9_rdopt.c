@@ -272,6 +272,52 @@ static void model_rd_for_sb(VP9_COMP *cpi, BLOCK_SIZE bsize,
   *out_dist_sum = dist_sum << 4;
 }
 
+#if CONFIG_VP9_HIGHBITDEPTH
+int64_t vp9_highbd_block_error_c(const tran_low_t *coeff,
+                                 const tran_low_t *dqcoeff,
+                                 intptr_t block_size,
+                                 int64_t *ssz, int bd) {
+  int i;
+  int64_t error = 0, sqcoeff = 0;
+  int shift = 2 * (bd - 8);
+  int rounding = shift > 0 ? 1 << (shift - 1) : 0;
+
+  for (i = 0; i < block_size; i++) {
+    const int64_t diff = coeff[i] - dqcoeff[i];
+    error +=  diff * diff;
+    sqcoeff += (int64_t)coeff[i] * (int64_t)coeff[i];
+  }
+  assert(error >= 0 && sqcoeff >= 0);
+  error = (error + rounding) >> shift;
+  sqcoeff = (sqcoeff + rounding) >> shift;
+
+  *ssz = sqcoeff;
+  return error;
+}
+
+int64_t vp9_highbd_block_error_8bit_c(const tran_low_t *coeff,
+                                      const tran_low_t *dqcoeff,
+                                      intptr_t block_size,
+                                      int64_t *ssz) {
+  // Note that the C versions of these 2 functions (vp9_block_error and
+  // vp9_highbd_block_error_8bit are the same, but the optimized assembly
+  // routines are not compatible in the non high bitdepth configuration, so
+  // they still cannot share the same name.
+  return vp9_block_error_c(coeff, dqcoeff, block_size, ssz);
+}
+
+static int64_t vp9_highbd_block_error_dispatch(const tran_low_t *coeff,
+                                               const tran_low_t *dqcoeff,
+                                               intptr_t block_size,
+                                               int64_t *ssz, int bd) {
+  if (bd == 8) {
+    return vp9_highbd_block_error_8bit(coeff, dqcoeff, block_size, ssz);
+  } else {
+    return vp9_highbd_block_error(coeff, dqcoeff, block_size, ssz, bd);
+  }
+}
+#endif  // CONFIG_VP9_HIGHBITDEPTH
+
 int64_t vp9_block_error_c(const tran_low_t *coeff, const tran_low_t *dqcoeff,
                           intptr_t block_size, int64_t *ssz) {
   int i;
@@ -299,30 +345,6 @@ int64_t vp9_block_error_fp_c(const int16_t *coeff, const int16_t *dqcoeff,
 
   return error;
 }
-
-#if CONFIG_VP9_HIGHBITDEPTH
-int64_t vp9_highbd_block_error_c(const tran_low_t *coeff,
-                                 const tran_low_t *dqcoeff,
-                                 intptr_t block_size,
-                                 int64_t *ssz, int bd) {
-  int i;
-  int64_t error = 0, sqcoeff = 0;
-  int shift = 2 * (bd - 8);
-  int rounding = shift > 0 ? 1 << (shift - 1) : 0;
-
-  for (i = 0; i < block_size; i++) {
-    const int64_t diff = coeff[i] - dqcoeff[i];
-    error +=  diff * diff;
-    sqcoeff += (int64_t)coeff[i] * (int64_t)coeff[i];
-  }
-  assert(error >= 0 && sqcoeff >= 0);
-  error = (error + rounding) >> shift;
-  sqcoeff = (sqcoeff + rounding) >> shift;
-
-  *ssz = sqcoeff;
-  return error;
-}
-#endif  // CONFIG_VP9_HIGHBITDEPTH
 
 /* The trailing '0' is a terminator which is used inside cost_coeffs() to
  * decide whether to include cost of a trailing EOB node or not (i.e. we
@@ -433,8 +455,9 @@ static void dist_block(MACROBLOCK *x, int plane, int block, TX_SIZE tx_size,
   tran_low_t *const dqcoeff = BLOCK_OFFSET(pd->dqcoeff, block);
 #if CONFIG_VP9_HIGHBITDEPTH
   const int bd = (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) ? xd->bd : 8;
-  *out_dist = vp9_highbd_block_error(coeff, dqcoeff, 16 << ss_txfrm_size,
-                                     &this_sse, bd) >> shift;
+  *out_dist = vp9_highbd_block_error_dispatch(coeff, dqcoeff,
+                                              16 << ss_txfrm_size,
+                                              &this_sse, bd) >> shift;
 #else
   *out_dist = vp9_block_error(coeff, dqcoeff, 16 << ss_txfrm_size,
                               &this_sse) >> shift;
@@ -834,7 +857,7 @@ static int64_t rd_pick_intra4x4block(VP9_COMP *cpi, MACROBLOCK *x,
             ratey += cost_coeffs(x, 0, block, tempa + idx, templ + idy, TX_4X4,
                                  so->scan, so->neighbors,
                                  cpi->sf.use_fast_coef_costing);
-            distortion += vp9_highbd_block_error(
+            distortion += vp9_highbd_block_error_dispatch(
                 coeff, BLOCK_OFFSET(pd->dqcoeff, block),
                 16, &unused, xd->bd) >> 2;
             if (RDCOST(x->rdmult, x->rddiv, ratey, distortion) >= best_rd)
@@ -932,8 +955,13 @@ static int64_t rd_pick_intra4x4block(VP9_COMP *cpi, MACROBLOCK *x,
           ratey += cost_coeffs(x, 0, block, tempa + idx, templ + idy, TX_4X4,
                              so->scan, so->neighbors,
                              cpi->sf.use_fast_coef_costing);
+#if CONFIG_VP9_HIGHBITDEPTH
+          distortion += vp9_highbd_block_error_8bit(
+              coeff, BLOCK_OFFSET(pd->dqcoeff, block), 16, &unused) >> 2;
+#else
           distortion += vp9_block_error(coeff, BLOCK_OFFSET(pd->dqcoeff, block),
                                         16, &unused) >> 2;
+#endif
           if (RDCOST(x->rdmult, x->rddiv, ratey, distortion) >= best_rd)
             goto next;
           vp9_iht4x4_add(tx_type, BLOCK_OFFSET(pd->dqcoeff, block),
@@ -1371,6 +1399,9 @@ static int64_t encode_inter_mb_segment(VP9_COMP *cpi,
   k = i;
   for (idy = 0; idy < height / 4; ++idy) {
     for (idx = 0; idx < width / 4; ++idx) {
+#if CONFIG_VP9_HIGHBITDEPTH
+      const int bd = (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) ? xd->bd : 8;
+#endif
       int64_t ssz, rd, rd1, rd2;
       tran_low_t* coeff;
 
@@ -1380,14 +1411,8 @@ static int64_t encode_inter_mb_segment(VP9_COMP *cpi,
                     coeff, 8);
       vp9_regular_quantize_b_4x4(x, 0, k, so->scan, so->iscan);
 #if CONFIG_VP9_HIGHBITDEPTH
-      if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
-        thisdistortion += vp9_highbd_block_error(coeff,
-                                                 BLOCK_OFFSET(pd->dqcoeff, k),
-                                                 16, &ssz, xd->bd);
-      } else {
-        thisdistortion += vp9_block_error(coeff, BLOCK_OFFSET(pd->dqcoeff, k),
-                                          16, &ssz);
-      }
+      thisdistortion += vp9_highbd_block_error_dispatch(
+          coeff, BLOCK_OFFSET(pd->dqcoeff, k), 16, &ssz, bd);
 #else
       thisdistortion += vp9_block_error(coeff, BLOCK_OFFSET(pd->dqcoeff, k),
                                         16, &ssz);
