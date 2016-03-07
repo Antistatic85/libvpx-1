@@ -50,8 +50,8 @@ static int64_t try_filter_frame(const YV12_BUFFER_CONFIG *sd,
                              cpi->enc_thread_hndl, cpi->max_threads,
                              &cpi->lf_row_sync);
   else
-    vp9_loop_filter_frame(cm->frame_to_show, cm, &cpi->td.mb.e_mbd, filt_level, 1,
-                          partial_frame);
+    vp9_loop_filter_frame(cm->frame_to_show, cm, &cpi->td.mb.e_mbd, filt_level,
+                          1, partial_frame);
 
 #if CONFIG_VP9_HIGHBITDEPTH
   if (cm->use_highbitdepth) {

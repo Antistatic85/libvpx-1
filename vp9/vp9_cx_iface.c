@@ -46,6 +46,8 @@ struct vp9_extracfg {
   vp9e_tune_content           content;
   vpx_color_space_t           color_space;
   int                         color_range;
+  int                         render_width;
+  int                         render_height;
 };
 
 static struct vp9_extracfg default_extra_cfg = {
@@ -73,6 +75,8 @@ static struct vp9_extracfg default_extra_cfg = {
   VP9E_CONTENT_DEFAULT,       // content
   VPX_CS_UNKNOWN,             // color space
   0,                          // color range
+  0,                          // render width
+  0,                          // render height
 };
 
 struct vpx_codec_alg_priv {
@@ -469,6 +473,8 @@ static vpx_codec_err_t set_encoder_config(
 
   oxcf->color_space = extra_cfg->color_space;
   oxcf->color_range = extra_cfg->color_range;
+  oxcf->render_width  = extra_cfg->render_width;
+  oxcf->render_height = extra_cfg->render_height;
   oxcf->arnr_max_frames = extra_cfg->arnr_max_frames;
   oxcf->arnr_strength   = extra_cfg->arnr_strength;
   oxcf->min_gf_interval = extra_cfg->min_gf_interval;
@@ -1371,17 +1377,20 @@ static vpx_codec_err_t ctrl_set_svc_layer_id(vpx_codec_alg_priv_t *ctx,
   VP9_COMP *const cpi = (VP9_COMP *)ctx->cpi;
   SVC *const svc = &cpi->svc;
 
-  svc->spatial_layer_id = data->spatial_layer_id;
+  svc->first_spatial_layer_to_encode = data->spatial_layer_id;
   svc->temporal_layer_id = data->temporal_layer_id;
   // Checks on valid layer_id input.
   if (svc->temporal_layer_id < 0 ||
       svc->temporal_layer_id >= (int)ctx->cfg.ts_number_layers) {
     return VPX_CODEC_INVALID_PARAM;
   }
-  if (svc->spatial_layer_id < 0 ||
-      svc->spatial_layer_id >= (int)ctx->cfg.ss_number_layers) {
+  if (svc->first_spatial_layer_to_encode < 0 ||
+      svc->first_spatial_layer_to_encode >= (int)ctx->cfg.ss_number_layers) {
     return VPX_CODEC_INVALID_PARAM;
   }
+  // First spatial layer to encode not implemented for two-pass.
+  if (is_two_pass_svc(cpi) && svc->first_spatial_layer_to_encode > 0)
+    return VPX_CODEC_INVALID_PARAM;
   return VPX_CODEC_OK;
 }
 
@@ -1466,6 +1475,15 @@ static vpx_codec_err_t ctrl_set_color_range(vpx_codec_alg_priv_t *ctx,
   return update_extra_cfg(ctx, &extra_cfg);
 }
 
+static vpx_codec_err_t ctrl_set_render_size(vpx_codec_alg_priv_t *ctx,
+                                            va_list args) {
+  struct vp9_extracfg extra_cfg = ctx->extra_cfg;
+  int *const render_size = va_arg(args, int *);
+  extra_cfg.render_width  = render_size[0];
+  extra_cfg.render_height = render_size[1];
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
 static vpx_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   {VP8_COPY_REFERENCE,                ctrl_copy_reference},
   {VP8E_UPD_ENTROPY,                  ctrl_update_entropy},
@@ -1507,6 +1525,7 @@ static vpx_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   {VP9E_SET_MIN_GF_INTERVAL,          ctrl_set_min_gf_interval},
   {VP9E_SET_MAX_GF_INTERVAL,          ctrl_set_max_gf_interval},
   {VP9E_SET_SVC_REF_FRAME_CONFIG,     ctrl_set_svc_ref_frame_config},
+  {VP9E_SET_RENDER_SIZE,              ctrl_set_render_size},
 
   // Getters
   {VP8E_GET_LAST_QUANTIZER,           ctrl_get_quantizer},

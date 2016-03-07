@@ -1848,8 +1848,10 @@ static void encode_b_rt(VP9_COMP *cpi, ThreadData *td,
   update_state_rt(cpi, td, ctx, mi_row, mi_col, bsize);
 
 #if CONFIG_VP9_TEMPORAL_DENOISING
-  if (cpi->oxcf.noise_sensitivity > 0 && output_enabled &&
-      cpi->common.frame_type != KEY_FRAME) {
+  if (cpi->oxcf.noise_sensitivity > 0 &&
+      output_enabled &&
+      cpi->common.frame_type != KEY_FRAME &&
+      cpi->resize_pending == 0) {
     vp9_denoiser_denoise(&cpi->denoiser, x, mi_row, mi_col,
                          VPXMAX(BLOCK_8X8, bsize), ctx);
   }
@@ -4647,5 +4649,7 @@ static void encode_superblock(VP9_COMP *cpi, ThreadData *td,
     }
     ++td->counts->tx.tx_totals[mbmi->tx_size];
     ++td->counts->tx.tx_totals[get_uv_tx_size(mbmi, &xd->plane[1])];
+    if (cm->seg.enabled && cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ)
+      vp9_cyclic_refresh_update_sb_postencode(cpi, mbmi, mi_row, mi_col, bsize);
   }
 }

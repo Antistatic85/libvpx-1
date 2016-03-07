@@ -653,6 +653,7 @@ static void choose_tx_size_from_rd(VP10_COMP *cpi, MACROBLOCK *x,
     } else if (s[n]) {
       if (is_inter_block(mbmi)) {
         rd[n][0] = rd[n][1] = RDCOST(x->rdmult, x->rddiv, s1, sse[n]);
+        r[n][1] -= r_tx_size;
       } else {
         rd[n][0] = RDCOST(x->rdmult, x->rddiv, s1, sse[n]);
         rd[n][1] = RDCOST(x->rdmult, x->rddiv, s1 + r_tx_size, sse[n]);
@@ -660,6 +661,11 @@ static void choose_tx_size_from_rd(VP10_COMP *cpi, MACROBLOCK *x,
     } else {
       rd[n][0] = RDCOST(x->rdmult, x->rddiv, r[n][0] + s0, d[n]);
       rd[n][1] = RDCOST(x->rdmult, x->rddiv, r[n][1] + s0, d[n]);
+    }
+
+    if (is_inter_block(mbmi) && !xd->lossless && !s[n] && sse[n] != INT64_MAX) {
+      rd[n][0] = VPXMIN(rd[n][0], RDCOST(x->rdmult, x->rddiv, s1, sse[n]));
+      rd[n][1] = VPXMIN(rd[n][1], RDCOST(x->rdmult, x->rddiv, s1, sse[n]));
     }
 
     // Early termination in transform size search.
@@ -792,8 +798,7 @@ static int64_t rd_pick_intra4x4block(VP10_COMP *cpi, MACROBLOCK *x,
           if (xd->lossless) {
             TX_TYPE tx_type = get_tx_type(PLANE_TYPE_Y, xd, block);
             const scan_order *so = get_scan(TX_4X4, tx_type);
-            vp10_highbd_fwd_txfm_4x4(src_diff, coeff, 8, DCT_DCT,
-                                     vp10_highbd_fwht4x4);
+            vp10_highbd_fwd_txfm_4x4(src_diff, coeff, 8, DCT_DCT, 1);
             vp10_regular_quantize_b_4x4(x, 0, block, so->scan, so->iscan);
             ratey += cost_coeffs(x, 0, block, tempa + idx, templ + idy, TX_4X4,
                                  so->scan, so->neighbors,
@@ -802,14 +807,12 @@ static int64_t rd_pick_intra4x4block(VP10_COMP *cpi, MACROBLOCK *x,
               goto next_highbd;
             vp10_highbd_inv_txfm_add_4x4(BLOCK_OFFSET(pd->dqcoeff, block),
                                          dst, dst_stride, p->eobs[block],
-                                         xd->bd, DCT_DCT,
-                                         vp10_highbd_iwht4x4_add);
+                                         xd->bd, DCT_DCT, 1);
           } else {
             int64_t unused;
             TX_TYPE tx_type = get_tx_type(PLANE_TYPE_Y, xd, block);
             const scan_order *so = get_scan(TX_4X4, tx_type);
-            vp10_highbd_fwd_txfm_4x4(src_diff, coeff, 8, tx_type,
-                                     vpx_highbd_fdct4x4);
+            vp10_highbd_fwd_txfm_4x4(src_diff, coeff, 8, tx_type, 0);
             vp10_regular_quantize_b_4x4(x, 0, block, so->scan, so->iscan);
             ratey += cost_coeffs(x, 0, block, tempa + idx, templ + idy, TX_4X4,
                                  so->scan, so->neighbors,
@@ -821,8 +824,7 @@ static int64_t rd_pick_intra4x4block(VP10_COMP *cpi, MACROBLOCK *x,
               goto next_highbd;
             vp10_highbd_inv_txfm_add_4x4(BLOCK_OFFSET(pd->dqcoeff, block),
                                          dst, dst_stride, p->eobs[block],
-                                         xd->bd, tx_type,
-                                         vp10_highbd_idct4x4_add);
+                                         xd->bd, tx_type, 0);
           }
         }
       }
@@ -895,7 +897,7 @@ static int64_t rd_pick_intra4x4block(VP10_COMP *cpi, MACROBLOCK *x,
         if (xd->lossless) {
           TX_TYPE tx_type = get_tx_type(PLANE_TYPE_Y, xd, block);
           const scan_order *so = get_scan(TX_4X4, tx_type);
-          vp10_fwd_txfm_4x4(src_diff, coeff, 8, DCT_DCT, vp10_fwht4x4);
+          vp10_fwd_txfm_4x4(src_diff, coeff, 8, DCT_DCT, 1);
           vp10_regular_quantize_b_4x4(x, 0, block, so->scan, so->iscan);
           ratey += cost_coeffs(x, 0, block, tempa + idx, templ + idy, TX_4X4,
                                so->scan, so->neighbors,
@@ -903,13 +905,12 @@ static int64_t rd_pick_intra4x4block(VP10_COMP *cpi, MACROBLOCK *x,
           if (RDCOST(x->rdmult, x->rddiv, ratey, distortion) >= best_rd)
             goto next;
           vp10_inv_txfm_add_4x4(BLOCK_OFFSET(pd->dqcoeff, block),
-                                dst, dst_stride, p->eobs[block], DCT_DCT,
-                                vp10_iwht4x4_add);
+                                dst, dst_stride, p->eobs[block], DCT_DCT, 1);
         } else {
           int64_t unused;
           TX_TYPE tx_type = get_tx_type(PLANE_TYPE_Y, xd, block);
           const scan_order *so = get_scan(TX_4X4, tx_type);
-          vp10_fwd_txfm_4x4(src_diff, coeff, 8, tx_type, vpx_fdct4x4);
+          vp10_fwd_txfm_4x4(src_diff, coeff, 8, tx_type, 0);
           vp10_regular_quantize_b_4x4(x, 0, block, so->scan, so->iscan);
           ratey += cost_coeffs(x, 0, block, tempa + idx, templ + idy, TX_4X4,
                              so->scan, so->neighbors,
@@ -919,8 +920,7 @@ static int64_t rd_pick_intra4x4block(VP10_COMP *cpi, MACROBLOCK *x,
           if (RDCOST(x->rdmult, x->rddiv, ratey, distortion) >= best_rd)
             goto next;
           vp10_inv_txfm_add_4x4(BLOCK_OFFSET(pd->dqcoeff, block),
-                                dst, dst_stride, p->eobs[block], tx_type,
-                                vp10_idct4x4_add);
+                                dst, dst_stride, p->eobs[block], tx_type, 0);
         }
       }
     }
@@ -1284,6 +1284,8 @@ static int64_t encode_inter_mb_segment(VP10_COMP *cpi,
   const int width = 4 * num_4x4_blocks_wide_lookup[plane_bsize];
   const int height = 4 * num_4x4_blocks_high_lookup[plane_bsize];
   int idx, idy;
+  void (*fwd_txm4x4)(const int16_t *input, tran_low_t *output, int stride);
+
   const uint8_t *const src =
       &p->src.buf[vp10_raster_block_offset(BLOCK_8X8, i, p->src.stride)];
   uint8_t *const dst = &pd->dst.buf[vp10_raster_block_offset(BLOCK_8X8, i,
@@ -1294,6 +1296,16 @@ static int64_t encode_inter_mb_segment(VP10_COMP *cpi,
   const scan_order *so = get_scan(TX_4X4, tx_type);
 
   vp10_build_inter_predictor_sub8x8(xd, 0, i, ir, ic, mi_row, mi_col);
+
+#if CONFIG_VP9_HIGHBITDEPTH
+  if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
+    fwd_txm4x4 = xd->lossless ? vp10_highbd_fwht4x4 : vpx_highbd_fdct4x4;
+  } else {
+    fwd_txm4x4 = xd->lossless ? vp10_fwht4x4 : vpx_fdct4x4;
+  }
+#else
+  fwd_txm4x4 = xd->lossless ? vp10_fwht4x4 : vpx_fdct4x4;
+#endif  // CONFIG_VP9_HIGHBITDEPTH
 
 #if CONFIG_VP9_HIGHBITDEPTH
   if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
@@ -1319,8 +1331,8 @@ static int64_t encode_inter_mb_segment(VP10_COMP *cpi,
 
       k += (idy * 2 + idx);
       coeff = BLOCK_OFFSET(p->coeff, k);
-      x->fwd_txm4x4(vp10_raster_block_offset_int16(BLOCK_8X8, k, p->src_diff),
-                    coeff, 8);
+      fwd_txm4x4(vp10_raster_block_offset_int16(BLOCK_8X8, k, p->src_diff),
+                 coeff, 8);
       vp10_regular_quantize_b_4x4(x, 0, k, so->scan, so->iscan);
 #if CONFIG_VP9_HIGHBITDEPTH
       if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {

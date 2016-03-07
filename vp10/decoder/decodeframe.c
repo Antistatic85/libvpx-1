@@ -124,6 +124,18 @@ static void read_inter_mode_probs(FRAME_CONTEXT *fc, vpx_reader *r) {
       vp10_diff_update_prob(r, &fc->inter_mode_probs[i][j]);
 }
 
+#if CONFIG_MISC_FIXES
+static REFERENCE_MODE read_frame_reference_mode(const VP10_COMMON *cm,
+    struct vpx_read_bit_buffer *rb) {
+  if (is_compound_reference_allowed(cm)) {
+    return vpx_rb_read_bit(rb) ? REFERENCE_MODE_SELECT
+                               : (vpx_rb_read_bit(rb) ? COMPOUND_REFERENCE
+                                                      : SINGLE_REFERENCE);
+  } else {
+    return SINGLE_REFERENCE;
+  }
+}
+#else
 static REFERENCE_MODE read_frame_reference_mode(const VP10_COMMON *cm,
                                                 vpx_reader *r) {
   if (is_compound_reference_allowed(cm)) {
@@ -134,6 +146,7 @@ static REFERENCE_MODE read_frame_reference_mode(const VP10_COMMON *cm,
     return SINGLE_REFERENCE;
   }
 }
+#endif
 
 static void read_frame_reference_mode_probs(VP10_COMMON *cm, vpx_reader *r) {
   FRAME_CONTEXT *const fc = cm->fc;
@@ -203,9 +216,7 @@ static void inverse_transform_block_inter(MACROBLOCKD* xd, int plane,
       switch (tx_size) {
         case TX_4X4:
           vp10_highbd_inv_txfm_add_4x4(dqcoeff, dst, stride, eob, xd->bd,
-                                       tx_type, xd->lossless ?
-                                           vp10_highbd_iwht4x4_add :
-                                           vp10_highbd_idct4x4_add);
+                                       tx_type, xd->lossless);
           break;
         case TX_8X8:
           vp10_highbd_inv_txfm_add_8x8(dqcoeff, dst, stride, eob, xd->bd,
@@ -228,8 +239,7 @@ static void inverse_transform_block_inter(MACROBLOCKD* xd, int plane,
       switch (tx_size) {
         case TX_4X4:
           vp10_inv_txfm_add_4x4(dqcoeff, dst, stride, eob, tx_type,
-                                xd->lossless ? vp10_iwht4x4_add :
-                                    vp10_idct4x4_add);
+                                xd->lossless);
           break;
         case TX_8X8:
           vp10_inv_txfm_add_8x8(dqcoeff, dst, stride, eob, tx_type);
@@ -274,9 +284,7 @@ static void inverse_transform_block_intra(MACROBLOCKD* xd, int plane,
       switch (tx_size) {
         case TX_4X4:
           vp10_highbd_inv_txfm_add_4x4(dqcoeff, dst, stride, eob, xd->bd,
-                                       tx_type, xd->lossless ?
-                                           vp10_highbd_iwht4x4_add :
-                                           vp10_highbd_idct4x4_add);
+                                       tx_type, xd->lossless);
           break;
         case TX_8X8:
           vp10_highbd_inv_txfm_add_8x8(dqcoeff, dst, stride, eob, xd->bd,
@@ -299,8 +307,7 @@ static void inverse_transform_block_intra(MACROBLOCKD* xd, int plane,
       switch (tx_size) {
         case TX_4X4:
           vp10_inv_txfm_add_4x4(dqcoeff, dst, stride, eob, tx_type,
-                                xd->lossless ? vp10_iwht4x4_add :
-                                    vp10_idct4x4_add);
+                                xd->lossless);
           break;
         case TX_8X8:
           vp10_inv_txfm_add_8x8(dqcoeff, dst, stride, eob, tx_type);
@@ -1118,7 +1125,8 @@ static void setup_loopfilter(struct loopfilter *lf,
 }
 
 static INLINE int read_delta_q(struct vpx_read_bit_buffer *rb) {
-  return vpx_rb_read_bit(rb) ? vpx_rb_read_inv_signed_literal(rb, 4) : 0;
+  return vpx_rb_read_bit(rb) ?
+      vpx_rb_read_inv_signed_literal(rb, CONFIG_MISC_FIXES ? 6 : 4) : 0;
 }
 
 static void setup_quantization(VP10_COMMON *const cm, MACROBLOCKD *const xd,
@@ -1169,12 +1177,12 @@ static INTERP_FILTER read_interp_filter(struct vpx_read_bit_buffer *rb) {
   return vpx_rb_read_bit(rb) ? SWITCHABLE : vpx_rb_read_literal(rb, 2);
 }
 
-static void setup_display_size(VP10_COMMON *cm,
-                               struct vpx_read_bit_buffer *rb) {
-  cm->display_width = cm->width;
-  cm->display_height = cm->height;
+static void setup_render_size(VP10_COMMON *cm,
+                              struct vpx_read_bit_buffer *rb) {
+  cm->render_width = cm->width;
+  cm->render_height = cm->height;
   if (vpx_rb_read_bit(rb))
-    vp10_read_frame_size(rb, &cm->display_width, &cm->display_height);
+    vp10_read_frame_size(rb, &cm->render_width, &cm->render_height);
 }
 
 static void resize_mv_buffer(VP10_COMMON *cm) {
@@ -1222,7 +1230,7 @@ static void setup_frame_size(VP10_COMMON *cm, struct vpx_read_bit_buffer *rb) {
   BufferPool *const pool = cm->buffer_pool;
   vp10_read_frame_size(rb, &width, &height);
   resize_context_buffers(cm, width, height);
-  setup_display_size(cm, rb);
+  setup_render_size(cm, rb);
 
   lock_buffer_pool(pool);
   if (vpx_realloc_frame_buffer(
@@ -1246,6 +1254,8 @@ static void setup_frame_size(VP10_COMMON *cm, struct vpx_read_bit_buffer *rb) {
   pool->frame_bufs[cm->new_fb_idx].buf.bit_depth = (unsigned int)cm->bit_depth;
   pool->frame_bufs[cm->new_fb_idx].buf.color_space = cm->color_space;
   pool->frame_bufs[cm->new_fb_idx].buf.color_range = cm->color_range;
+  pool->frame_bufs[cm->new_fb_idx].buf.render_width  = cm->render_width;
+  pool->frame_bufs[cm->new_fb_idx].buf.render_height = cm->render_height;
 }
 
 static INLINE int valid_ref_frame_img_fmt(vpx_bit_depth_t ref_bit_depth,
@@ -1267,13 +1277,21 @@ static void setup_frame_size_with_refs(VP10_COMMON *cm,
       YV12_BUFFER_CONFIG *const buf = cm->frame_refs[i].buf;
       width = buf->y_crop_width;
       height = buf->y_crop_height;
+#if CONFIG_MISC_FIXES
+      cm->render_width = buf->render_width;
+      cm->render_height = buf->render_height;
+#endif
       found = 1;
       break;
     }
   }
 
-  if (!found)
+  if (!found) {
     vp10_read_frame_size(rb, &width, &height);
+#if CONFIG_MISC_FIXES
+    setup_render_size(cm, rb);
+#endif
+  }
 
   if (width <= 0 || height <= 0)
     vpx_internal_error(&cm->error, VPX_CODEC_CORRUPT_FRAME,
@@ -1304,7 +1322,9 @@ static void setup_frame_size_with_refs(VP10_COMMON *cm,
   }
 
   resize_context_buffers(cm, width, height);
-  setup_display_size(cm, rb);
+#if !CONFIG_MISC_FIXES
+  setup_render_size(cm, rb);
+#endif
 
   lock_buffer_pool(pool);
   if (vpx_realloc_frame_buffer(
@@ -1328,6 +1348,8 @@ static void setup_frame_size_with_refs(VP10_COMMON *cm,
   pool->frame_bufs[cm->new_fb_idx].buf.bit_depth = (unsigned int)cm->bit_depth;
   pool->frame_bufs[cm->new_fb_idx].buf.color_space = cm->color_space;
   pool->frame_bufs[cm->new_fb_idx].buf.color_range = cm->color_range;
+  pool->frame_bufs[cm->new_fb_idx].buf.render_width  = cm->render_width;
+  pool->frame_bufs[cm->new_fb_idx].buf.render_height = cm->render_height;
 }
 
 static void setup_tile_info(VP10_COMMON *cm, struct vpx_read_bit_buffer *rb) {
@@ -1968,6 +1990,8 @@ static size_t read_uncompressed_header(VP10Decoder *pbi,
 #endif
   get_frame_new_buffer(cm)->color_space = cm->color_space;
   get_frame_new_buffer(cm)->color_range = cm->color_range;
+  get_frame_new_buffer(cm)->render_width  = cm->render_width;
+  get_frame_new_buffer(cm)->render_height = cm->render_height;
 
   if (pbi->need_resync) {
     vpx_internal_error(&cm->error, VPX_CODEC_CORRUPT_FRAME,
@@ -2029,6 +2053,7 @@ static size_t read_uncompressed_header(VP10Decoder *pbi,
   setup_segmentation_dequant(cm);
 #if CONFIG_MISC_FIXES
   cm->tx_mode = xd->lossless ? ONLY_4X4 : read_tx_mode(rb);
+  cm->reference_mode = read_frame_reference_mode(cm, rb);
 #endif
 
   setup_tile_info(cm, rb);
@@ -2078,7 +2103,9 @@ static int read_compressed_header(VP10Decoder *pbi, const uint8_t *data,
     for (i = 0; i < INTRA_INTER_CONTEXTS; i++)
       vp10_diff_update_prob(&r, &fc->intra_inter_prob[i]);
 
+#if !CONFIG_MISC_FIXES
     cm->reference_mode = read_frame_reference_mode(cm, &r);
+#endif
     if (cm->reference_mode != SINGLE_REFERENCE)
       setup_compound_reference_mode(cm);
     read_frame_reference_mode_probs(cm, &r);

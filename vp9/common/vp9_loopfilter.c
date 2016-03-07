@@ -776,7 +776,7 @@ static void build_masks(const loop_filter_info_n *const lfi_n,
   // an 8x8 in that the internal ones can be skipped and don't depend on
   // the prediction block size.
   if (tx_size_y == TX_4X4)
-    *int_4x4_y |= (size_mask[block_size] & 0xffffffffffffffffULL) << shift_y;
+    *int_4x4_y |= size_mask[block_size] << shift_y;
 
   if (tx_size_uv == TX_4X4)
     *int_4x4_uv |= (size_mask_uv[block_size] & 0xffff) << shift_uv;
@@ -822,7 +822,7 @@ static void build_y_mask(const loop_filter_info_n *const lfi_n,
               left_64x64_txform_mask[tx_size_y]) << shift_y;
 
   if (tx_size_y == TX_4X4)
-    *int_4x4_y |= (size_mask[block_size] & 0xffffffffffffffffULL) << shift_y;
+    *int_4x4_y |= size_mask[block_size] << shift_y;
 }
 
 // This function sets up the bit masks for the entire 64x64 region represented
@@ -1189,9 +1189,7 @@ void vp9_filter_block_plane_non420(VP9_COMMON *cm,
       const int block_edge_above = (num_4x4_blocks_high_lookup[sb_type] > 1) ?
           !(r & (num_8x8_blocks_high_lookup[sb_type] - 1)) : 1;
       const int skip_this_r = skip_this && !block_edge_above;
-      const TX_SIZE tx_size = (plane->plane_type == PLANE_TYPE_UV)
-                            ? get_uv_tx_size(&mi[0].mbmi, plane)
-                            : mi[0].mbmi.tx_size;
+      const TX_SIZE tx_size = get_uv_tx_size(&mi[0].mbmi, plane);
       const int skip_border_4x4_c = ss_x && mi_col + c == cm->mi_cols - 1;
       const int skip_border_4x4_r = ss_y && mi_row + r == cm->mi_rows - 1;
 
@@ -1438,11 +1436,9 @@ void vp9_filter_block_plane_ss11(VP9_COMMON *const cm,
 
   // Vertical pass: do 2 rows at one time
   for (r = 0; r < MI_BLOCK_SIZE && mi_row + r < cm->mi_rows; r += 4) {
-    if (plane->plane_type == 1) {
-      for (c = 0; c < (MI_BLOCK_SIZE >> 1); c++) {
-        lfm->lfl_uv[(r << 1) + c] = lfm->lfl_y[(r << 3) + (c << 1)];
-        lfm->lfl_uv[((r + 2) << 1) + c] = lfm->lfl_y[((r + 2) << 3) + (c << 1)];
-      }
+    for (c = 0; c < (MI_BLOCK_SIZE >> 1); c++) {
+      lfm->lfl_uv[(r << 1) + c] = lfm->lfl_y[(r << 3) + (c << 1)];
+      lfm->lfl_uv[((r + 2) << 1) + c] = lfm->lfl_y[((r + 2) << 3) + (c << 1)];
     }
 
     {

@@ -733,7 +733,7 @@ static void encode_loopfilter(struct loopfilter *lf,
 static void write_delta_q(struct vpx_write_bit_buffer *wb, int delta_q) {
   if (delta_q != 0) {
     vpx_wb_write_bit(wb, 1);
-    vpx_wb_write_inv_signed_literal(wb, delta_q, 4);
+    vpx_wb_write_inv_signed_literal(wb, delta_q, CONFIG_MISC_FIXES ? 6 : 4);
   } else {
     vpx_wb_write_bit(wb, 0);
   }
@@ -982,14 +982,14 @@ static size_t encode_tiles(VP10_COMP *cpi, uint8_t *data_ptr) {
   return total_size;
 }
 
-static void write_display_size(const VP10_COMMON *cm,
-                               struct vpx_write_bit_buffer *wb) {
-  const int scaling_active = cm->width != cm->display_width ||
-                             cm->height != cm->display_height;
+static void write_render_size(const VP10_COMMON *cm,
+                              struct vpx_write_bit_buffer *wb) {
+  const int scaling_active = cm->width != cm->render_width ||
+                             cm->height != cm->render_height;
   vpx_wb_write_bit(wb, scaling_active);
   if (scaling_active) {
-    vpx_wb_write_literal(wb, cm->display_width - 1, 16);
-    vpx_wb_write_literal(wb, cm->display_height - 1, 16);
+    vpx_wb_write_literal(wb, cm->render_width - 1, 16);
+    vpx_wb_write_literal(wb, cm->render_height - 1, 16);
   }
 }
 
@@ -998,7 +998,7 @@ static void write_frame_size(const VP10_COMMON *cm,
   vpx_wb_write_literal(wb, cm->width - 1, 16);
   vpx_wb_write_literal(wb, cm->height - 1, 16);
 
-  write_display_size(cm, wb);
+  write_render_size(cm, wb);
 }
 
 static void write_frame_size_with_refs(VP10_COMP *cpi,
@@ -1013,6 +1013,10 @@ static void write_frame_size_with_refs(VP10_COMP *cpi,
     if (cfg != NULL) {
       found = cm->width == cfg->y_crop_width &&
               cm->height == cfg->y_crop_height;
+#if CONFIG_MISC_FIXES
+      found &= cm->render_width == cfg->render_width &&
+               cm->render_height == cfg->render_height;
+#endif
     }
     vpx_wb_write_bit(wb, found);
     if (found) {
@@ -1023,9 +1027,15 @@ static void write_frame_size_with_refs(VP10_COMP *cpi,
   if (!found) {
     vpx_wb_write_literal(wb, cm->width - 1, 16);
     vpx_wb_write_literal(wb, cm->height - 1, 16);
+
+#if CONFIG_MISC_FIXES
+    write_render_size(cm, wb);
+#endif
   }
 
-  write_display_size(cm, wb);
+#if !CONFIG_MISC_FIXES
+  write_render_size(cm, wb);
+#endif
 }
 
 static void write_sync_code(struct vpx_write_bit_buffer *wb) {
@@ -1169,6 +1179,14 @@ static void write_uncompressed_header(VP10_COMP *cpi,
     cm->tx_mode = TX_4X4;
   else
     write_txfm_mode(cm->tx_mode, wb);
+  if (cpi->allow_comp_inter_inter) {
+    const int use_hybrid_pred = cm->reference_mode == REFERENCE_MODE_SELECT;
+    const int use_compound_pred = cm->reference_mode != SINGLE_REFERENCE;
+
+    vpx_wb_write_bit(wb, use_hybrid_pred);
+    if (!use_hybrid_pred)
+      vpx_wb_write_bit(wb, use_compound_pred);
+  }
 #endif
 
   write_tile_info(cm, wb);
@@ -1208,8 +1226,9 @@ static size_t write_compressed_header(VP10_COMP *cpi, uint8_t *data) {
                                 counts->intra_inter[i]);
 
     if (cpi->allow_comp_inter_inter) {
-      const int use_compound_pred = cm->reference_mode != SINGLE_REFERENCE;
       const int use_hybrid_pred = cm->reference_mode == REFERENCE_MODE_SELECT;
+#if !CONFIG_MISC_FIXES
+      const int use_compound_pred = cm->reference_mode != SINGLE_REFERENCE;
 
       vpx_write_bit(&header_bc, use_compound_pred);
       if (use_compound_pred) {
@@ -1219,6 +1238,12 @@ static size_t write_compressed_header(VP10_COMP *cpi, uint8_t *data) {
             vp10_cond_prob_diff_update(&header_bc, &fc->comp_inter_prob[i],
                                       counts->comp_inter[i]);
       }
+#else
+      if (use_hybrid_pred)
+        for (i = 0; i < COMP_INTER_CONTEXTS; i++)
+          vp10_cond_prob_diff_update(&header_bc, &fc->comp_inter_prob[i],
+                                     counts->comp_inter[i]);
+#endif
     }
 
     if (cm->reference_mode != COMPOUND_REFERENCE) {

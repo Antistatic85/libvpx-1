@@ -201,6 +201,10 @@ disabled(){
   eval test "x\$$1" = "xno"
 }
 
+# Iterates through positional parameters, checks to confirm the parameter has
+# not been explicitly (force) disabled, and enables the setting controlled by
+# the parameter when the setting is not disabled.
+# Note: Does NOT alter RTCD generation options ($RTCD_OPTIONS).
 soft_enable() {
   for var in $*; do
     if ! disabled $var; then
@@ -210,6 +214,10 @@ soft_enable() {
   done
 }
 
+# Iterates through positional parameters, checks to confirm the parameter has
+# not been explicitly (force) enabled, and disables the setting controlled by
+# the parameter when the setting is not enabled.
+# Note: Does NOT alter RTCD generation options ($RTCD_OPTIONS).
 soft_disable() {
   for var in $*; do
     if ! enabled $var; then
@@ -629,6 +637,11 @@ show_darwin_sdk_path() {
     xcodebuild -sdk $1 -version Path 2>/dev/null
 }
 
+# Print the major version number of the Darwin SDK specified by $1.
+show_darwin_sdk_major_version() {
+  xcrun --sdk $1 --show-sdk-version 2>/dev/null | cut -d. -f1
+}
+
 process_common_toolchain() {
   if [ -z "$toolchain" ]; then
     gcctarget="${CHOST:-$(gcc -dumpmachine 2> /dev/null)}"
@@ -740,7 +753,15 @@ process_common_toolchain() {
   # Handle darwin variants. Newer SDKs allow targeting older
   # platforms, so use the newest one available.
   case ${toolchain} in
-    *-darwin*)
+    arm*-darwin*)
+      add_cflags "-miphoneos-version-min=${IOS_VERSION_MIN}"
+      iphoneos_sdk_dir="$(show_darwin_sdk_path iphoneos)"
+      if [ -d "${iphoneos_sdk_dir}" ]; then
+        add_cflags  "-isysroot ${iphoneos_sdk_dir}"
+        add_ldflags "-isysroot ${iphoneos_sdk_dir}"
+      fi
+      ;;
+    x86*-darwin*)
       osx_sdk_dir="$(show_darwin_sdk_path macosx)"
       if [ -d "${osx_sdk_dir}" ]; then
         add_cflags  "-isysroot ${osx_sdk_dir}"
@@ -815,10 +836,36 @@ process_common_toolchain() {
           if disabled neon && enabled neon_asm; then
             die "Disabling neon while keeping neon-asm is not supported"
           fi
-          soft_enable media
+          case ${toolchain} in
+            # Apple iOS SDKs no longer support armv6 as of the version 9
+            # release (coincides with release of Xcode 7). Only enable media
+            # when using earlier SDK releases.
+            *-darwin*)
+              if [ "$(show_darwin_sdk_major_version iphoneos)" -lt 9 ]; then
+                soft_enable media
+              else
+                soft_disable media
+                RTCD_OPTIONS="${RTCD_OPTIONS}--disable-media "
+              fi
+              ;;
+            *)
+              soft_enable media
+              ;;
+          esac
           ;;
         armv6)
-          soft_enable media
+          case ${toolchain} in
+            *-darwin*)
+              if [ "$(show_darwin_sdk_major_version iphoneos)" -lt 9 ]; then
+                soft_enable media
+              else
+                die "Your iOS SDK does not support armv6."
+              fi
+              ;;
+            *)
+              soft_enable media
+              ;;
+          esac
           ;;
       esac
 
@@ -1011,6 +1058,12 @@ EOF
           done
 
           asm_conversion_cmd="${source_path}/build/make/ads2gas_apple.pl"
+
+          if [ "$(show_darwin_sdk_major_version iphoneos)" -gt 8 ]; then
+            check_add_cflags -fembed-bitcode
+            check_add_asflags -fembed-bitcode
+            check_add_ldflags -fembed-bitcode
+          fi
           ;;
 
         linux*)
@@ -1181,7 +1234,8 @@ EOF
               && AS=""
           fi
           [ "${AS}" = auto ] || [ -z "${AS}" ] \
-            && die "Neither yasm nor nasm have been found"
+            && die "Neither yasm nor nasm have been found." \
+                   "See the prerequisites section in the README for more info."
           ;;
       esac
       log_echo "  using $AS"
@@ -1220,6 +1274,13 @@ EOF
           enabled x86 && sim_arch="-arch i386" || sim_arch="-arch x86_64"
           add_cflags  ${sim_arch}
           add_ldflags ${sim_arch}
+
+          if [ "$(show_darwin_sdk_major_version iphonesimulator)" -gt 8 ]; then
+            # yasm v1.3.0 doesn't know what -fembed-bitcode means, so turning it
+            # on is pointless (unless building a C-only lib). Warn the user, but
+            # do nothing here.
+            log "Warning: Bitcode embed disabled for simulator targets."
+          fi
           ;;
         os2)
           add_asflags -f aout
