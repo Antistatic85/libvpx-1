@@ -35,6 +35,7 @@
 #include "vp9/encoder/vp9_lookahead.h"
 #include "vp9/encoder/vp9_mbgraph.h"
 #include "vp9/encoder/vp9_mcomp.h"
+#include "vp9/encoder/vp9_noise_estimate.h"
 #include "vp9/encoder/vp9_quantize.h"
 #include "vp9/encoder/vp9_ratectrl.h"
 #include "vp9/encoder/vp9_rd.h"
@@ -475,7 +476,7 @@ typedef struct VP9_COMP {
 
   int mbmode_cost[INTRA_MODES];
   unsigned int inter_mode_cost[INTER_MODE_CONTEXTS][INTER_MODES];
-  int intra_uv_mode_cost[FRAME_TYPES][INTRA_MODES];
+  int intra_uv_mode_cost[FRAME_TYPES][INTRA_MODES][INTRA_MODES];
   int y_mode_costs[INTRA_MODES][INTRA_MODES][INTRA_MODES];
   int switchable_interp_costs[SWITCHABLE_FILTER_CONTEXTS][SWITCHABLE_FILTERS];
   int partition_cost[PARTITION_CONTEXTS][PARTITION_TYPES];
@@ -504,6 +505,8 @@ typedef struct VP9_COMP {
   int resize_avg_qp;
   int resize_buffer_underflow;
   int resize_count;
+
+  NOISE_ESTIMATE noise_estimate;
 
   // VAR_BASED_PARTITION thresholds
   // 0 - threshold_64x64; 1 - threshold_32x32;

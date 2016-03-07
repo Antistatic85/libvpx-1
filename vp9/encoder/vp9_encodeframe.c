@@ -424,7 +424,6 @@ static int set_vt_partitioning(VP9_COMP *cpi,
   variance_node vt;
   const int block_width = num_8x8_blocks_wide_lookup[bsize];
   const int block_height = num_8x8_blocks_high_lookup[bsize];
-  const int low_res = (cm->width <= 352 && cm->height <= 288);
 
   assert(block_height == block_width);
   tree_to_node(data, bsize, &vt);
@@ -437,7 +436,7 @@ static int set_vt_partitioning(VP9_COMP *cpi,
   // No check for vert/horiz split as too few samples for variance.
   if (bsize == bsize_min) {
     // Variance already computed to set the force_split.
-    if (low_res || cm->frame_type == KEY_FRAME)
+    if (cm->frame_type == KEY_FRAME)
       get_variance(&vt.part_variances->none);
     if (mi_col + block_width / 2 < cm->mi_cols &&
         mi_row + block_height / 2 < cm->mi_rows &&
@@ -448,7 +447,7 @@ static int set_vt_partitioning(VP9_COMP *cpi,
     return 0;
   } else if (bsize > bsize_min) {
     // Variance already computed to set the force_split.
-    if (low_res || cm->frame_type == KEY_FRAME)
+    if (cm->frame_type == KEY_FRAME)
       get_variance(&vt.part_variances->none);
     // For key frame: take split for bsize above 32X32 or very high variance.
     if (cm->frame_type == KEY_FRAME &&
@@ -504,7 +503,7 @@ void set_vbp_thresholds(VP9_COMP *cpi, int64_t thresholds[], int q) {
   VP9_COMMON *const cm = &cpi->common;
   const int is_key_frame = (cm->frame_type == KEY_FRAME);
   const int threshold_multiplier = is_key_frame ? 20 : 1;
-  const int64_t threshold_base = (int64_t)(threshold_multiplier *
+  int64_t threshold_base = (int64_t)(threshold_multiplier *
       cpi->y_dequant[q][1]);
   if (is_key_frame) {
     thresholds[0] = threshold_base;
@@ -512,9 +511,18 @@ void set_vbp_thresholds(VP9_COMP *cpi, int64_t thresholds[], int q) {
     thresholds[2] = threshold_base >> 2;
     thresholds[3] = threshold_base << 2;
   } else {
-    thresholds[1] = threshold_base;
+    // Increase base variance threshold based on  estimated noise level.
+    if (cpi->noise_estimate.enabled) {
+      NOISE_LEVEL noise_level = vp9_noise_estimate_extract_level(
+          &cpi->noise_estimate);
+      if (noise_level == kHigh)
+        threshold_base = 3 * threshold_base;
+      else if (noise_level == kMedium)
+        threshold_base = threshold_base << 1;
+    }
     if (cm->width <= 352 && cm->height <= 288) {
-      thresholds[0] = threshold_base >> 2;
+      thresholds[0] = threshold_base >> 3;
+      thresholds[1] = threshold_base >> 1;
       thresholds[2] = threshold_base << 3;
     } else {
       thresholds[0] = threshold_base;
@@ -541,7 +549,7 @@ void vp9_set_variance_partition_thresholds(VP9_COMP *cpi, int q) {
       cpi->vbp_bsize_min = BLOCK_8X8;
     } else {
       if (cm->width <= 352 && cm->height <= 288)
-        cpi->vbp_threshold_sad = 100;
+        cpi->vbp_threshold_sad = 10;
       else
         cpi->vbp_threshold_sad = (cpi->y_dequant[q][1] << 1) > 1000 ?
             (cpi->y_dequant[q][1] << 1) : 1000;
@@ -942,7 +950,8 @@ int choose_partitioning(VP9_COMP *cpi,
           force_split[split_index] = 1;
           force_split[i + 1] = 1;
           force_split[0] = 1;
-        } else if (vt.split[i].split[j].part_variances.none.variance >=
+        } else if (cpi->oxcf.speed < 8 &&
+                   vt.split[i].split[j].part_variances.none.variance >=
                    thresholds[1] &&
                    !cyclic_refresh_segment_id_boosted(segment_id)) {
           // We have some nominal amount of 16x16 variance (based on average),
@@ -995,6 +1004,14 @@ int choose_partitioning(VP9_COMP *cpi,
         for (m = 0; m < 4; m++)
           fill_variance_tree(&vtemp->split[m], BLOCK_8X8);
         fill_variance_tree(vtemp, BLOCK_16X16);
+        // If variance of this 16x16 block is above the threshold, force block
+        // to split. This also forces a split on the upper levels.
+        get_variance(&vtemp->part_variances.none);
+        if (vtemp->part_variances.none.variance > thresholds[2]) {
+          force_split[5 + i2 + j] = 1;
+          force_split[i + 1] = 1;
+          force_split[0] = 1;
+        }
       }
     }
     fill_variance_tree(&vt.split[i], BLOCK_32X32);
@@ -1847,16 +1864,6 @@ static void encode_b_rt(VP9_COMP *cpi, ThreadData *td,
   set_offsets(cpi, tile, x, mi_row, mi_col, bsize);
   update_state_rt(cpi, td, ctx, mi_row, mi_col, bsize);
 
-#if CONFIG_VP9_TEMPORAL_DENOISING
-  if (cpi->oxcf.noise_sensitivity > 0 &&
-      output_enabled &&
-      cpi->common.frame_type != KEY_FRAME &&
-      cpi->resize_pending == 0) {
-    vp9_denoiser_denoise(&cpi->denoiser, x, mi_row, mi_col,
-                         VPXMAX(BLOCK_8X8, bsize), ctx);
-  }
-#endif
-
   encode_superblock(cpi, td, tp, output_enabled, mi_row, mi_col, bsize, ctx);
   update_stats(&cpi->common, td);
 
@@ -2531,8 +2538,15 @@ static void rd_pick_partition(VP9_COMP *cpi, ThreadData *td,
 
   if (cpi->sf.use_square_partition_only &&
       bsize > cpi->sf.use_square_only_threshold) {
+    if (cpi->use_svc) {
+      if (!vp9_active_h_edge(cpi, mi_row, mi_step) || x->e_mbd.lossless)
+        partition_horz_allowed &= force_horz_split;
+      if (!vp9_active_v_edge(cpi, mi_row, mi_step) || x->e_mbd.lossless)
+        partition_vert_allowed &= force_vert_split;
+    } else {
       partition_horz_allowed &= force_horz_split;
       partition_vert_allowed &= force_vert_split;
+    }
   }
 
   save_context(x, mi_row, mi_col, a, l, sa, sl, bsize);
@@ -4063,6 +4077,10 @@ static void encode_sb_rows(VP9_COMP *cpi, ThreadData *const td,
   TileInfo tile;
   TOKENEXTRA *tok = cpi->tok;
 
+  // Set up pointers to per thread motion search counters.
+  td->mb.m_search_count_ptr = &td->rd_counts.m_search_count;
+  td->mb.ex_search_count_ptr = &td->rd_counts.ex_search_count;
+
   for (mi_row = mi_row_start; mi_row < mi_row_end; mi_row += mi_row_step) {
     const int sb_row = mi_row >> MI_BLOCK_SIZE_LOG2;
     tile_row = vp9_get_tile_row_index(&tile, cm, mi_row);
@@ -4277,9 +4295,7 @@ static void encode_frame_internal(VP9_COMP *cpi) {
   xd->mi[0] = cm->mi;
 
   vp9_zero(*td->counts);
-  vp9_zero(td->rd_counts.coef_counts);
-  vp9_zero(td->rd_counts.comp_pred_diff);
-  vp9_zero(td->rd_counts.filter_diff);
+  vp9_zero(td->rd_counts);
 
   xd->lossless = cm->base_qindex == 0 &&
                  cm->y_dc_delta_q == 0 &&

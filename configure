@@ -125,6 +125,7 @@ all_platforms="${all_platforms} x86-darwin11-gcc"
 all_platforms="${all_platforms} x86-darwin12-gcc"
 all_platforms="${all_platforms} x86-darwin13-gcc"
 all_platforms="${all_platforms} x86-darwin14-gcc"
+all_platforms="${all_platforms} x86-darwin15-gcc"
 all_platforms="${all_platforms} x86-iphonesimulator-gcc"
 all_platforms="${all_platforms} x86-linux-gcc"
 all_platforms="${all_platforms} x86-linux-icc"
@@ -145,6 +146,7 @@ all_platforms="${all_platforms} x86_64-darwin11-gcc"
 all_platforms="${all_platforms} x86_64-darwin12-gcc"
 all_platforms="${all_platforms} x86_64-darwin13-gcc"
 all_platforms="${all_platforms} x86_64-darwin14-gcc"
+all_platforms="${all_platforms} x86_64-darwin15-gcc"
 all_platforms="${all_platforms} x86_64-iphonesimulator-gcc"
 all_platforms="${all_platforms} x86_64-linux-gcc"
 all_platforms="${all_platforms} x86_64-linux-icc"
@@ -236,6 +238,16 @@ ARCH_LIST="
     x86
     x86_64
 "
+ARCH_EXT_LIST_X86="
+    mmx
+    sse
+    sse2
+    sse3
+    ssse3
+    sse4_1
+    avx
+    avx2
+"
 ARCH_EXT_LIST="
     edsp
     media
@@ -247,14 +259,7 @@ ARCH_EXT_LIST="
     msa
     mips64
 
-    mmx
-    sse
-    sse2
-    sse3
-    ssse3
-    sse4_1
-    avx
-    avx2
+    ${ARCH_EXT_LIST_X86}
 "
 HAVE_LIST="
     ${ARCH_EXT_LIST}

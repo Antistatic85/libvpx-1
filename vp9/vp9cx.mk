@@ -82,6 +82,8 @@ VP9_CX_SRCS-yes += encoder/vp9_aq_complexity.c
 VP9_CX_SRCS-yes += encoder/vp9_aq_complexity.h
 VP9_CX_SRCS-yes += encoder/vp9_skin_detection.c
 VP9_CX_SRCS-yes += encoder/vp9_skin_detection.h
+VP9_CX_SRCS-yes += encoder/vp9_noise_estimate.c
+VP9_CX_SRCS-yes += encoder/vp9_noise_estimate.h
 ifeq ($(CONFIG_VP9_POSTPROC),yes)
 VP9_CX_SRCS-$(CONFIG_INTERNAL_STATS) += common/vp9_postproc.h
 VP9_CX_SRCS-$(CONFIG_INTERNAL_STATS) += common/vp9_postproc.c
@@ -98,6 +100,7 @@ VP9_CX_SRCS-$(CONFIG_OPENCL) += encoder/opencl/vp9_eopencl.h
 VP9_CX_SRCS-$(HAVE_SSE2) += encoder/x86/vp9_avg_intrin_sse2.c
 VP9_CX_SRCS-$(HAVE_SSE2) += encoder/x86/vp9_temporal_filter_apply_sse2.asm
 VP9_CX_SRCS-$(HAVE_SSE2) += encoder/x86/vp9_quantize_sse2.c
+VP9_CX_SRCS-$(HAVE_AVX) += encoder/x86/vp9_diamond_search_sad_avx.c
 ifeq ($(CONFIG_VP9_HIGHBITDEPTH),yes)
 VP9_CX_SRCS-$(HAVE_SSE2) += encoder/x86/vp9_highbd_block_error_intrin_sse2.c
 endif

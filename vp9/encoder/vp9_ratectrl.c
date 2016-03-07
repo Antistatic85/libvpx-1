@@ -370,8 +370,9 @@ void vp9_rc_init(const VP9EncoderConfig *oxcf, int pass, RATE_CONTROL *rc) {
 int vp9_rc_drop_frame(VP9_COMP *cpi) {
   const VP9EncoderConfig *oxcf = &cpi->oxcf;
   RATE_CONTROL *const rc = &cpi->rc;
-
-  if (!oxcf->drop_frames_water_mark) {
+  if (!oxcf->drop_frames_water_mark ||
+      (is_one_pass_cbr_svc(cpi) &&
+       cpi->svc.spatial_layer_id > cpi->svc.first_spatial_layer_to_encode)) {
     return 0;
   } else {
     if (rc->buffer_level < 0) {
@@ -1074,7 +1075,7 @@ static int rc_pick_q_and_bounds_two_pass(const VP9_COMP *cpi,
       if (!cpi->refresh_alt_ref_frame) {
         active_best_quality = cq_level;
       } else {
-       active_best_quality = get_gf_active_quality(rc, q, cm->bit_depth);
+        active_best_quality = get_gf_active_quality(rc, q, cm->bit_depth);
 
         // Modify best quality for second level arfs. For mode VPX_Q this
         // becomes the baseline frame q.
@@ -1256,8 +1257,12 @@ static void update_golden_frame_stats(VP9_COMP *cpi) {
     rc->frames_since_golden = 0;
 
     // If we are not using alt ref in the up and coming group clear the arf
-    // active flag.
-    if (!rc->source_alt_ref_pending) {
+    // active flag. In multi arf group case, if the index is not 0 then
+    // we are overlaying a mid group arf so should not reset the flag.
+    if (cpi->oxcf.pass == 2) {
+      if (!rc->source_alt_ref_pending && (cpi->twopass.gf_group.index == 0))
+        rc->source_alt_ref_active = 0;
+    } else if (!rc->source_alt_ref_pending) {
       rc->source_alt_ref_active = 0;
     }
 
@@ -1557,7 +1562,7 @@ void vp9_rc_get_svc_params(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
   RATE_CONTROL *const rc = &cpi->rc;
   int target = rc->avg_frame_bandwidth;
-  const int layer = LAYER_IDS_TO_IDX(cpi->svc.spatial_layer_id,
+  int layer = LAYER_IDS_TO_IDX(cpi->svc.spatial_layer_id,
       cpi->svc.temporal_layer_id, cpi->svc.number_temporal_layers);
 
   if ((cm->current_video_frame == 0) ||
@@ -1572,8 +1577,10 @@ void vp9_rc_get_svc_params(VP9_COMP *cpi) {
       cpi->ref_frame_flags &=
           (~VP9_LAST_FLAG & ~VP9_GOLD_FLAG & ~VP9_ALT_FLAG);
     } else if (is_one_pass_cbr_svc(cpi)) {
-      cpi->svc.layer_context[layer].is_key_frame = 1;
       reset_temporal_layer_to_zero(cpi);
+      layer = LAYER_IDS_TO_IDX(cpi->svc.spatial_layer_id,
+           cpi->svc.temporal_layer_id, cpi->svc.number_temporal_layers);
+      cpi->svc.layer_context[layer].is_key_frame = 1;
       cpi->ref_frame_flags &=
                 (~VP9_LAST_FLAG & ~VP9_GOLD_FLAG & ~VP9_ALT_FLAG);
       // Assumption here is that LAST_FRAME is being updated for a keyframe.
@@ -1835,6 +1842,9 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
   RESIZE_ACTION resize_action = NO_RESIZE;
   int avg_qp_thr1 = 70;
   int avg_qp_thr2 = 50;
+  int min_width = 180;
+  int min_height = 180;
+  int down_size_on = 1;
   cpi->resize_scale_num = 1;
   cpi->resize_scale_den = 1;
   // Don't resize on key frame; reset the counters on key frame.
@@ -1842,6 +1852,21 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
     cpi->resize_avg_qp = 0;
     cpi->resize_count = 0;
     return 0;
+  }
+  // Check current frame reslution to avoid generating frames smaller than
+  // the minimum resolution.
+  if (ONEHALFONLY_RESIZE) {
+    if ((cm->width >> 1) < min_width || (cm->height >> 1) < min_height)
+      down_size_on = 0;
+  } else {
+    if (cpi->resize_state == ORIG &&
+        (cm->width * 3 / 4 < min_width ||
+         cm->height * 3 / 4 < min_height))
+      return 0;
+    else if (cpi->resize_state == THREE_QUARTER &&
+             ((cpi->oxcf.width >> 1) < min_width ||
+              (cpi->oxcf.height >> 1) < min_height))
+      down_size_on = 0;
   }
 
 #if CONFIG_VP9_TEMPORAL_DENOISING
@@ -1854,7 +1879,7 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
 
   // Resize based on average buffer underflow and QP over some window.
   // Ignore samples close to key frame, since QP is usually high after key.
-  if (cpi->rc.frames_since_key > 1 * cpi->framerate) {
+  if (cpi->rc.frames_since_key > 2 * cpi->framerate) {
     const int window = (int)(4 * cpi->framerate);
     cpi->resize_avg_qp += cm->base_qindex;
     if (cpi->rc.buffer_level < (int)(30 * rc->optimal_buffer_level / 100))
@@ -1869,7 +1894,7 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
       // down state, i.e. 1/2 or 3/4 of original resolution.
       // Currently, use a flag to turn 3/4 resizing feature on/off.
       if (cpi->resize_buffer_underflow > (cpi->resize_count >> 2)) {
-        if (cpi->resize_state == THREE_QUARTER) {
+        if (cpi->resize_state == THREE_QUARTER && down_size_on) {
           resize_action = DOWN_ONEHALF;
           cpi->resize_state = ONE_HALF;
         } else if (cpi->resize_state == ORIG) {

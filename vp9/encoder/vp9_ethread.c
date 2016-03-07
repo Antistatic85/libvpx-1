@@ -142,6 +142,10 @@ void vp9_accumulate_rd_opt(ThreadData *td, ThreadData *td_t) {
             for (n = 0; n < ENTROPY_TOKENS; n++)
               td->rd_counts.coef_counts[i][j][k][l][m][n] +=
                   td_t->rd_counts.coef_counts[i][j][k][l][m][n];
+
+  // Counts of all motion searches and exhuastive mesh searches.
+  td->rd_counts.m_search_count += td_t->rd_counts.m_search_count;
+  td->rd_counts.ex_search_count += td_t->rd_counts.ex_search_count;
 }
 
 void vp9_mb_copy(VP9_COMP *cpi, MACROBLOCK *x_dst, MACROBLOCK *x_src) {

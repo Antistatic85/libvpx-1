@@ -24,6 +24,18 @@ static INLINE unsigned int horizontal_add_u16x8(const uint16x8_t v_16x8) {
   return vget_lane_u32(c, 0);
 }
 
+unsigned int vp9_avg_4x4_neon(const uint8_t *s, int p) {
+  uint16x8_t v_sum;
+  uint32x2_t v_s0 = vdup_n_u32(0);
+  uint32x2_t v_s1 = vdup_n_u32(0);
+  v_s0 = vld1_lane_u32((const uint32_t *)s, v_s0, 0);
+  v_s0 = vld1_lane_u32((const uint32_t *)(s + p), v_s0, 1);
+  v_s1 = vld1_lane_u32((const uint32_t *)(s + 2 * p), v_s1, 0);
+  v_s1 = vld1_lane_u32((const uint32_t *)(s + 3 * p), v_s1, 1);
+  v_sum = vaddl_u8(vreinterpret_u8_u32(v_s0), vreinterpret_u8_u32(v_s1));
+  return (horizontal_add_u16x8(v_sum) + 8) >> 4;
+}
+
 unsigned int vp9_avg_8x8_neon(const uint8_t *s, int p) {
   uint8x8_t v_s0 = vld1_u8(s);
   const uint8x8_t v_s1 = vld1_u8(s + p);
@@ -48,6 +60,33 @@ unsigned int vp9_avg_8x8_neon(const uint8_t *s, int p) {
   v_sum = vaddw_u8(v_sum, v_s0);
 
   return (horizontal_add_u16x8(v_sum) + 32) >> 6;
+}
+
+// coeff: 16 bits, dynamic range [-32640, 32640].
+// length: value range {16, 64, 256, 1024}.
+int vp9_satd_neon(const int16_t *coeff, int length) {
+  const int16x4_t zero = vdup_n_s16(0);
+  int32x4_t accum = vdupq_n_s32(0);
+
+  do {
+    const int16x8_t src0 = vld1q_s16(coeff);
+    const int16x8_t src8 = vld1q_s16(coeff + 8);
+    accum = vabal_s16(accum, vget_low_s16(src0), zero);
+    accum = vabal_s16(accum, vget_high_s16(src0), zero);
+    accum = vabal_s16(accum, vget_low_s16(src8), zero);
+    accum = vabal_s16(accum, vget_high_s16(src8), zero);
+    length -= 16;
+    coeff += 16;
+  } while (length != 0);
+
+  {
+    // satd: 26 bits, dynamic range [-32640 * 1024, 32640 * 1024]
+    const int64x2_t s0 = vpaddlq_s32(accum);  // cascading summation of 'accum'.
+    const int32x2_t s1 = vadd_s32(vreinterpret_s32_s64(vget_low_s64(s0)),
+                                  vreinterpret_s32_s64(vget_high_s64(s0)));
+    const int satd = vget_lane_s32(s1, 0);
+    return satd;
+  }
 }
 
 void vp9_int_pro_row_neon(int16_t hbuf[16], uint8_t const *ref,

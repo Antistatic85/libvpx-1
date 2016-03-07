@@ -415,8 +415,11 @@ void cyclic_refresh_update_map(VP9_COMP *const cpi,
   assert(cr->sb_index < sbs_in_frame);
   i = cr->sb_index;
   cr->target_num_seg_blocks = 0;
-  if (cpi->oxcf.content != VP9E_CONTENT_SCREEN)
+  if (cpi->oxcf.content != VP9E_CONTENT_SCREEN) {
     consec_zero_mv_thresh = 100;
+   if (cpi->noise_estimate.enabled && cpi->noise_estimate.level >= kMedium)
+     consec_zero_mv_thresh = 80;
+  }
   qindex_thresh =
       cpi->oxcf.content == VP9E_CONTENT_SCREEN
       ? vp9_get_qindex(seg, CR_SEGMENT_ID_BOOST2, base_qindex)
@@ -491,10 +494,14 @@ void vp9_cyclic_refresh_update_parameters(VP9_COMP *const cpi) {
   // Account for larger interval on base layer for temporal layers.
   if (cr->percent_refresh > 0 &&
       rc->frames_since_key <  (4 * cpi->svc.number_temporal_layers) *
-      (100 / cr->percent_refresh))
+      (100 / cr->percent_refresh)) {
     cr->rate_ratio_qdelta = 3.0;
-  else
+  } else {
     cr->rate_ratio_qdelta = 2.0;
+  if (cpi->noise_estimate.enabled && cpi->noise_estimate.level >= kMedium)
+    // Reduce the delta-qp if the estimated source noise is above threshold.
+    cr->rate_ratio_qdelta = 1.5;
+  }
   // Adjust some parameters for low resolutions at low bitrates.
   if (cm->width <= 352 &&
       cm->height <= 288 &&

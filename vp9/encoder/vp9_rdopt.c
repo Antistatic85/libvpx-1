@@ -1202,7 +1202,8 @@ static int64_t rd_pick_intra_sbuv_mode(VP9_COMP *cpi, MACROBLOCK *x,
                           &this_distortion, &s, &this_sse, bsize, best_rd))
       continue;
     this_rate = this_rate_tokenonly +
-                cpi->intra_uv_mode_cost[cpi->common.frame_type][mode];
+        cpi->intra_uv_mode_cost[cpi->common.frame_type]
+                                [xd->mi[0]->mbmi.mode][mode];
     this_rd = RDCOST(x->rdmult, x->rddiv, this_rate, this_distortion);
 
     if (this_rd < best_rd) {
@@ -1232,7 +1233,9 @@ static int64_t rd_sbuv_dcpred(const VP9_COMP *cpi, MACROBLOCK *x,
   memset(x->skip_txfm, SKIP_TXFM_NONE, sizeof(x->skip_txfm));
   super_block_uvrd(cpi, x, rate_tokenonly, distortion,
                    skippable, &unused, bsize, INT64_MAX);
-  *rate = *rate_tokenonly + cpi->intra_uv_mode_cost[cm->frame_type][DC_PRED];
+  *rate = *rate_tokenonly +
+      cpi->intra_uv_mode_cost[cm->frame_type]
+                              [x->e_mbd.mi[0]->mbmi.mode][DC_PRED];
   return RDCOST(x->rdmult, x->rddiv, *rate, *distortion);
 }
 
@@ -1750,8 +1753,9 @@ static int64_t rd_pick_best_sub8x8_mode(VP9_COMP *cpi, MACROBLOCK *x,
   const int num_4x4_blocks_high = num_4x4_blocks_high_lookup[bsize];
   ENTROPY_CONTEXT t_above[2], t_left[2];
   int subpelmv = 1, have_ref = 0;
+  SPEED_FEATURES *const sf = &cpi->sf;
   const int has_second_rf = has_second_ref(mbmi);
-  const int inter_mode_mask = cpi->sf.inter_mode_mask[bsize];
+  const int inter_mode_mask = sf->inter_mode_mask[bsize];
   MB_MODE_INFO_EXT *const mbmi_ext = x->mbmi_ext;
 
   vp9_zero(*bsi);
@@ -1820,7 +1824,7 @@ static int64_t rd_pick_best_sub8x8_mode(VP9_COMP *cpi, MACROBLOCK *x,
             seg_mvs[i][mbmi->ref_frame[0]].as_int == INVALID_MV) {
           MV *const new_mv = &mode_mv[NEWMV][0].as_mv;
           int step_param = 0;
-          int thissme, bestsme = INT_MAX;
+          int bestsme = INT_MAX;
           int sadpb = x->sadperbit4;
           MV mvp_full;
           int max_mv;
@@ -1845,7 +1849,7 @@ static int64_t rd_pick_best_sub8x8_mode(VP9_COMP *cpi, MACROBLOCK *x,
             max_mv =
                 VPXMAX(abs(bsi->mvp.as_mv.row), abs(bsi->mvp.as_mv.col)) >> 3;
 
-          if (cpi->sf.mv.auto_mv_step_size && cm->show_frame) {
+          if (sf->mv.auto_mv_step_size && cm->show_frame) {
             // Take wtd average of the step_params based on the last frame's
             // max mv magnitude and the best ref mvs of the current block for
             // the given reference.
@@ -1858,7 +1862,7 @@ static int64_t rd_pick_best_sub8x8_mode(VP9_COMP *cpi, MACROBLOCK *x,
           mvp_full.row = bsi->mvp.as_mv.row >> 3;
           mvp_full.col = bsi->mvp.as_mv.col >> 3;
 
-          if (cpi->sf.adaptive_motion_search) {
+          if (sf->adaptive_motion_search) {
             mvp_full.row = x->pred_mv[mbmi->ref_frame[0]].row >> 3;
             mvp_full.col = x->pred_mv[mbmi->ref_frame[0]].col >> 3;
             step_param = VPXMAX(step_param, 8);
@@ -1871,30 +1875,9 @@ static int64_t rd_pick_best_sub8x8_mode(VP9_COMP *cpi, MACROBLOCK *x,
 
           bestsme = vp9_full_pixel_search(
               cpi, x, bsize, &mvp_full, step_param, sadpb,
-              cpi->sf.mv.subpel_search_method != SUBPEL_TREE ? cost_list : NULL,
+              sf->mv.subpel_search_method != SUBPEL_TREE ? cost_list : NULL,
               &bsi->ref_mv[0]->as_mv, new_mv,
               INT_MAX, 1);
-
-          // Should we do a full search (best quality only)
-          if (cpi->oxcf.mode == BEST) {
-            int_mv *const best_mv = &mi->bmi[i].as_mv[0];
-            /* Check if mvp_full is within the range. */
-            clamp_mv(&mvp_full, x->mv_col_min, x->mv_col_max,
-                     x->mv_row_min, x->mv_row_max);
-            thissme = cpi->full_search_sad(x, &mvp_full,
-                                           sadpb, 16, &cpi->fn_ptr[bsize],
-                                           &bsi->ref_mv[0]->as_mv,
-                                           &best_mv->as_mv);
-            cost_list[1] = cost_list[2] = cost_list[3] = cost_list[4] = INT_MAX;
-            if (thissme < bestsme) {
-              bestsme = thissme;
-              *new_mv = best_mv->as_mv;
-            } else {
-              // The full search result is actually worse so re-instate the
-              // previous best vector
-              best_mv->as_mv = *new_mv;
-            }
-          }
 
           if (bestsme < INT_MAX) {
             int distortion;
@@ -1904,8 +1887,8 @@ static int64_t rd_pick_best_sub8x8_mode(VP9_COMP *cpi, MACROBLOCK *x,
                 &bsi->ref_mv[0]->as_mv,
                 cm->allow_high_precision_mv,
                 x->errorperbit, &cpi->fn_ptr[bsize],
-                cpi->sf.mv.subpel_force_stop,
-                cpi->sf.mv.subpel_iters_per_step,
+                sf->mv.subpel_force_stop,
+                sf->mv.subpel_iters_per_step,
                 cond_cost_list(cpi, cost_list),
                 x->nmvjointcost, x->mvcost,
                 &distortion,
@@ -1916,7 +1899,7 @@ static int64_t rd_pick_best_sub8x8_mode(VP9_COMP *cpi, MACROBLOCK *x,
             seg_mvs[i][mbmi->ref_frame[0]].as_mv = *new_mv;
           }
 
-          if (cpi->sf.adaptive_motion_search)
+          if (sf->adaptive_motion_search)
             x->pred_mv[mbmi->ref_frame[0]] = *new_mv;
 
           // restore src pointers
@@ -1933,7 +1916,7 @@ static int64_t rd_pick_best_sub8x8_mode(VP9_COMP *cpi, MACROBLOCK *x,
             mbmi->interp_filter == EIGHTTAP) {
           // adjust src pointers
           mi_buf_shift(x, i);
-          if (cpi->sf.comp_inter_joint_search_thresh <= bsize) {
+          if (sf->comp_inter_joint_search_thresh <= bsize) {
             int rate_mv;
             joint_motion_search(cpi, x, bsize, frame_mv[this_mode],
                                 mi_row, mi_col, seg_mvs[i],
@@ -2851,9 +2834,9 @@ static void rd_variance_adjustment(VP9_COMP *cpi,
       ? (source_variance - recon_variance)
       : (recon_variance - source_variance);
 
-    var_error = (200 * source_variance * recon_variance) /
-      ((source_variance * source_variance) +
-       (recon_variance * recon_variance));
+    var_error = ((int64_t)200 * source_variance * recon_variance) /
+      (((int64_t)source_variance * source_variance) +
+       ((int64_t)recon_variance * recon_variance));
     var_error = 100 - var_error;
   }
 

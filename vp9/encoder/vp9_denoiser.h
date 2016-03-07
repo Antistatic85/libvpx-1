@@ -23,8 +23,16 @@ extern "C" {
 
 typedef enum vp9_denoiser_decision {
   COPY_BLOCK,
-  FILTER_BLOCK
+  FILTER_BLOCK,
+  FILTER_ZEROMV_BLOCK
 } VP9_DENOISER_DECISION;
+
+typedef enum vp9_denoiser_level {
+  kDenLowLow,
+  kDenLow,
+  kDenMedium,
+  kDenHigh
+} VP9_DENOISER_LEVEL;
 
 typedef struct vp9_denoiser {
   YV12_BUFFER_CONFIG running_avg_y[MAX_REF_FRAMES];
@@ -32,10 +40,7 @@ typedef struct vp9_denoiser {
   YV12_BUFFER_CONFIG last_source;
   int increase_denoising;
   int frame_buffer_initialized;
-  int denoising_on;
-  int noise_estimate;
-  int thresh_noise_estimate;
-  int noise_estimate_count;
+  VP9_DENOISER_LEVEL denoising_level;
 } VP9_DENOISER;
 
 struct VP9_COMP;
@@ -50,7 +55,8 @@ void vp9_denoiser_update_frame_info(VP9_DENOISER *denoiser,
 
 void vp9_denoiser_denoise(VP9_DENOISER *denoiser, MACROBLOCK *mb,
                           int mi_row, int mi_col, BLOCK_SIZE bs,
-                          PICK_MODE_CONTEXT *ctx);
+                          PICK_MODE_CONTEXT *ctx ,
+                          VP9_DENOISER_DECISION *denoiser_decision);
 
 void vp9_denoiser_reset_frame_stats(PICK_MODE_CONTEXT *ctx);
 
@@ -76,11 +82,8 @@ static int total_adj_strong_thresh(BLOCK_SIZE bs, int increase_denoising) {
 
 void vp9_denoiser_free(VP9_DENOISER *denoiser);
 
-void vp9_denoiser_init_noise_estimate(VP9_DENOISER *denoiser,
-                                      int width,
-                                      int height);
-
-void vp9_denoiser_update_noise_estimate(struct VP9_COMP *const cpi);
+void vp9_denoiser_set_noise_level(VP9_DENOISER *denoiser,
+                                  int noise_level);
 
 #ifdef __cplusplus
 }  // extern "C"

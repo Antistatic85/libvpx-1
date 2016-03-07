@@ -538,7 +538,7 @@ TEST_P(DatarateTestVP9Large, ChangingDropFrameThresh) {
         << " The first dropped frame for drop_thresh " << i
         << " > first dropped frame for drop_thresh "
         << i - kDropFrameThreshTestStep;
-    ASSERT_GE(num_drops_, last_num_drops * 0.90)
+    ASSERT_GE(num_drops_, last_num_drops * 0.85)
         << " The number of dropped frames for drop_thresh " << i
         << " < number of dropped frames for drop_thresh "
         << i - kDropFrameThreshTestStep;
@@ -770,7 +770,7 @@ class DatarateOnePassCbrSvc : public ::libvpx_test::EncoderTest,
                                   ::libvpx_test::Encoder *encoder) {
     if (video->frame() == 0) {
       int i;
-      for (i = 0; i < 2; ++i) {
+      for (i = 0; i < VPX_MAX_LAYERS; ++i) {
         svc_params_.max_quantizers[i] = 63;
         svc_params_.min_quantizers[i] = 0;
       }

@@ -46,6 +46,7 @@
 #include "vp9/encoder/vp9_encoder.h"
 #include "vp9/encoder/vp9_firstpass.h"
 #include "vp9/encoder/vp9_mbgraph.h"
+#include "vp9/encoder/vp9_noise_estimate.h"
 #include "vp9/encoder/vp9_picklpf.h"
 #include "vp9/encoder/vp9_ratectrl.h"
 #include "vp9/encoder/vp9_rd.h"
@@ -885,6 +886,8 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
   cpi->ref_frame_flags = 0;
 
   init_buffer_indices(cpi);
+
+  vp9_noise_estimate_init(&cpi->noise_estimate, cm->width, cm->height);
 }
 
 static void set_rc_buffer_sizes(RATE_CONTROL *rc,
@@ -1647,7 +1650,30 @@ void vp9_change_config(struct VP9_COMP *cpi, const VP9EncoderConfig *oxcf) {
 #endif
 #define log2f(x) (log (x) / (float) M_LOG2_E)
 
+/***********************************************************************
+ * Read before modifying 'cal_nmvjointsadcost' or 'cal_nmvsadcosts'    *
+ ***********************************************************************
+ * The following 2 functions ('cal_nmvjointsadcost' and                *
+ * 'cal_nmvsadcosts') are used to calculate cost lookup tables         *
+ * used by 'vp9_diamond_search_sad'. The C implementation of the       *
+ * function is generic, but the AVX intrinsics optimised version       *
+ * relies on the following properties of the computed tables:          *
+ * For cal_nmvjointsadcost:                                            *
+ *   - mvjointsadcost[1] == mvjointsadcost[2] == mvjointsadcost[3]     *
+ * For cal_nmvsadcosts:                                                *
+ *   - For all i: mvsadcost[0][i] == mvsadcost[1][i]                   *
+ *         (Equal costs for both components)                           *
+ *   - For all i: mvsadcost[0][i] == mvsadcost[0][-i]                  *
+ *         (Cost function is even)                                     *
+ * If these do not hold, then the AVX optimised version of the         *
+ * 'vp9_diamond_search_sad' function cannot be used as it is, in which *
+ * case you can revert to using the C function instead.                *
+ ***********************************************************************/
+
 static void cal_nmvjointsadcost(int *mvjointsadcost) {
+  /*********************************************************************
+   * Warning: Read the comments above before modifying this function   *
+   *********************************************************************/
   mvjointsadcost[0] = 600;
   mvjointsadcost[1] = 300;
   mvjointsadcost[2] = 300;
@@ -1655,6 +1681,9 @@ static void cal_nmvjointsadcost(int *mvjointsadcost) {
 }
 
 static void cal_nmvsadcosts(int *mvsadcost[2]) {
+  /*********************************************************************
+   * Warning: Read the comments above before modifying this function   *
+   *********************************************************************/
   int i = 1;
 
   mvsadcost[0][0] = 0;
@@ -1825,6 +1854,10 @@ VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
 
   cpi->first_time_stamp_ever = INT64_MAX;
 
+  /*********************************************************************
+   * Warning: Read the comments around 'cal_nmvjointsadcost' and       *
+   * 'cal_nmvsadcosts' before modifying how these tables are computed. *
+   *********************************************************************/
   cal_nmvjointsadcost(cpi->td.mb.nmvjointsadcost);
   cpi->td.mb.nmvcost[0] = &cpi->nmvcosts[0][MV_MAX];
   cpi->td.mb.nmvcost[1] = &cpi->nmvcosts[1][MV_MAX];
@@ -3077,7 +3110,7 @@ static void output_frame_level_debug_stats(VP9_COMP *cpi) {
   recon_err = vp9_get_y_sse(cpi->Source, get_frame_new_buffer(cm));
 
   if (cpi->twopass.total_left_stats.coded_error != 0.0)
-    fprintf(f, "%10u %dx%d %d %d %10d %10d %10d %10d"
+    fprintf(f, "%10u %dx%d %10d %10d %d %d %10d %10d %10d %10d"
        "%10"PRId64" %10"PRId64" %5d %5d %10"PRId64" "
        "%10"PRId64" %10"PRId64" %10d "
        "%7.2lf %7.2lf %7.2lf %7.2lf %7.2lf"
@@ -3086,6 +3119,8 @@ static void output_frame_level_debug_stats(VP9_COMP *cpi) {
         "%10lf %8u %10"PRId64" %10d %10d %10d\n",
         cpi->common.current_video_frame,
         cm->width, cm->height,
+        cpi->td.rd_counts.m_search_count,
+        cpi->td.rd_counts.ex_search_count,
         cpi->rc.source_alt_ref_pending,
         cpi->rc.source_alt_ref_active,
         cpi->rc.this_frame_target,
@@ -3275,6 +3310,7 @@ static void set_frame_size(VP9_COMP *cpi) {
     // TODO(agrange) Scale cpi->max_mv_magnitude if frame-size has changed.
     set_mv_search_params(cpi);
 
+    vp9_noise_estimate_init(&cpi->noise_estimate, cm->width, cm->height);
 #if CONFIG_VP9_TEMPORAL_DENOISING
     // Reset the denoiser on the resized frame.
     if (cpi->oxcf.noise_sensitivity > 0) {
@@ -3374,14 +3410,18 @@ static void encode_without_recode_loop(VP9_COMP *cpi) {
 
   // Avoid scaling last_source unless its needed.
   // Last source is currently only used for screen-content mode,
-  // or if partition_search_type == SOURCE_VAR_BASED_PARTITION.
+  // if partition_search_type == SOURCE_VAR_BASED_PARTITION, or if noise
+  // estimation is enabled.
   if (cpi->unscaled_last_source != NULL &&
       (cpi->oxcf.content == VP9E_CONTENT_SCREEN ||
-      cpi->sf.partition_search_type == SOURCE_VAR_BASED_PARTITION))
+      cpi->sf.partition_search_type == SOURCE_VAR_BASED_PARTITION ||
+      cpi->noise_estimate.enabled))
     cpi->Last_Source = vp9_scale_if_required(cm,
                                              cpi->unscaled_last_source,
                                              &cpi->scaled_last_source,
                                              (cpi->oxcf.pass == 0));
+
+  vp9_update_noise_estimate(cpi);
 
   if (frame_is_intra_only(cm) == 0) {
     vp9_scale_references(cpi);
@@ -3736,12 +3776,16 @@ YV12_BUFFER_CONFIG *vp9_scale_if_required(VP9_COMMON *cm,
   if (cm->mi_cols * MI_SIZE != unscaled->y_width ||
       cm->mi_rows * MI_SIZE != unscaled->y_height) {
 #if CONFIG_VP9_HIGHBITDEPTH
-    if (use_normative_scaler)
+    if (use_normative_scaler &&
+        unscaled->y_width <= (scaled->y_width << 1) &&
+        unscaled->y_height <= (scaled->y_height << 1))
       scale_and_extend_frame(unscaled, scaled, (int)cm->bit_depth);
     else
       scale_and_extend_frame_nonnormative(unscaled, scaled, (int)cm->bit_depth);
 #else
-    if (use_normative_scaler)
+    if (use_normative_scaler &&
+        unscaled->y_width <= (scaled->y_width << 1) &&
+        unscaled->y_height <= (scaled->y_height << 1))
       scale_and_extend_frame(unscaled, scaled);
     else
       scale_and_extend_frame_nonnormative(unscaled, scaled);
@@ -3884,14 +3928,17 @@ static void encode_frame_to_data_rate(VP9_COMP *cpi,
   }
 
   // For 1 pass CBR, check if we are dropping this frame.
-  // Never drop on key frame.
+  // For spatial layers, for now only check for frame-dropping on first spatial
+  // layer, and if decision is to drop, we drop whole super-frame.
   if (oxcf->pass == 0 &&
       oxcf->rc_mode == VPX_CBR &&
       cm->frame_type != KEY_FRAME) {
-    if (vp9_rc_drop_frame(cpi)) {
+    if (vp9_rc_drop_frame(cpi) ||
+        (is_one_pass_cbr_svc(cpi) && cpi->svc.rc_drop_superframe == 1)) {
       vp9_rc_postencode_update_drop_frame(cpi);
       ++cm->current_video_frame;
       cpi->ext_refresh_frame_flags_pending = 0;
+      cpi->svc.rc_drop_superframe = 1;
       return;
     }
   }
