@@ -14,6 +14,7 @@
 
 #include "vpx/vpx_encoder.h"
 #include "vpx_dsp/bitwriter_buffer.h"
+#include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_mem/vpx_mem.h"
 #include "vpx_ports/mem_ops.h"
 #include "vpx_ports/system_state.h"
@@ -707,7 +708,7 @@ static void encode_loopfilter(struct loopfilter *lf,
   if (lf->mode_ref_delta_enabled) {
     vpx_wb_write_bit(wb, lf->mode_ref_delta_update);
     if (lf->mode_ref_delta_update) {
-      for (i = 0; i < MAX_REF_LF_DELTAS; i++) {
+      for (i = 0; i < MAX_REF_FRAMES; i++) {
         const int delta = lf->ref_deltas[i];
         const int changed = delta != lf->last_ref_deltas[i];
         vpx_wb_write_bit(wb, changed);
@@ -815,7 +816,7 @@ static void encode_segmentation(VP10_COMMON *cm, MACROBLOCKD *xd,
 static void encode_txfm_probs(VP10_COMMON *cm, vpx_writer *w,
                               FRAME_COUNTS *counts) {
   // Mode
-  vpx_write_literal(w, MIN(cm->tx_mode, ALLOW_32X32), 2);
+  vpx_write_literal(w, VPXMIN(cm->tx_mode, ALLOW_32X32), 2);
   if (cm->tx_mode >= ALLOW_32X32)
     vpx_write_bit(w, cm->tx_mode == TX_MODE_SELECT);
 
@@ -851,11 +852,9 @@ static void encode_txfm_probs(VP10_COMMON *cm, vpx_writer *w,
 
 static void write_interp_filter(INTERP_FILTER filter,
                                 struct vpx_write_bit_buffer *wb) {
-  const int filter_to_literal[] = { 1, 0, 2, 3 };
-
   vpx_wb_write_bit(wb, filter == SWITCHABLE);
   if (filter != SWITCHABLE)
-    vpx_wb_write_literal(wb, filter_to_literal[filter], 2);
+    vpx_wb_write_literal(wb, filter, 2);
 }
 
 static void fix_interp_filter(VP10_COMMON *cm, FRAME_COUNTS *counts) {
@@ -996,18 +995,7 @@ static void write_frame_size_with_refs(VP10_COMP *cpi,
   for (ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ++ref_frame) {
     YV12_BUFFER_CONFIG *cfg = get_ref_frame_buffer(cpi, ref_frame);
 
-    // Set "found" to 0 for temporal svc and for spatial svc key frame
-    if (cpi->use_svc &&
-        ((cpi->svc.number_temporal_layers > 1 &&
-         cpi->oxcf.rc_mode == VPX_CBR) ||
-        (cpi->svc.number_spatial_layers > 1 &&
-         cpi->svc.layer_context[cpi->svc.spatial_layer_id].is_key_frame) ||
-        (is_two_pass_svc(cpi) &&
-         cpi->svc.encode_empty_frame_state == ENCODING &&
-         cpi->svc.layer_context[0].frames_from_key_frame <
-         cpi->svc.number_temporal_layers + 1))) {
-      found = 0;
-    } else if (cfg != NULL) {
+    if (cfg != NULL) {
       found = cm->width == cfg->y_crop_width &&
               cm->height == cfg->y_crop_height;
     }
@@ -1093,14 +1081,6 @@ static void write_uncompressed_header(VP10_COMP *cpi,
     write_bitdepth_colorspace_sampling(cm, wb);
     write_frame_size(cm, wb);
   } else {
-    // In spatial svc if it's not error_resilient_mode then we need to code all
-    // visible frames as invisible. But we need to keep the show_frame flag so
-    // that the publisher could know whether it is supposed to be visible.
-    // So we will code the show_frame flag as it is. Then code the intra_only
-    // bit here. This will make the bitstream incompatible. In the player we
-    // will change to show_frame flag to 0, then add an one byte frame with
-    // show_existing_frame flag which tells the decoder which frame we want to
-    // show.
     if (!cm->show_frame)
       vpx_wb_write_bit(wb, cm->intra_only);
 

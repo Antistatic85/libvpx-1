@@ -11,6 +11,7 @@
 #include <limits.h>
 #include <math.h>
 
+#include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_ports/system_state.h"
 
 #include "vp9/encoder/vp9_aq_cyclicrefresh.h"
@@ -185,8 +186,8 @@ void vp9_cyclic_refresh_update_segment(VP9_COMP *const cpi,
   CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
   const int bw = num_8x8_blocks_wide_lookup[bsize];
   const int bh = num_8x8_blocks_high_lookup[bsize];
-  const int xmis = MIN(cm->mi_cols - mi_col, bw);
-  const int ymis = MIN(cm->mi_rows - mi_row, bh);
+  const int xmis = VPXMIN(cm->mi_cols - mi_col, bw);
+  const int ymis = VPXMIN(cm->mi_rows - mi_row, bh);
   const int block_index = mi_row * cm->mi_cols + mi_col;
   const int refresh_this_block = candidate_refresh_aq(cr, mbmi, rate, dist,
                                                       bsize);
@@ -381,10 +382,10 @@ void cyclic_refresh_update_map(VP9_COMP *const cpi,
     assert(mi_col >= 0 && mi_col < cm->mi_cols);
     bl_index = mi_row * cm->mi_cols + mi_col;
     // Loop through all 8x8 blocks in superblock and update map.
-    xmis = MIN(cm->mi_cols - mi_col,
-               num_8x8_blocks_wide_lookup[BLOCK_64X64]);
-    ymis = MIN(cm->mi_rows - mi_row,
-               num_8x8_blocks_high_lookup[BLOCK_64X64]);
+    xmis =
+        VPXMIN(cm->mi_cols - mi_col, num_8x8_blocks_wide_lookup[BLOCK_64X64]);
+    ymis =
+        VPXMIN(cm->mi_rows - mi_row, num_8x8_blocks_high_lookup[BLOCK_64X64]);
     for (y = 0; y < ymis; y++) {
       for (x = 0; x < xmis; x++) {
         const int bl_index2 = bl_index + y * cm->mi_cols + x;
@@ -519,8 +520,9 @@ void vp9_cyclic_refresh_setup(VP9_COMP *const cpi) {
 
     // Set a more aggressive (higher) q delta for segment BOOST2.
     qindex_delta = compute_deltaq(
-        cpi, cm->base_qindex, MIN(CR_MAX_RATE_TARGET_RATIO,
-        0.1 * cr->rate_boost_fac * cr->rate_ratio_qdelta));
+        cpi, cm->base_qindex,
+        VPXMIN(CR_MAX_RATE_TARGET_RATIO,
+               0.1 * cr->rate_boost_fac * cr->rate_ratio_qdelta));
     cr->qindex_delta[2] = qindex_delta;
     vp9_set_segdata(seg, CR_SEGMENT_ID_BOOST2, SEG_LVL_ALT_Q, qindex_delta);
 
@@ -581,8 +583,8 @@ void vp9_gpu_cyclic_refresh_qindex_setup(VP9_COMP *const cpi,
   vp9_set_segdata(seg, CR_SEGMENT_ID_BOOST1, SEG_LVL_ALT_Q, qindex_delta);
   // Set a more aggressive (higher) q delta for segment BOOST2.
   qindex_delta = compute_deltaq(
-      cpi, base_qindex, MIN(CR_MAX_RATE_TARGET_RATIO,
-                                0.1 * cr->rate_boost_fac * cr->rate_ratio_qdelta));
+      cpi, base_qindex, VPXMIN(CR_MAX_RATE_TARGET_RATIO,
+                               0.1 * cr->rate_boost_fac * cr->rate_ratio_qdelta));
   cr->qindex_delta[2] = qindex_delta;
   vp9_set_segdata(seg, CR_SEGMENT_ID_BOOST2, SEG_LVL_ALT_Q, qindex_delta);
 }

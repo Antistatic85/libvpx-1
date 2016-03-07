@@ -16,6 +16,7 @@
 #include "./vp9_rtcd.h"
 #include "./vpx_dsp_rtcd.h"
 
+#include "vpx_dsp/vpx_dsp_common.h"
 #include "vpx_mem/vpx_mem.h"
 #include "vpx_ports/mem.h"
 
@@ -343,16 +344,16 @@ static void model_rd_for_sb_y_large(VP9_COMP *cpi, BLOCK_SIZE bsize,
 
   if (cpi->common.tx_mode == TX_MODE_SELECT) {
     if (sse > (var << 2))
-      tx_size = MIN(max_txsize_lookup[bsize],
-                    tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+      tx_size = VPXMIN(max_txsize_lookup[bsize],
+                       tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
     else
       tx_size = TX_8X8;
 
     if (tx_size > TX_16X16)
       tx_size = TX_16X16;
   } else {
-    tx_size = MIN(max_txsize_lookup[bsize],
-                  tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+    tx_size = VPXMIN(max_txsize_lookup[bsize],
+                     tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
   }
 
   assert(tx_size >= TX_8X8);
@@ -485,8 +486,8 @@ static void model_rd_for_sb_y(VP9_COMP *cpi, BLOCK_SIZE bsize,
   if (cpi->common.tx_mode == TX_MODE_SELECT) {
     if (sse > (var << 2))
       xd->mi[0]->mbmi.tx_size =
-          MIN(max_txsize_lookup[bsize],
-              tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+          VPXMIN(max_txsize_lookup[bsize],
+                 tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
     else
       xd->mi[0]->mbmi.tx_size = TX_8X8;
 
@@ -497,8 +498,8 @@ static void model_rd_for_sb_y(VP9_COMP *cpi, BLOCK_SIZE bsize,
       xd->mi[0]->mbmi.tx_size = TX_16X16;
   } else {
     xd->mi[0]->mbmi.tx_size =
-        MIN(max_txsize_lookup[bsize],
-            tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+        VPXMIN(max_txsize_lookup[bsize],
+               tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
   }
 
   // Evaluate if the partition block is a skippable block in Y plane.
@@ -789,7 +790,7 @@ static void encode_breakout_test(VP9_COMP *cpi, MACROBLOCK *x,
     const unsigned int max_thresh = 36000;
     // The encode_breakout input
     const unsigned int min_thresh =
-        MIN(((unsigned int)x->encode_breakout << 4), max_thresh);
+        VPXMIN(((unsigned int)x->encode_breakout << 4), max_thresh);
 #if CONFIG_VP9_HIGHBITDEPTH
     const int shift = (xd->bd << 1) - 16;
 #endif
@@ -909,7 +910,7 @@ static void estimate_block_intra(int plane, int block, BLOCK_SIZE plane_bsize,
 
   // TODO(jingning): This needs further refactoring.
   block_yrd(cpi, x, &rate, &dist, &is_skippable, &this_sse, 0,
-            bsize_tx, MIN(tx_size, TX_16X16));
+            bsize_tx, VPXMIN(tx_size, TX_16X16));
   x->skip_txfm[0] = is_skippable;
   rate += vp9_cost_bit(vp9_get_skip_prob(&cpi->common, xd), is_skippable);
 
@@ -958,8 +959,8 @@ static INLINE void update_thresh_freq_fact(VP9_COMP *cpi,
   if (thr_mode_idx == best_mode_idx)
     *freq_fact -= (*freq_fact >> 4);
   else
-    *freq_fact = MIN(*freq_fact + RD_THRESH_INC,
-        cpi->sf.adaptive_rd_thresh * RD_THRESH_MAX_FACT);
+    *freq_fact = VPXMIN(*freq_fact + RD_THRESH_INC,
+                        cpi->sf.adaptive_rd_thresh * RD_THRESH_MAX_FACT);
 }
 
 void vp9_pick_intra_mode(VP9_COMP *cpi, MACROBLOCK *x, RD_COST *rd_cost,
@@ -970,8 +971,8 @@ void vp9_pick_intra_mode(VP9_COMP *cpi, MACROBLOCK *x, RD_COST *rd_cost,
   PREDICTION_MODE this_mode;
   struct estimate_block_intra_args args = { cpi, x, DC_PRED, 0, 0 };
   const TX_SIZE intra_tx_size =
-      MIN(max_txsize_lookup[bsize],
-          tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+      VPXMIN(max_txsize_lookup[bsize],
+             tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
   MODE_INFO *const mic = xd->mi[0];
   int *bmode_costs;
   const MODE_INFO *above_mi = xd->mi[-xd->mi_stride];
@@ -1098,8 +1099,8 @@ void vp9_pick_inter_mode_dp(VP9_COMP *cpi, MACROBLOCK *x,
   mbmi->sb_type = bsize;
   mbmi->ref_frame[0] = NONE;
   mbmi->ref_frame[1] = NONE;
-  mbmi->tx_size = MIN(max_txsize_lookup[bsize],
-                      tx_mode_to_biggest_tx_size[cm->tx_mode]);
+  mbmi->tx_size = VPXMIN(max_txsize_lookup[bsize],
+                         tx_mode_to_biggest_tx_size[cm->tx_mode]);
 
 #if CONFIG_VP9_TEMPORAL_DENOISING
   vp9_denoiser_reset_frame_stats(ctx);
@@ -1321,8 +1322,8 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   mbmi->sb_type = bsize;
   mbmi->ref_frame[0] = NONE;
   mbmi->ref_frame[1] = NONE;
-  mbmi->tx_size = MIN(max_txsize_lookup[bsize],
-                      tx_mode_to_biggest_tx_size[cm->tx_mode]);
+  mbmi->tx_size = VPXMIN(max_txsize_lookup[bsize],
+                         tx_mode_to_biggest_tx_size[cm->tx_mode]);
 
 #if CONFIG_VP9_TEMPORAL_DENOISING
   vp9_denoiser_reset_frame_stats(ctx);
@@ -1631,7 +1632,7 @@ skip_gpu:
     if (!this_early_term) {
       this_sse = (int64_t)sse_y;
       block_yrd(cpi, x, &this_rdc.rate, &this_rdc.dist, &is_skippable,
-                &this_sse, 0, bsize, MIN(mbmi->tx_size, TX_16X16));
+                &this_sse, 0, bsize, VPXMIN(mbmi->tx_size, TX_16X16));
       x->skip_txfm[0] = is_skippable;
       if (is_skippable) {
         this_rdc.rate = vp9_cost_bit(vp9_get_skip_prob(cm, xd), 1);
@@ -1740,8 +1741,8 @@ skip_gpu:
        bsize <= cpi->sf.max_intra_bsize)) {
     struct estimate_block_intra_args args = { cpi, x, DC_PRED, 0, 0 };
     const TX_SIZE intra_tx_size =
-        MIN(max_txsize_lookup[bsize],
-            tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
+        VPXMIN(max_txsize_lookup[bsize],
+               tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
     int i;
     TX_SIZE best_intra_tx_size = TX_SIZES;
 

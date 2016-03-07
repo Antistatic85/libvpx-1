@@ -10,6 +10,8 @@
 
 #include "./vpx_config.h"
 
+#include "vpx_dsp/vpx_dsp_common.h"
+
 #include "vp9/common/vp9_reconinter.h"
 
 #include "vp9/encoder/vp9_encoder.h"
@@ -26,7 +28,7 @@ void vp9_enc_sync_read(VP9_COMP *cpi, int sb_row, int sb_col) {
     // top right dependency
     int idx = sb_col + cpi->sync_range;
 
-    idx = MIN(idx, (cm->sb_cols - 1));
+    idx = VPXMIN(idx, (cm->sb_cols - 1));
     if (*top_sb_col >= idx)
       break;
     x86_pause_hint();

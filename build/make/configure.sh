@@ -1095,7 +1095,9 @@ EOF
           CROSS=${CROSS:-g}
           ;;
         os2)
+          disable_feature pic
           AS=${AS:-nasm}
+          add_ldflags -Zhigh-mem
           ;;
       esac
 
@@ -1340,12 +1342,6 @@ EOF
   if enabled linux; then
     add_cflags -D_LARGEFILE_SOURCE
     add_cflags -D_FILE_OFFSET_BITS=64
-  fi
-
-  # append any user defined extra cflags
-  if [ -n "${extra_cflags}" ] ; then
-    check_add_cflags ${extra_cflags} || \
-    die "Requested extra CFLAGS '${extra_cflags}' not supported by compiler"
   fi
 }
 

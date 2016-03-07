@@ -334,7 +334,7 @@ void vp9_gpu_set_mvinfo_offsets(VP9_COMP *const cpi, MACROBLOCK *const x,
 static int get_subframe_offset(int idx, int mi_rows, int sb_rows) {
   const int offset = ((idx * sb_rows + (MAX_SUB_FRAMES - 1)) / MAX_SUB_FRAMES)
                      << MI_BLOCK_SIZE_LOG2;
-  return MIN(offset, mi_rows);
+  return VPXMIN(offset, mi_rows);
 }
 
 void vp9_subframe_init(SubFrameInfo *subframe, const VP9_COMMON *cm, int idx) {

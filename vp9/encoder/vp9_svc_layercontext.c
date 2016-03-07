@@ -13,9 +13,10 @@
 #include "vp9/encoder/vp9_encoder.h"
 #include "vp9/encoder/vp9_svc_layercontext.h"
 #include "vp9/encoder/vp9_extend.h"
+#include "vpx_dsp/vpx_dsp_common.h"
 
 #define SMALL_FRAME_FB_IDX 7
-#define SMALL_FRAME_WIDTH  16
+#define SMALL_FRAME_WIDTH  32
 #define SMALL_FRAME_HEIGHT 16
 
 void vp9_init_layer_context(VP9_COMP *const cpi) {
@@ -113,8 +114,6 @@ void vp9_update_layer_context_change_config(VP9_COMP *const cpi,
 
   if (svc->temporal_layering_mode != VP9E_TEMPORAL_LAYERING_MODE_NOLAYERING) {
     for (sl = 0; sl < oxcf->ss_number_layers; ++sl) {
-      spatial_layer_target = 0;
-
       for (tl = 0; tl < oxcf->ts_number_layers; ++tl) {
         layer = LAYER_IDS_TO_IDX(sl, tl, oxcf->ts_number_layers);
         svc->layer_context[layer].target_bandwidth =
@@ -141,8 +140,8 @@ void vp9_update_layer_context_change_config(VP9_COMP *const cpi,
         lrc->maximum_buffer_size =
             (int64_t)(rc->maximum_buffer_size * bitrate_alloc);
         lrc->bits_off_target =
-            MIN(lrc->bits_off_target, lrc->maximum_buffer_size);
-        lrc->buffer_level = MIN(lrc->buffer_level, lrc->maximum_buffer_size);
+            VPXMIN(lrc->bits_off_target, lrc->maximum_buffer_size);
+        lrc->buffer_level = VPXMIN(lrc->buffer_level, lrc->maximum_buffer_size);
         lc->framerate = cpi->framerate / oxcf->ts_rate_decimator[tl];
         lrc->avg_frame_bandwidth = (int)(lc->target_bandwidth / lc->framerate);
         lrc->max_frame_bandwidth = rc->max_frame_bandwidth;
@@ -173,9 +172,9 @@ void vp9_update_layer_context_change_config(VP9_COMP *const cpi,
           (int64_t)(rc->optimal_buffer_level * bitrate_alloc);
       lrc->maximum_buffer_size =
           (int64_t)(rc->maximum_buffer_size * bitrate_alloc);
-      lrc->bits_off_target = MIN(lrc->bits_off_target,
-                                 lrc->maximum_buffer_size);
-      lrc->buffer_level = MIN(lrc->buffer_level, lrc->maximum_buffer_size);
+      lrc->bits_off_target = VPXMIN(lrc->bits_off_target,
+                                    lrc->maximum_buffer_size);
+      lrc->buffer_level = VPXMIN(lrc->buffer_level, lrc->maximum_buffer_size);
       // Update framerate-related quantities.
       if (svc->number_temporal_layers > 1 && cpi->oxcf.rc_mode == VPX_CBR) {
         lc->framerate = cpi->framerate / oxcf->ts_rate_decimator[layer];
