@@ -428,6 +428,8 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
 
   vpx_free_frame_buffer(&cpi->svc.empty_frame.img);
   memset(&cpi->svc.empty_frame, 0, sizeof(cpi->svc.empty_frame));
+
+  vp9_free_svc_cyclic_refresh(cpi);
 }
 
 static void save_coding_context(VP9_COMP *cpi) {
@@ -812,6 +814,7 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
   cm->use_highbitdepth = oxcf->use_highbitdepth;
 #endif
   cm->color_space = oxcf->color_space;
+  cm->color_range = oxcf->color_range;
 
   cm->width = oxcf->width;
   cm->height = oxcf->height;
@@ -1549,6 +1552,7 @@ void vp9_change_config(struct VP9_COMP *cpi, const VP9EncoderConfig *oxcf) {
     cm->profile = oxcf->profile;
   cm->bit_depth = oxcf->bit_depth;
   cm->color_space = oxcf->color_space;
+  cm->color_range = oxcf->color_range;
 
   if (cm->profile <= PROFILE_1)
     assert(cm->bit_depth == VPX_BITS_8);
@@ -3345,11 +3349,19 @@ static void encode_without_recode_loop(VP9_COMP *cpi) {
 
   cpi->Source = vp9_scale_if_required(cm,
                                       cpi->un_scaled_source,
-                                      &cpi->scaled_source);
-  if (cpi->unscaled_last_source != NULL)
+                                      &cpi->scaled_source,
+                                      (cpi->oxcf.pass == 0));
+
+  // Avoid scaling last_source unless its needed.
+  // Last source is currently only used for screen-content mode,
+  // or if partition_search_type == SOURCE_VAR_BASED_PARTITION.
+  if (cpi->unscaled_last_source != NULL &&
+      (cpi->oxcf.content == VP9E_CONTENT_SCREEN ||
+      cpi->sf.partition_search_type == SOURCE_VAR_BASED_PARTITION))
     cpi->Last_Source = vp9_scale_if_required(cm,
                                              cpi->unscaled_last_source,
-                                             &cpi->scaled_last_source);
+                                             &cpi->scaled_last_source,
+                                             (cpi->oxcf.pass == 0));
 
   if (frame_is_intra_only(cm) == 0) {
     vp9_scale_references(cpi);
@@ -3442,11 +3454,13 @@ static void encode_with_recode_loop(VP9_COMP *cpi,
     }
 
     cpi->Source = vp9_scale_if_required(cm, cpi->un_scaled_source,
-                                      &cpi->scaled_source);
+                                      &cpi->scaled_source,
+                                      (cpi->oxcf.pass == 0));
 
     if (cpi->unscaled_last_source != NULL)
       cpi->Last_Source = vp9_scale_if_required(cm, cpi->unscaled_last_source,
-                                               &cpi->scaled_last_source);
+                                               &cpi->scaled_last_source,
+                                               (cpi->oxcf.pass == 0));
 
     if (frame_is_intra_only(cm) == 0) {
       if (loop_count > 0) {
@@ -3697,20 +3711,17 @@ static void set_ext_overrides(VP9_COMP *cpi) {
 
 YV12_BUFFER_CONFIG *vp9_scale_if_required(VP9_COMMON *cm,
                                           YV12_BUFFER_CONFIG *unscaled,
-                                          YV12_BUFFER_CONFIG *scaled) {
+                                          YV12_BUFFER_CONFIG *scaled,
+                                          int use_normative_scaler) {
   if (cm->mi_cols * MI_SIZE != unscaled->y_width ||
       cm->mi_rows * MI_SIZE != unscaled->y_height) {
 #if CONFIG_VP9_HIGHBITDEPTH
-    if (unscaled->y_width == (scaled->y_width << 1) &&
-        unscaled->y_height == (scaled->y_height << 1))
+    if (use_normative_scaler)
       scale_and_extend_frame(unscaled, scaled, (int)cm->bit_depth);
     else
       scale_and_extend_frame_nonnormative(unscaled, scaled, (int)cm->bit_depth);
 #else
-    // Use the faster normative (convolve8) scaling filter: for now only for
-    // scaling factor of 2.
-    if (unscaled->y_width == (scaled->y_width << 1) &&
-        unscaled->y_height == (scaled->y_height << 1))
+    if (use_normative_scaler)
       scale_and_extend_frame(unscaled, scaled);
     else
       scale_and_extend_frame_nonnormative(unscaled, scaled);
@@ -3873,6 +3884,8 @@ static void encode_frame_to_data_rate(VP9_COMP *cpi,
 #endif
 
   cm->frame_to_show = get_frame_new_buffer(cm);
+  cm->frame_to_show->color_space = cm->color_space;
+  cm->frame_to_show->color_range = cm->color_range;
   cpi->last_frame_buffer = get_ref_frame_buffer(cpi, LAST_FRAME);
 
   if (cpi->sf.recode_loop == DISALLOW_RECODE) {

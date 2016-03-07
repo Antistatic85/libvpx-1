@@ -94,4 +94,4 @@ void vp9_accumulate_rd_opt(ThreadData *td, ThreadData *td_t);
 void vp9_mb_copy(struct VP9_COMP *cpi, struct macroblock *x_dst,
                  struct macroblock *x_src);
 
-#endif /* VP9_ETHREAD_H_ */
+#endif /* VP9_ENCODER_VP9_ETHREAD_H_ */

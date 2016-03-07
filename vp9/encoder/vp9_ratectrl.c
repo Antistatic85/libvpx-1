@@ -533,8 +533,7 @@ int vp9_rc_regulate_q(const VP9_COMP *cpi, int target_bits_per_frame,
   do {
     if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ &&
         cm->seg.enabled &&
-        cpi->svc.temporal_layer_id == 0 &&
-        cpi->svc.spatial_layer_id == 0) {
+        cpi->svc.temporal_layer_id == 0) {
       bits_per_mb_at_this_q =
           (int)vp9_cyclic_refresh_rc_bits_per_mb(cpi, i, correction_factor);
     } else {
@@ -1354,7 +1353,7 @@ void vp9_rc_postencode_update(VP9_COMP *cpi, uint64_t bytes_used) {
 
   rc->total_target_vs_actual = rc->total_actual_bits - rc->total_target_bits;
 
-  if (!cpi->use_svc) {
+  if (!cpi->use_svc || is_two_pass_svc(cpi)) {
     if (is_altref_enabled(cpi) && cpi->refresh_alt_ref_frame &&
         (cm->frame_type != KEY_FRAME))
       // Update the alternate reference frame stats as appropriate.
@@ -1832,8 +1831,8 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
   }
   // Resize based on average buffer underflow and QP over some window.
   // Ignore samples close to key frame, since QP is usually high after key.
-  if (cpi->rc.frames_since_key > 2 * cpi->framerate) {
-    const int window = (int)(5 * cpi->framerate);
+  if (cpi->rc.frames_since_key > 1 * cpi->framerate) {
+    const int window = (int)(4 * cpi->framerate);
     cpi->resize_avg_qp += cm->base_qindex;
     if (cpi->rc.buffer_level < (int)(30 * rc->optimal_buffer_level / 100))
       ++cpi->resize_buffer_underflow;
@@ -1850,7 +1849,7 @@ int vp9_resize_one_pass_cbr(VP9_COMP *cpi) {
         resize_now = 1;
         cpi->resize_state = 1;
       } else if (cpi->resize_state == 1 &&
-                 avg_qp < 40 * cpi->rc.worst_quality / 100) {
+                 avg_qp < 50 * cpi->rc.worst_quality / 100) {
         resize_now = -1;
         cpi->resize_state = 0;
       }

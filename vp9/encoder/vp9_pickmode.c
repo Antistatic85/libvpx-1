@@ -686,10 +686,11 @@ static void block_yrd(VP9_COMP *cpi, MACROBLOCK *x, int *rate, int64_t *dist,
 }
 #endif
 
-static void model_rd_for_sb_uv(VP9_COMP *cpi, BLOCK_SIZE bsize,
+static void model_rd_for_sb_uv(VP9_COMP *cpi, BLOCK_SIZE plane_bsize,
                                MACROBLOCK *x, MACROBLOCKD *xd,
                                int *out_rate_sum, int64_t *out_dist_sum,
-                               unsigned int *var_y, unsigned int *sse_y) {
+                               unsigned int *var_y, unsigned int *sse_y,
+                               int start_plane, int stop_plane) {
   // Note our transform coeffs are 8 times an orthogonal transform.
   // Hence quantizer step is also 8 times. To get effective quantizer
   // we need to divide by 8 before sending to modeling function.
@@ -701,12 +702,12 @@ static void model_rd_for_sb_uv(VP9_COMP *cpi, BLOCK_SIZE bsize,
   *out_rate_sum = 0;
   *out_dist_sum = 0;
 
-  for (i = 1; i <= 2; ++i) {
+  for (i = start_plane; i <= stop_plane; ++i) {
     struct macroblock_plane *const p = &x->plane[i];
     struct macroblockd_plane *const pd = &xd->plane[i];
     const uint32_t dc_quant = pd->dequant[0];
     const uint32_t ac_quant = pd->dequant[1];
-    const BLOCK_SIZE bs = get_plane_block_size(bsize, pd);
+    const BLOCK_SIZE bs = plane_bsize;
     unsigned int var;
 
     if (!x->color_sensitivity[i - 1])
@@ -891,12 +892,8 @@ static void estimate_block_intra(int plane, int block, BLOCK_SIZE plane_bsize,
   int i, j;
   int rate;
   int64_t dist;
-  int64_t this_sse = INT64_MAX;
-  int is_skippable;
 
   txfrm_block_to_raster_xy(plane_bsize, tx_size, block, &i, &j);
-  assert(plane == 0);
-  (void) plane;
 
   p->src.buf = &src_buf_base[4 * (j * src_stride + i)];
   pd->dst.buf = &dst_buf_base[4 * (j * dst_stride + i)];
@@ -906,13 +903,22 @@ static void estimate_block_intra(int plane, int block, BLOCK_SIZE plane_bsize,
                           x->skip_encode ? p->src.buf : pd->dst.buf,
                           x->skip_encode ? src_stride : dst_stride,
                           pd->dst.buf, dst_stride,
-                          i, j, 0);
+                          i, j, plane);
 
-  // TODO(jingning): This needs further refactoring.
-  block_yrd(cpi, x, &rate, &dist, &is_skippable, &this_sse, 0,
-            bsize_tx, VPXMIN(tx_size, TX_16X16));
-  x->skip_txfm[0] = is_skippable;
-  rate += vp9_cost_bit(vp9_get_skip_prob(&cpi->common, xd), is_skippable);
+  if (plane == 0) {
+    int64_t this_sse = INT64_MAX;
+    int is_skippable;
+    // TODO(jingning): This needs further refactoring.
+    block_yrd(cpi, x, &rate, &dist, &is_skippable, &this_sse, 0,
+              bsize_tx, VPXMIN(tx_size, TX_16X16));
+    x->skip_txfm[0] = is_skippable;
+    // TODO(jingning): Skip is signalled per prediciton block not per tx block.
+    rate += vp9_cost_bit(vp9_get_skip_prob(&cpi->common, xd), is_skippable);
+  } else {
+    unsigned int var, sse;
+    model_rd_for_sb_uv(cpi, plane_bsize, x, xd, &rate, &dist, &var, &sse,
+                       plane, plane);
+  }
 
   p->src.buf = src_buf_base;
   pd->dst.buf = dst_buf_base;
@@ -1394,10 +1400,13 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
     if (const_motion[ref_frame] && this_mode == NEARMV)
       continue;
 
-    i = (ref_frame == LAST_FRAME) ? GOLDEN_FRAME : LAST_FRAME;
-    if ((cpi->ref_frame_flags & flag_list[i]) && cpi->sf.reference_masking)
+    if (!(this_mode == ZEROMV && ref_frame == LAST_FRAME)) {
+      i = (ref_frame == LAST_FRAME) ? GOLDEN_FRAME : LAST_FRAME;
+      if ((cpi->ref_frame_flags & flag_list[i]) && cpi->sf.reference_masking)
         if (x->pred_mv_sad[ref_frame] > (x->pred_mv_sad[i] << 1))
           ref_frame_skip_mask |= (1 << ref_frame);
+    }
+
     if (ref_frame_skip_mask & (1 << ref_frame))
       continue;
 
@@ -1660,12 +1669,13 @@ skip_gpu:
     if (x->color_sensitivity[0] || x->color_sensitivity[1]) {
       int uv_rate = 0;
       int64_t uv_dist = 0;
+      const BLOCK_SIZE uv_bsize = get_plane_block_size(bsize, &xd->plane[1]);
       if (x->color_sensitivity[0])
         vp9_build_inter_predictors_sbp(xd, mi_row, mi_col, bsize, 1);
       if (x->color_sensitivity[1])
         vp9_build_inter_predictors_sbp(xd, mi_row, mi_col, bsize, 2);
-      model_rd_for_sb_uv(cpi, bsize, x, xd, &uv_rate, &uv_dist,
-                         &var_y, &sse_y);
+      model_rd_for_sb_uv(cpi, uv_bsize, x, xd, &uv_rate, &uv_dist,
+                         &var_y, &sse_y, 1, 2);
       this_rdc.rate += uv_rate;
       this_rdc.dist += uv_dist;
     }
@@ -1788,6 +1798,15 @@ skip_gpu:
       mbmi->tx_size = intra_tx_size;
       vp9_foreach_transformed_block_in_plane(xd, bsize, 0,
                                              estimate_block_intra, &args);
+      // Inter and intra RD will mismatch in scale for non-screen content.
+      if (cpi->oxcf.content == VP9E_CONTENT_SCREEN) {
+        if (x->color_sensitivity[0])
+          vp9_foreach_transformed_block_in_plane(xd, bsize, 1,
+                                                 estimate_block_intra, &args);
+        if (x->color_sensitivity[1])
+          vp9_foreach_transformed_block_in_plane(xd, bsize, 2,
+                                                 estimate_block_intra, &args);
+      }
       this_rdc.rate = args.rate;
       this_rdc.dist = args.dist;
       this_rdc.rate += cpi->mbmode_cost[this_mode];

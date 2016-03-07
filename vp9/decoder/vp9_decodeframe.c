@@ -1256,6 +1256,7 @@ static void setup_frame_size(VP9_COMMON *cm, struct vpx_read_bit_buffer *rb) {
   pool->frame_bufs[cm->new_fb_idx].buf.subsampling_y = cm->subsampling_y;
   pool->frame_bufs[cm->new_fb_idx].buf.bit_depth = (unsigned int)cm->bit_depth;
   pool->frame_bufs[cm->new_fb_idx].buf.color_space = cm->color_space;
+  pool->frame_bufs[cm->new_fb_idx].buf.color_range = cm->color_range;
 }
 
 static INLINE int valid_ref_frame_img_fmt(vpx_bit_depth_t ref_bit_depth,
@@ -1337,6 +1338,7 @@ static void setup_frame_size_with_refs(VP9_COMMON *cm,
   pool->frame_bufs[cm->new_fb_idx].buf.subsampling_y = cm->subsampling_y;
   pool->frame_bufs[cm->new_fb_idx].buf.bit_depth = (unsigned int)cm->bit_depth;
   pool->frame_bufs[cm->new_fb_idx].buf.color_space = cm->color_space;
+  pool->frame_bufs[cm->new_fb_idx].buf.color_range = cm->color_range;
 }
 
 static void setup_tile_info(VP9_COMMON *cm, struct vpx_read_bit_buffer *rb) {
@@ -1561,9 +1563,10 @@ static const uint8_t *decode_tiles(VP9Decoder *pbi,
   return vpx_reader_find_end(&tile_data->bit_reader);
 }
 
-static int tile_worker_hook(TileWorkerData *const tile_data,
-                            const TileInfo *const tile) {
+static int tile_worker_hook(TileWorkerData *const tile_data, void *unused) {
+  const TileInfo *const tile = &tile_data->xd.tile;
   int mi_row, mi_col;
+  (void)unused;
 
   if (setjmp(tile_data->error_info.jmp)) {
     tile_data->error_info.setjmp = 0;
@@ -1626,8 +1629,6 @@ static const uint8_t *decode_tiles_mt(VP9Decoder *pbi,
     CHECK_MEM_ERROR(cm, pbi->tile_worker_data,
                     vpx_memalign(32, num_threads *
                                  sizeof(*pbi->tile_worker_data)));
-    CHECK_MEM_ERROR(cm, pbi->tile_worker_info,
-                    vpx_malloc(num_threads * sizeof(*pbi->tile_worker_info)));
     for (i = 0; i < num_threads; ++i) {
       VPxWorker *const worker = &pbi->tile_workers[i];
       ++pbi->num_tile_workers;
@@ -1643,10 +1644,15 @@ static const uint8_t *decode_tiles_mt(VP9Decoder *pbi,
   // Reset tile decoding hook
   for (n = 0; n < num_workers; ++n) {
     VPxWorker *const worker = &pbi->tile_workers[n];
+    TileWorkerData *const tile_data = &pbi->tile_worker_data[n];
     winterface->sync(worker);
+    tile_data->pbi = pbi;
+    tile_data->xd = pbi->mb;
+    tile_data->xd.counts =
+        cm->frame_parallel_decoding_mode ? NULL : &tile_data->counts;
     worker->hook = (VPxWorkerHook)tile_worker_hook;
-    worker->data1 = &pbi->tile_worker_data[n];
-    worker->data2 = &pbi->tile_worker_info[n];
+    worker->data1 = tile_data;
+    worker->data2 = NULL;
   }
 
   // Note: this memset assumes above_context[0], [1] and [2]
@@ -1696,16 +1702,10 @@ static const uint8_t *decode_tiles_mt(VP9Decoder *pbi,
     for (i = 0; i < num_workers && n < tile_cols; ++i) {
       VPxWorker *const worker = &pbi->tile_workers[i];
       TileWorkerData *const tile_data = (TileWorkerData*)worker->data1;
-      TileInfo *const tile = (TileInfo*)worker->data2;
       TileBuffer *const buf = &tile_buffers[0][n];
 
-      tile_data->pbi = pbi;
-      tile_data->xd = pbi->mb;
       tile_data->xd.corrupted = 0;
-      tile_data->xd.counts = cm->frame_parallel_decoding_mode ?
-                             0 : &tile_data->counts;
       vp9_zero(tile_data->dqcoeff);
-      vp9_tile_init(tile, cm, 0, buf->col);
       vp9_tile_init(&tile_data->xd.tile, cm, 0, buf->col);
       setup_token_decoder(buf->data, data_end, buf->size, &cm->error,
                           &tile_data->bit_reader, pbi->decrypt_cb,
@@ -1740,14 +1740,15 @@ static const uint8_t *decode_tiles_mt(VP9Decoder *pbi,
       bit_reader_end = vpx_reader_find_end(&tile_data->bit_reader);
       final_worker = -1;
     }
+  }
 
-    // Accumulate thread frame counts.
-    if (n >= tile_cols && !cm->frame_parallel_decoding_mode) {
-      for (i = 0; i < num_workers; ++i) {
-        TileWorkerData *const tile_data =
-            (TileWorkerData*)pbi->tile_workers[i].data1;
-        vp9_accumulate_frame_counts(cm, &tile_data->counts, 1);
-      }
+  // Accumulate thread frame counts.
+  if (!cm->frame_parallel_decoding_mode) {
+    int i;
+    for (i = 0; i < num_workers; ++i) {
+      TileWorkerData *const tile_data =
+          (TileWorkerData*)pbi->tile_workers[i].data1;
+      vp9_accumulate_frame_counts(&cm->counts, &tile_data->counts, 1);
     }
   }
 
@@ -1774,7 +1775,8 @@ static void read_bitdepth_colorspace_sampling(
   }
   cm->color_space = vpx_rb_read_literal(rb, 3);
   if (cm->color_space != VPX_CS_SRGB) {
-    vpx_rb_read_bit(rb);  // [16,235] (including xvycc) vs [0,255] range
+    // [16,235] (including xvycc) vs [0,255] range
+    cm->color_range = vpx_rb_read_bit(rb);
     if (cm->profile == PROFILE_1 || cm->profile == PROFILE_3) {
       cm->subsampling_x = vpx_rb_read_bit(rb);
       cm->subsampling_y = vpx_rb_read_bit(rb);
@@ -1788,6 +1790,7 @@ static void read_bitdepth_colorspace_sampling(
       cm->subsampling_y = cm->subsampling_x = 1;
     }
   } else {
+    cm->color_range = 1;
     if (cm->profile == PROFILE_1 || cm->profile == PROFILE_3) {
       // Note if colorspace is SRGB then 4:4:4 chroma sampling is assumed.
       // 4:2:2 or 4:4:0 chroma sampling is not allowed.
@@ -1893,6 +1896,7 @@ static size_t read_uncompressed_header(VP9Decoder *pbi,
         // specifies that the default color format should be YUV 4:2:0 in this
         // case (normative).
         cm->color_space = VPX_CS_BT_601;
+        cm->color_range = 0;
         cm->subsampling_y = cm->subsampling_x = 1;
         cm->bit_depth = VPX_BITS_8;
 #if CONFIG_VP9_HIGHBITDEPTH
@@ -1943,6 +1947,7 @@ static size_t read_uncompressed_header(VP9Decoder *pbi,
   get_frame_new_buffer(cm)->bit_depth = cm->bit_depth;
 #endif
   get_frame_new_buffer(cm)->color_space = cm->color_space;
+  get_frame_new_buffer(cm)->color_range = cm->color_range;
 
   if (pbi->need_resync) {
     vpx_internal_error(&cm->error, VPX_CODEC_CORRUPT_FRAME,

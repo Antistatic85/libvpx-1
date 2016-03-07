@@ -170,15 +170,16 @@ static BLOCK_SIZE get_rd_var_based_fixed_partition(VP10_COMP *cpi,
 
 // Lighter version of set_offsets that only sets the mode info
 // pointers.
-static INLINE void set_mode_info_offsets(VP10_COMMON *const cm,
+static INLINE void set_mode_info_offsets(VP10_COMP *const cpi,
                                          MACROBLOCK *const x,
                                          MACROBLOCKD *const xd,
                                          int mi_row,
                                          int mi_col) {
+  VP10_COMMON *const cm = &cpi->common;
   const int idx_str = xd->mi_stride * mi_row + mi_col;
   xd->mi = cm->mi_grid_visible + idx_str;
   xd->mi[0] = cm->mi + idx_str;
-  x->mbmi_ext = x->mbmi_ext_base + (mi_row * cm->mi_cols + mi_col);
+  x->mbmi_ext = cpi->mbmi_ext_base + (mi_row * cm->mi_cols + mi_col);
 }
 
 static void set_offsets(VP10_COMP *cpi, const TileInfo *const tile,
@@ -193,7 +194,7 @@ static void set_offsets(VP10_COMP *cpi, const TileInfo *const tile,
 
   set_skip_context(xd, mi_row, mi_col);
 
-  set_mode_info_offsets(cm, x, xd, mi_row, mi_col);
+  set_mode_info_offsets(cpi, x, xd, mi_row, mi_col);
 
   mbmi = &xd->mi[0]->mbmi;
 
@@ -244,7 +245,7 @@ static void set_block_size(VP10_COMP * const cpi,
                            int mi_row, int mi_col,
                            BLOCK_SIZE bsize) {
   if (cpi->common.mi_cols > mi_col && cpi->common.mi_rows > mi_row) {
-    set_mode_info_offsets(&cpi->common, x, xd, mi_row, mi_col);
+    set_mode_info_offsets(cpi, x, xd, mi_row, mi_col);
     xd->mi[0]->mbmi.sb_type = bsize;
   }
 }
@@ -2585,20 +2586,6 @@ static TX_MODE select_tx_mode(const VP10_COMP *cpi, MACROBLOCKD *const xd) {
     return cpi->common.tx_mode;
 }
 
-static int get_skip_encode_frame(const VP10_COMMON *cm, ThreadData *const td) {
-  unsigned int intra_count = 0, inter_count = 0;
-  int j;
-
-  for (j = 0; j < INTRA_INTER_CONTEXTS; ++j) {
-    intra_count += td->counts->intra_inter[j][0];
-    inter_count += td->counts->intra_inter[j][1];
-  }
-
-  return (intra_count << 2) < inter_count &&
-         cm->frame_type != KEY_FRAME &&
-         cm->show_frame;
-}
-
 void vp10_init_tile_data(VP10_COMP *cpi) {
   VP10_COMMON *const cm = &cpi->common;
   const int tile_cols = 1 << cm->log2_tile_cols;
@@ -2690,7 +2677,6 @@ static int input_fpmb_stats(FIRSTPASS_MB_STATS *firstpass_mb_stats,
 #endif
 
 static void encode_frame_internal(VP10_COMP *cpi) {
-  SPEED_FEATURES *const sf = &cpi->sf;
   ThreadData *const td = &cpi->td;
   MACROBLOCK *const x = &td->mb;
   VP10_COMMON *const cm = &cpi->common;
@@ -2765,9 +2751,6 @@ static void encode_frame_internal(VP10_COMP *cpi) {
     vpx_usec_timer_mark(&emr_timer);
     cpi->time_encode_sb_row += vpx_usec_timer_elapsed(&emr_timer);
   }
-
-  sf->skip_encode_frame = sf->skip_encode_sb ?
-      get_skip_encode_frame(cm, td) : 0;
 
 #if 0
   // Keep record of the total distortion this time around for future use
@@ -2962,11 +2945,6 @@ static void encode_superblock(VP10_COMP *cpi, ThreadData *td,
   x->skip_optimize = ctx->is_coded;
   ctx->is_coded = 1;
   x->use_lp32x32fdct = cpi->sf.use_lp32x32fdct;
-  x->skip_encode = (!output_enabled && cpi->sf.skip_encode_frame &&
-                    x->q_index < QIDX_SKIP_THRESH);
-
-  if (x->skip_encode)
-    return;
 
   if (!is_inter_block(mbmi)) {
     int plane;

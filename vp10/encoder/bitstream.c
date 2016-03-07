@@ -386,8 +386,7 @@ static void write_modes_b(VP10_COMP *cpi, const TileInfo *const tile,
   xd->mi = cm->mi_grid_visible + (mi_row * cm->mi_stride + mi_col);
   m = xd->mi[0];
 
-  cpi->td.mb.mbmi_ext = cpi->td.mb.mbmi_ext_base +
-      (mi_row * cm->mi_cols + mi_col);
+  cpi->td.mb.mbmi_ext = cpi->mbmi_ext_base + (mi_row * cm->mi_cols + mi_col);
 
   set_mi_row_col(xd, tile,
                  mi_row, num_8x8_blocks_high_lookup[m->mbmi.sb_type],
@@ -714,8 +713,7 @@ static void encode_loopfilter(struct loopfilter *lf,
         vpx_wb_write_bit(wb, changed);
         if (changed) {
           lf->last_ref_deltas[i] = delta;
-          vpx_wb_write_literal(wb, abs(delta) & 0x3F, 6);
-          vpx_wb_write_bit(wb, delta < 0);
+          vpx_wb_write_inv_signed_literal(wb, delta, 6);
         }
       }
 
@@ -725,8 +723,7 @@ static void encode_loopfilter(struct loopfilter *lf,
         vpx_wb_write_bit(wb, changed);
         if (changed) {
           lf->last_mode_deltas[i] = delta;
-          vpx_wb_write_literal(wb, abs(delta) & 0x3F, 6);
-          vpx_wb_write_bit(wb, delta < 0);
+          vpx_wb_write_inv_signed_literal(wb, delta, 6);
         }
       }
     }
@@ -736,8 +733,7 @@ static void encode_loopfilter(struct loopfilter *lf,
 static void write_delta_q(struct vpx_write_bit_buffer *wb, int delta_q) {
   if (delta_q != 0) {
     vpx_wb_write_bit(wb, 1);
-    vpx_wb_write_literal(wb, abs(delta_q), 4);
-    vpx_wb_write_bit(wb, delta_q < 0);
+    vpx_wb_write_inv_signed_literal(wb, delta_q, 4);
   } else {
     vpx_wb_write_bit(wb, 0);
   }
@@ -762,7 +758,11 @@ static void encode_segmentation(VP10_COMMON *cm, MACROBLOCKD *xd,
     return;
 
   // Segmentation map
-  vpx_wb_write_bit(wb, seg->update_map);
+  if (!frame_is_intra_only(cm) && !cm->error_resilient_mode) {
+    vpx_wb_write_bit(wb, seg->update_map);
+  } else {
+    assert(seg->update_map == 1);
+  }
   if (seg->update_map) {
     // Select the coding strategy (temporal or spatial)
     vp10_choose_segmap_coding_method(cm, xd);
@@ -776,7 +776,11 @@ static void encode_segmentation(VP10_COMMON *cm, MACROBLOCKD *xd,
     }
 
     // Write out the chosen coding method.
-    vpx_wb_write_bit(wb, seg->temporal_update);
+    if (!frame_is_intra_only(cm) && !cm->error_resilient_mode) {
+      vpx_wb_write_bit(wb, seg->temporal_update);
+    } else {
+      assert(seg->temporal_update == 0);
+    }
     if (seg->temporal_update) {
       for (i = 0; i < PREDICTION_PROBS; i++) {
         const int prob = seg->pred_probs[i];
@@ -813,14 +817,25 @@ static void encode_segmentation(VP10_COMMON *cm, MACROBLOCKD *xd,
   }
 }
 
-static void encode_txfm_probs(VP10_COMMON *cm, vpx_writer *w,
+#if CONFIG_MISC_FIXES
+static void write_txfm_mode(TX_MODE mode, struct vpx_write_bit_buffer *wb) {
+  vpx_wb_write_bit(wb, mode == TX_MODE_SELECT);
+  if (mode != TX_MODE_SELECT)
+    vpx_wb_write_literal(wb, mode, 2);
+}
+#endif
+
+static void update_txfm_probs(VP10_COMMON *cm, vpx_writer *w,
                               FRAME_COUNTS *counts) {
+#if !CONFIG_MISC_FIXES
   // Mode
   vpx_write_literal(w, VPXMIN(cm->tx_mode, ALLOW_32X32), 2);
   if (cm->tx_mode >= ALLOW_32X32)
     vpx_write_bit(w, cm->tx_mode == TX_MODE_SELECT);
 
   // Probabilities
+#endif
+
   if (cm->tx_mode == TX_MODE_SELECT) {
     int i, j;
     unsigned int ct_8x8p[TX_SIZES - 3][2];
@@ -1047,7 +1062,8 @@ static void write_bitdepth_colorspace_sampling(
   }
   vpx_wb_write_literal(wb, cm->color_space, 3);
   if (cm->color_space != VPX_CS_SRGB) {
-    vpx_wb_write_bit(wb, 0);  // 0: [16, 235] (i.e. xvYCC), 1: [0, 255]
+    // 0: [16, 235] (i.e. xvYCC), 1: [0, 255]
+    vpx_wb_write_bit(wb, cm->color_range);
     if (cm->profile == PROFILE_1 || cm->profile == PROFILE_3) {
       assert(cm->subsampling_x != 1 || cm->subsampling_y != 1);
       vpx_wb_write_bit(wb, cm->subsampling_x);
@@ -1084,8 +1100,25 @@ static void write_uncompressed_header(VP10_COMP *cpi,
     if (!cm->show_frame)
       vpx_wb_write_bit(wb, cm->intra_only);
 
-    if (!cm->error_resilient_mode)
-      vpx_wb_write_literal(wb, cm->reset_frame_context, 2);
+    if (!cm->error_resilient_mode) {
+#if CONFIG_MISC_FIXES
+      if (cm->intra_only) {
+        vpx_wb_write_bit(wb,
+                         cm->reset_frame_context == RESET_FRAME_CONTEXT_ALL);
+      } else {
+        vpx_wb_write_bit(wb,
+                         cm->reset_frame_context != RESET_FRAME_CONTEXT_NONE);
+        if (cm->reset_frame_context != RESET_FRAME_CONTEXT_NONE)
+          vpx_wb_write_bit(wb,
+                           cm->reset_frame_context == RESET_FRAME_CONTEXT_ALL);
+      }
+#else
+      static const int reset_frame_context_conv_tbl[3] = { 0, 2, 3 };
+
+      vpx_wb_write_literal(wb,
+          reset_frame_context_conv_tbl[cm->reset_frame_context], 2);
+#endif
+    }
 
     if (cm->intra_only) {
       write_sync_code(wb);
@@ -1117,8 +1150,13 @@ static void write_uncompressed_header(VP10_COMP *cpi,
   }
 
   if (!cm->error_resilient_mode) {
-    vpx_wb_write_bit(wb, cm->refresh_frame_context);
-    vpx_wb_write_bit(wb, cm->frame_parallel_decoding_mode);
+    vpx_wb_write_bit(wb,
+                     cm->refresh_frame_context != REFRESH_FRAME_CONTEXT_OFF);
+#if CONFIG_MISC_FIXES
+    if (cm->refresh_frame_context != REFRESH_FRAME_CONTEXT_OFF)
+#endif
+      vpx_wb_write_bit(wb, cm->refresh_frame_context !=
+                               REFRESH_FRAME_CONTEXT_BACKWARD);
   }
 
   vpx_wb_write_literal(wb, cm->frame_context_idx, FRAME_CONTEXTS_LOG2);
@@ -1126,24 +1164,32 @@ static void write_uncompressed_header(VP10_COMP *cpi,
   encode_loopfilter(&cm->lf, wb);
   encode_quantization(cm, wb);
   encode_segmentation(cm, xd, wb);
+#if CONFIG_MISC_FIXES
+  if (xd->lossless)
+    cm->tx_mode = TX_4X4;
+  else
+    write_txfm_mode(cm->tx_mode, wb);
+#endif
 
   write_tile_info(cm, wb);
 }
 
 static size_t write_compressed_header(VP10_COMP *cpi, uint8_t *data) {
   VP10_COMMON *const cm = &cpi->common;
-  MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
   FRAME_CONTEXT *const fc = cm->fc;
   FRAME_COUNTS *counts = cpi->td.counts;
   vpx_writer header_bc;
 
   vpx_start_encode(&header_bc, data);
 
-  if (xd->lossless)
-    cm->tx_mode = ONLY_4X4;
+#if !CONFIG_MISC_FIXES
+  if (cpi->td.mb.e_mbd.lossless)
+    cm->tx_mode = TX_4X4;
   else
-    encode_txfm_probs(cm, &header_bc, counts);
-
+    update_txfm_probs(cm, &header_bc, counts);
+#else
+  update_txfm_probs(cm, &header_bc, counts);
+#endif
   update_coef_probs(cpi, &header_bc);
   update_skip_probs(cm, &header_bc, counts);
 

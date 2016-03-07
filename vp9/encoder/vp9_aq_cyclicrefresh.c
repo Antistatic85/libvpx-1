@@ -232,9 +232,17 @@ void vp9_cyclic_refresh_update_segment(VP9_COMP *const cpi,
       // don't update the map for them. For cases where motion is non-zero or
       // the reference frame isn't the previous frame, the previous value in
       // the map for this spatial location is not entirely correct.
-      if (!is_inter_block(mbmi) || !skip)
+      if ((!is_inter_block(mbmi) || !skip) &&
+          mbmi->segment_id <= CR_SEGMENT_ID_BOOST2) {
         cr->last_coded_q_map[map_offset] = clamp(
             cm->base_qindex + cr->qindex_delta[mbmi->segment_id], 0, MAXQ);
+      } else if (is_inter_block(mbmi) && skip &&
+                 mbmi->segment_id <= CR_SEGMENT_ID_BOOST2) {
+        cr->last_coded_q_map[map_offset] = VPXMIN(
+            clamp(cm->base_qindex + cr->qindex_delta[mbmi->segment_id],
+                  0, MAXQ),
+            cr->last_coded_q_map[map_offset]);
+      }
     }
 }
 
@@ -447,6 +455,10 @@ void vp9_cyclic_refresh_update_parameters(VP9_COMP *const cpi) {
     cr->motion_thresh = 32;
     cr->rate_boost_fac = 17;
   }
+  if (cpi->svc.spatial_layer_id > 0) {
+    cr->motion_thresh = 4;
+    cr->rate_boost_fac = 12;
+  }
 }
 
 // Setup cyclic background refresh: set delta q and segmentation map.
@@ -458,11 +470,10 @@ void vp9_cyclic_refresh_setup(VP9_COMP *const cpi) {
   const int apply_cyclic_refresh  = apply_cyclic_refresh_bitrate(cm, rc);
   if (cm->current_video_frame == 0)
     cr->low_content_avg = 0.0;
-  // Don't apply refresh on key frame or enhancement layer frames.
+  // Don't apply refresh on key frame or temporal enhancement layer frames.
   if (!apply_cyclic_refresh ||
       (cm->frame_type == KEY_FRAME) ||
-      (cpi->svc.temporal_layer_id > 0) ||
-      (cpi->svc.spatial_layer_id > 0)) {
+      (cpi->svc.temporal_layer_id > 0)) {
     // Set segmentation map to 0 and disable.
     unsigned char *const seg_map = cpi->segmentation_map;
     memset(seg_map, 0, cm->mi_rows * cm->mi_cols);

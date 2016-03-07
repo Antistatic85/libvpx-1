@@ -791,7 +791,7 @@ int choose_partitioning(VP9_COMP *cpi,
     // TODO(marpan): If that assumption is broken, we need to revisit this code.
     MB_MODE_INFO *mbmi = &xd->mi[0]->mbmi;
     unsigned int uv_sad;
-    const YV12_BUFFER_CONFIG *yv12 = cpi->Last_Source;
+    const YV12_BUFFER_CONFIG *yv12 = cpi->unscaled_last_source;
 
     unsigned int y_sad;
     const BLOCK_SIZE bsize = x->use_gpu ? BLOCK_64X64 : (BLOCK_32X32 +
@@ -4172,7 +4172,7 @@ static void encode_tiles_mt(VP9_COMP *cpi) {
 
     // After encoding the frame, accumulate the stats across all threads,
     // for updating probability and rd thresh tables for the next frame.
-    vp9_accumulate_frame_counts(cm, td->counts, 0);
+    vp9_accumulate_frame_counts(&cm->counts, td->counts, 0);
     vp9_accumulate_rd_opt(&cpi->td, td);
   }
 }

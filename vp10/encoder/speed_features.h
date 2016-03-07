@@ -223,11 +223,6 @@ typedef struct SPEED_FEATURES {
   // mode to be evaluated. A high value means we will be faster.
   int adaptive_rd_thresh;
 
-  // Enables skipping the reconstruction step (idct, recon) in the
-  // intermediate steps assuming the last frame didn't have too many intra
-  // blocks and the q is less than a threshold.
-  int skip_encode_sb;
-  int skip_encode_frame;
   // Speed feature to allow or disallow skipping of recode at block
   // level within a frame.
   int allow_skip_recode;
@@ -252,9 +247,6 @@ typedef struct SPEED_FEATURES {
   // checking modes for reference frames that don't match the reference frame
   // of the best so far.
   int mode_skip_start;
-
-  // TODO(JBB): Remove this.
-  int reference_masking;
 
   PARTITION_SEARCH_TYPE partition_search_type;
 
@@ -313,8 +305,6 @@ typedef struct SPEED_FEATURES {
   int cb_pred_filter_search;
 
   int cb_partition_search;
-
-  int motion_field_mode_search;
 
   int alt_ref_search_fp;
 

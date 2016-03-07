@@ -12,6 +12,7 @@
 #ifndef VP9_ENCODER_VP9_AQ_CYCLICREFRESH_H_
 #define VP9_ENCODER_VP9_AQ_CYCLICREFRESH_H_
 
+#include "vpx/vpx_integer.h"
 #include "vp9/common/vp9_blockd.h"
 
 #ifdef __cplusplus
