@@ -268,7 +268,7 @@ static void inverse_transform_block_inter(MACROBLOCKD* xd, int plane,
     if (eob == 1) {
       dqcoeff[0] = 0;
     } else {
-      if (tx_size <= TX_16X16 && eob <= 10)
+      if (tx_type == DCT_DCT && tx_size <= TX_16X16 && eob <= 10)
         memset(dqcoeff, 0, 4 * (4 << tx_size) * sizeof(dqcoeff[0]));
       else if (tx_size == TX_32X32 && eob <= 34)
         memset(dqcoeff, 0, 256 * sizeof(dqcoeff[0]));
@@ -2109,8 +2109,8 @@ static size_t read_uncompressed_header(VP10Decoder *pbi,
 
   setup_segmentation_dequant(cm);
 #if CONFIG_MISC_FIXES
-  cm->tx_mode = (xd->lossless[0]) ? ONLY_4X4
-                                  : read_tx_mode(rb);
+  cm->tx_mode = (!cm->seg.enabled && xd->lossless[0]) ? ONLY_4X4
+                                                      : read_tx_mode(rb);
   cm->reference_mode = read_frame_reference_mode(cm, rb);
 #endif
 
@@ -2122,6 +2122,23 @@ static size_t read_uncompressed_header(VP10Decoder *pbi,
                        "Invalid header size");
 
   return sz;
+}
+
+static void read_ext_tx_probs(FRAME_CONTEXT *fc, vpx_reader *r) {
+  int i, j, k;
+  if (vpx_read(r, GROUP_DIFF_UPDATE_PROB)) {
+    for (i = TX_4X4; i < EXT_TX_SIZES; ++i) {
+      for (j = 0; j < TX_TYPES; ++j)
+        for (k = 0; k < TX_TYPES - 1; ++k)
+          vp10_diff_update_prob(r, &fc->intra_ext_tx_prob[i][j][k]);
+    }
+  }
+  if (vpx_read(r, GROUP_DIFF_UPDATE_PROB)) {
+    for (i = TX_4X4; i < EXT_TX_SIZES; ++i) {
+      for (k = 0; k < TX_TYPES - 1; ++k)
+        vp10_diff_update_prob(r, &fc->inter_ext_tx_prob[i][k]);
+    }
+  }
 }
 
 static int read_compressed_header(VP10Decoder *pbi, const uint8_t *data,
@@ -2205,6 +2222,7 @@ static int read_compressed_header(VP10Decoder *pbi, const uint8_t *data,
 #endif
 
     read_mv_probs(nmvc, cm->allow_high_precision_mv, &r);
+    read_ext_tx_probs(fc, &r);
   }
 
   return vpx_reader_has_error(&r);
@@ -2245,6 +2263,10 @@ static void debug_check_frame_counts(const VP10_COMMON *const cm) {
   assert(!memcmp(&cm->counts.tx, &zero_counts.tx, sizeof(cm->counts.tx)));
   assert(!memcmp(cm->counts.skip, zero_counts.skip, sizeof(cm->counts.skip)));
   assert(!memcmp(&cm->counts.mv, &zero_counts.mv, sizeof(cm->counts.mv)));
+  assert(!memcmp(cm->counts.intra_ext_tx, zero_counts.intra_ext_tx,
+                 sizeof(cm->counts.intra_ext_tx)));
+  assert(!memcmp(cm->counts.inter_ext_tx, zero_counts.inter_ext_tx,
+                 sizeof(cm->counts.inter_ext_tx)));
 }
 #endif  // NDEBUG
 

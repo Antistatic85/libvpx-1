@@ -100,6 +100,8 @@ static TX_SIZE read_tx_size(VP10_COMMON *cm, MACROBLOCKD *xd,
   TX_MODE tx_mode = cm->tx_mode;
   BLOCK_SIZE bsize = xd->mi[0]->mbmi.sb_type;
   const TX_SIZE max_tx_size = max_txsize_lookup[bsize];
+  if (xd->lossless[xd->mi[0]->mbmi.segment_id])
+    return TX_4X4;
   if (allow_select && tx_mode == TX_MODE_SELECT && bsize >= BLOCK_8X8)
     return read_selected_tx_size(cm, xd, max_tx_size, r);
   else
@@ -294,6 +296,20 @@ static void read_intra_frame_mode_info(VP10_COMMON *const cm,
   }
 
   mbmi->uv_mode = read_intra_mode_uv(cm, xd, r, mbmi->mode);
+
+  if (mbmi->tx_size < TX_32X32 &&
+      cm->base_qindex > 0 && !mbmi->skip &&
+      !segfeature_active(&cm->seg, mbmi->segment_id, SEG_LVL_SKIP)) {
+    FRAME_COUNTS *counts = xd->counts;
+    TX_TYPE tx_type_nom = intra_mode_to_tx_type_context[mbmi->mode];
+    mbmi->tx_type = vpx_read_tree(
+        r, vp10_ext_tx_tree,
+        cm->fc->intra_ext_tx_prob[mbmi->tx_size][tx_type_nom]);
+    if (counts)
+      ++counts->intra_ext_tx[mbmi->tx_size][tx_type_nom][mbmi->tx_type];
+  } else {
+    mbmi->tx_type = DCT_DCT;
+  }
 }
 
 static int read_mv_component(vpx_reader *r,
@@ -650,6 +666,28 @@ static void read_inter_frame_mode_info(VP10Decoder *const pbi,
     read_inter_block_mode_info(pbi, xd, mi, mi_row, mi_col, r);
   else
     read_intra_block_mode_info(cm, xd, mi, r);
+
+  if (mbmi->tx_size < TX_32X32 &&
+      cm->base_qindex > 0 && !mbmi->skip &&
+      !segfeature_active(&cm->seg, mbmi->segment_id, SEG_LVL_SKIP)) {
+    FRAME_COUNTS *counts = xd->counts;
+    if (inter_block) {
+      mbmi->tx_type = vpx_read_tree(
+          r, vp10_ext_tx_tree,
+          cm->fc->inter_ext_tx_prob[mbmi->tx_size]);
+      if (counts)
+        ++counts->inter_ext_tx[mbmi->tx_size][mbmi->tx_type];
+    } else {
+      const TX_TYPE tx_type_nom = intra_mode_to_tx_type_context[mbmi->mode];
+      mbmi->tx_type = vpx_read_tree(
+          r, vp10_ext_tx_tree,
+          cm->fc->intra_ext_tx_prob[mbmi->tx_size][tx_type_nom]);
+      if (counts)
+        ++counts->intra_ext_tx[mbmi->tx_size][tx_type_nom][mbmi->tx_type];
+    }
+  } else {
+    mbmi->tx_type = DCT_DCT;
+  }
 }
 
 void vp10_read_mode_info(VP10Decoder *const pbi, MACROBLOCKD *xd,

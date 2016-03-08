@@ -467,6 +467,8 @@ typedef struct VP10_COMP {
   int multi_arf_enabled;
   int multi_arf_last_grp_enabled;
 
+  int intra_tx_type_costs[EXT_TX_SIZES][TX_TYPES][TX_TYPES];
+  int inter_tx_type_costs[EXT_TX_SIZES][TX_TYPES];
 #if CONFIG_VP9_TEMPORAL_DENOISING
   VP9_DENOISER denoiser;
 #endif

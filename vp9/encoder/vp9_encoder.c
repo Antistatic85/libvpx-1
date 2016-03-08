@@ -36,6 +36,7 @@
 #include "vp9/common/vp9_reconintra.h"
 #include "vp9/common/vp9_tile_common.h"
 
+#include "vp9/encoder/vp9_aq_360.h"
 #include "vp9/encoder/vp9_aq_complexity.h"
 #include "vp9/encoder/vp9_aq_cyclicrefresh.h"
 #include "vp9/encoder/vp9_aq_variance.h"
@@ -621,7 +622,7 @@ static void update_reference_segmentation_map(VP9_COMP *cpi) {
     MODE_INFO **mi_8x8 = mi_8x8_ptr;
     uint8_t *cache = cache_ptr;
     for (col = 0; col < cm->mi_cols; col++, mi_8x8++, cache++)
-      cache[0] = mi_8x8[0]->mbmi.segment_id;
+      cache[0] = mi_8x8[0]->segment_id;
     mi_8x8_ptr += cm->mi_stride;
     cache_ptr += cm->mi_cols;
   }
@@ -3460,6 +3461,8 @@ static void encode_without_recode_loop(VP9_COMP *cpi) {
   // exclusive.
   if (cpi->oxcf.aq_mode == VARIANCE_AQ) {
     vp9_vaq_frame_setup(cpi);
+  } else if (cpi->oxcf.aq_mode == EQUATOR360_AQ) {
+    vp9_360aq_frame_setup(cpi);
   } else if (cpi->oxcf.aq_mode == COMPLEXITY_AQ) {
     vp9_setup_in_frame_q_adj(cpi);
   } else if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ) {
@@ -3558,6 +3561,8 @@ static void encode_with_recode_loop(VP9_COMP *cpi,
     // exclusive.
     if (cpi->oxcf.aq_mode == VARIANCE_AQ) {
       vp9_vaq_frame_setup(cpi);
+    } else if (cpi->oxcf.aq_mode == EQUATOR360_AQ) {
+      vp9_360aq_frame_setup(cpi);
     } else if (cpi->oxcf.aq_mode == COMPLEXITY_AQ) {
       vp9_setup_in_frame_q_adj(cpi);
     }

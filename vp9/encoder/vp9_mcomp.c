@@ -439,7 +439,7 @@ int vp9_find_best_sub_pixel_tree_pruned_evenmore(
   tr = br;
   tc = bc;
 
-  if (allow_hp && vp9_use_mv_hp(ref_mv) && forced_stop == 0) {
+  if (allow_hp && use_mv_hp(ref_mv) && forced_stop == 0) {
     hstep >>= 1;
     FIRST_LEVEL_CHECKS;
     if (eighthiters > 1) {
@@ -507,7 +507,7 @@ int vp9_find_best_sub_pixel_tree_pruned_more(const MACROBLOCK *x,
     }
   }
 
-  if (allow_hp && vp9_use_mv_hp(ref_mv) && forced_stop == 0) {
+  if (allow_hp && use_mv_hp(ref_mv) && forced_stop == 0) {
     tr = br;
     tc = bc;
     hstep >>= 1;
@@ -602,7 +602,7 @@ int vp9_find_best_sub_pixel_tree_pruned(const MACROBLOCK *x,
     tc = bc;
   }
 
-  if (allow_hp && vp9_use_mv_hp(ref_mv) && forced_stop == 0) {
+  if (allow_hp && use_mv_hp(ref_mv) && forced_stop == 0) {
     hstep >>= 1;
     FIRST_LEVEL_CHECKS;
     if (eighthiters > 1) {
@@ -681,7 +681,7 @@ int vp9_find_best_sub_pixel_tree(const MACROBLOCK *x,
   unsigned int cost_array[5];
   int kr, kc;
 
-  if (!(allow_hp && vp9_use_mv_hp(ref_mv)))
+  if (!(allow_hp && use_mv_hp(ref_mv)))
     if (round == 3)
       round = 2;
 
@@ -821,7 +821,7 @@ int vp9_find_best_sub_pixel_tree_dp(const MACROBLOCK *x,
   const MV *search_step = search_step_table_dp;
   int idx, best_idx = -1;
 
-  if (!(allow_hp && vp9_use_mv_hp(ref_mv)))
+  if (!(allow_hp && use_mv_hp(ref_mv)))
     if (round == 3)
       round = 2;
 
@@ -1935,7 +1935,7 @@ unsigned int vp9_int_pro_motion_estimation(const VP9_COMP *cpi, MACROBLOCK *x,
                                            BLOCK_SIZE bsize,
                                            int mi_row, int mi_col) {
   MACROBLOCKD *xd = &x->e_mbd;
-  MB_MODE_INFO *mbmi = &xd->mi[0]->mbmi;
+  MODE_INFO *mi = xd->mi[0];
   struct buf_2d backup_yv12[MAX_MB_PLANE] = {{0, 0}};
   DECLARE_ALIGNED(16, int16_t, hbuf[128]);
   DECLARE_ALIGNED(16, int16_t, vbuf[128]);
@@ -1949,12 +1949,12 @@ unsigned int vp9_int_pro_motion_estimation(const VP9_COMP *cpi, MACROBLOCK *x,
   const int src_stride = x->plane[0].src.stride;
   const int ref_stride = xd->plane[0].pre[0].stride;
   uint8_t const *ref_buf, *src_buf;
-  MV *tmp_mv = &xd->mi[0]->mbmi.mv[0].as_mv;
+  MV *tmp_mv = &xd->mi[0]->mv[0].as_mv;
   unsigned int best_sad, tmp_sad, this_sad[4];
   MV this_mv;
   const int norm_factor = 3 + (bw >> 5);
   const YV12_BUFFER_CONFIG *scaled_ref_frame =
-      vp9_get_scaled_ref_frame(cpi, mbmi->ref_frame[0]);
+      vp9_get_scaled_ref_frame(cpi, mi->ref_frame[0]);
 
   if (scaled_ref_frame) {
     int i;
