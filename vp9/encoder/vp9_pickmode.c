@@ -635,14 +635,14 @@ static void block_yrd(VP9_COMP *cpi, MACROBLOCK *x, int *rate, int64_t *dist,
                                   scan_order->scan, scan_order->iscan);
             break;
           case TX_16X16:
-            vp9_hadamard_16x16(src_diff, diff_stride, (int16_t *)coeff);
+            vpx_hadamard_16x16(src_diff, diff_stride, (int16_t *)coeff);
             vp9_quantize_fp(coeff, 256, x->skip_block, p->zbin, p->round_fp,
                             p->quant_fp, p->quant_shift, qcoeff, dqcoeff,
                             pd->dequant, eob,
                             scan_order->scan, scan_order->iscan);
             break;
           case TX_8X8:
-            vp9_hadamard_8x8(src_diff, diff_stride, (int16_t *)coeff);
+            vpx_hadamard_8x8(src_diff, diff_stride, (int16_t *)coeff);
             vp9_quantize_fp(coeff, 64, x->skip_block, p->zbin, p->round_fp,
                             p->quant_fp, p->quant_shift, qcoeff, dqcoeff,
                             pd->dequant, eob,
@@ -665,7 +665,7 @@ static void block_yrd(VP9_COMP *cpi, MACROBLOCK *x, int *rate, int64_t *dist,
         if (*eob == 1)
           *rate += (int)abs(qcoeff[0]);
         else if (*eob > 1)
-          *rate += vp9_satd((const int16_t *)qcoeff, step << 4);
+          *rate += vpx_satd((const int16_t *)qcoeff, step << 4);
 
         *dist += vp9_block_error_fp(coeff, dqcoeff, step << 4) >> shift;
       }
@@ -1256,6 +1256,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
                          int mi_row, int mi_col, RD_COST *rd_cost,
                          BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx) {
   VP9_COMMON *const cm = &cpi->common;
+  const SVC *const svc = &cpi->svc;
   MACROBLOCKD *const xd = &x->e_mbd;
   MB_MODE_INFO *const mbmi = &xd->mi[0]->mbmi;
   struct macroblockd_plane *const pd = &xd->plane[0];
@@ -1305,6 +1306,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   int best_pred_sad = INT_MAX;
   int best_early_term = 0;
   int ref_frame_cost[MAX_REF_FRAMES];
+  int svc_force_zero_mode[3] = {0};
 #if CONFIG_VP9_TEMPORAL_DENOISING
   int64_t zero_last_cost_orig = INT64_MAX;
 #endif
@@ -1356,6 +1358,16 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
     usable_ref_frame = LAST_FRAME;
   } else {
     usable_ref_frame = GOLDEN_FRAME;
+  }
+
+  // If the reference is temporally aligned with current superframe
+  // (e.g., spatial reference within superframe), constrain the inter mode:
+  // for now only test zero motion.
+  if (cpi->use_svc && svc ->force_zero_mode_spatial_ref) {
+    if (svc->ref_frame_index[cpi->lst_fb_idx] == svc->current_superframe)
+      svc_force_zero_mode[LAST_FRAME - 1] = 1;
+    if (svc->ref_frame_index[cpi->gld_fb_idx] == svc->current_superframe)
+      svc_force_zero_mode[GOLDEN_FRAME - 1] = 1;
   }
 
   for (ref_frame = LAST_FRAME; ref_frame <= usable_ref_frame; ++ref_frame) {
@@ -1410,8 +1422,13 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
       continue;
 
     ref_frame = ref_mode_set[idx].ref_frame;
-    if (cpi->use_svc)
+    if (cpi->use_svc) {
       ref_frame = ref_mode_set_svc[idx].ref_frame;
+      if (svc_force_zero_mode[ref_frame - 1] &&
+          frame_mv[this_mode][ref_frame].as_int != 0)
+        continue;
+    }
+
     if (!(cpi->ref_frame_flags & flag_list[ref_frame]))
       continue;
     if (const_motion[ref_frame] && this_mode == NEARMV)

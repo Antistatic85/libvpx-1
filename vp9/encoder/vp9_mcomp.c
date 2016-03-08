@@ -1862,7 +1862,7 @@ static int vector_match(int16_t *ref, int16_t *src, int bwl) {
   int center, offset = 0;
   int bw = 4 << bwl;  // redundant variable, to be changed in the experiments.
   for (d = 0; d <= bw; d += 16) {
-    this_sad = vp9_vector_var(&ref[d], src, bwl);
+    this_sad = vpx_vector_var(&ref[d], src, bwl);
     if (this_sad < best_sad) {
       best_sad = this_sad;
       offset = d;
@@ -1875,7 +1875,7 @@ static int vector_match(int16_t *ref, int16_t *src, int bwl) {
     // check limit
     if (this_pos < 0 || this_pos > bw)
       continue;
-    this_sad = vp9_vector_var(&ref[this_pos], src, bwl);
+    this_sad = vpx_vector_var(&ref[this_pos], src, bwl);
     if (this_sad < best_sad) {
       best_sad = this_sad;
       center = this_pos;
@@ -1888,7 +1888,7 @@ static int vector_match(int16_t *ref, int16_t *src, int bwl) {
     // check limit
     if (this_pos < 0 || this_pos > bw)
       continue;
-    this_sad = vp9_vector_var(&ref[this_pos], src, bwl);
+    this_sad = vpx_vector_var(&ref[this_pos], src, bwl);
     if (this_sad < best_sad) {
       best_sad = this_sad;
       center = this_pos;
@@ -1901,7 +1901,7 @@ static int vector_match(int16_t *ref, int16_t *src, int bwl) {
     // check limit
     if (this_pos < 0 || this_pos > bw)
       continue;
-    this_sad = vp9_vector_var(&ref[this_pos], src, bwl);
+    this_sad = vpx_vector_var(&ref[this_pos], src, bwl);
     if (this_sad < best_sad) {
       best_sad = this_sad;
       center = this_pos;
@@ -1914,7 +1914,7 @@ static int vector_match(int16_t *ref, int16_t *src, int bwl) {
     // check limit
     if (this_pos < 0 || this_pos > bw)
       continue;
-    this_sad = vp9_vector_var(&ref[this_pos], src, bwl);
+    this_sad = vpx_vector_var(&ref[this_pos], src, bwl);
     if (this_sad < best_sad) {
       best_sad = this_sad;
       center = this_pos;
@@ -1986,25 +1986,25 @@ unsigned int vp9_int_pro_motion_estimation(const VP9_COMP *cpi, MACROBLOCK *x,
   // Set up prediction 1-D reference set
   ref_buf = xd->plane[0].pre[0].buf - (bw >> 1);
   for (idx = 0; idx < search_width; idx += 16) {
-    vp9_int_pro_row(&hbuf[idx], ref_buf, ref_stride, bh);
+    vpx_int_pro_row(&hbuf[idx], ref_buf, ref_stride, bh);
     ref_buf += 16;
   }
 
   ref_buf = xd->plane[0].pre[0].buf - (bh >> 1) * ref_stride;
   for (idx = 0; idx < search_height; ++idx) {
-    vbuf[idx] = vp9_int_pro_col(ref_buf, bw) >> norm_factor;
+    vbuf[idx] = vpx_int_pro_col(ref_buf, bw) >> norm_factor;
     ref_buf += ref_stride;
   }
 
   // Set up src 1-D reference set
   for (idx = 0; idx < bw; idx += 16) {
     src_buf = x->plane[0].src.buf + idx;
-    vp9_int_pro_row(&src_hbuf[idx], src_buf, src_stride, bh);
+    vpx_int_pro_row(&src_hbuf[idx], src_buf, src_stride, bh);
   }
 
   src_buf = x->plane[0].src.buf;
   for (idx = 0; idx < bh; ++idx) {
-    src_vbuf[idx] = vp9_int_pro_col(src_buf, bw) >> norm_factor;
+    src_vbuf[idx] = vpx_int_pro_col(src_buf, bw) >> norm_factor;
     src_buf += src_stride;
   }
 

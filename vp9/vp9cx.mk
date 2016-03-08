@@ -17,7 +17,6 @@ VP9_CX_SRCS_REMOVE-no  += $(VP9_COMMON_SRCS_REMOVE-no)
 
 VP9_CX_SRCS-yes += vp9_cx_iface.c
 
-VP9_CX_SRCS-yes += encoder/vp9_avg.c
 VP9_CX_SRCS-yes += encoder/vp9_bitstream.c
 VP9_CX_SRCS-yes += encoder/vp9_context_tree.c
 VP9_CX_SRCS-yes += encoder/vp9_context_tree.h
@@ -97,7 +96,6 @@ VP9_CX_SRCS-yes += encoder/vp9_egpu.h
 VP9_CX_SRCS-$(CONFIG_OPENCL) += encoder/opencl/vp9_eopencl.c
 VP9_CX_SRCS-$(CONFIG_OPENCL) += encoder/opencl/vp9_eopencl.h
 
-VP9_CX_SRCS-$(HAVE_SSE2) += encoder/x86/vp9_avg_intrin_sse2.c
 VP9_CX_SRCS-$(HAVE_SSE2) += encoder/x86/vp9_temporal_filter_apply_sse2.asm
 VP9_CX_SRCS-$(HAVE_SSE2) += encoder/x86/vp9_quantize_sse2.c
 VP9_CX_SRCS-$(HAVE_AVX) += encoder/x86/vp9_diamond_search_sad_avx.c
@@ -118,7 +116,6 @@ endif
 ifeq ($(ARCH_X86_64),yes)
 ifeq ($(CONFIG_USE_X86INC),yes)
 VP9_CX_SRCS-$(HAVE_SSSE3) += encoder/x86/vp9_quantize_ssse3_x86_64.asm
-VP9_CX_SRCS-$(HAVE_SSSE3) += encoder/x86/vp9_dct_ssse3_x86_64.asm
 endif
 endif
 
@@ -135,10 +132,8 @@ ifneq ($(CONFIG_VP9_HIGHBITDEPTH),yes)
 VP9_CX_SRCS-$(HAVE_NEON) += encoder/arm/neon/vp9_dct_neon.c
 VP9_CX_SRCS-$(HAVE_NEON) += encoder/arm/neon/vp9_error_neon.c
 endif
-VP9_CX_SRCS-$(HAVE_NEON) += encoder/arm/neon/vp9_avg_neon.c
 VP9_CX_SRCS-$(HAVE_NEON) += encoder/arm/neon/vp9_quantize_neon.c
 
-VP9_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/vp9_avg_msa.c
 VP9_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/vp9_error_msa.c
 VP9_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/vp9_fdct4x4_msa.c
 VP9_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/vp9_fdct8x8_msa.c
