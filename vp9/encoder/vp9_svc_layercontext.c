@@ -43,6 +43,26 @@ void vp9_init_layer_context(VP9_COMP *const cpi) {
     cpi->svc.ext_alt_fb_idx[sl] = 2;
   }
 
+  // For 1 pass cbr: allocate scaled_frame that may be used as an intermediate
+  // buffer for a 2 stage down-sampling: two stages of 1:2 down-sampling for a
+  // target of 1/4x1/4.
+  if (cpi->oxcf.pass == 0 && cpi->oxcf.rc_mode == VPX_CBR) {
+    if (vpx_realloc_frame_buffer(&cpi->svc.scaled_temp,
+                                 cpi->common.width >> 1,
+                                 cpi->common.height >> 1,
+                                 cpi->common.subsampling_x,
+                                 cpi->common.subsampling_y,
+#if CONFIG_VP9_HIGHBITDEPTH
+                                 cpi->common.use_highbitdepth,
+#endif
+                                 VP9_ENC_BORDER_IN_PIXELS,
+                                 cpi->common.byte_alignment,
+                                 NULL, NULL, NULL))
+      vpx_internal_error(&cpi->common.error, VPX_CODEC_MEM_ERROR,
+                         "Failed to allocate scaled_frame for svc ");
+  }
+
+
   if (cpi->oxcf.error_resilient_mode == 0 && cpi->oxcf.pass == 2) {
     if (vpx_realloc_frame_buffer(&cpi->svc.empty_frame.img,
                                  SMALL_FRAME_WIDTH, SMALL_FRAME_HEIGHT,
@@ -118,15 +138,20 @@ void vp9_init_layer_context(VP9_COMP *const cpi) {
           tl == 0) {
         size_t last_coded_q_map_size;
         size_t consec_zero_mv_size;
+        VP9_COMMON *const cm = &cpi->common;
         lc->sb_index = 0;
-        lc->map = vpx_malloc(mi_rows * mi_cols * sizeof(signed char));
+        CHECK_MEM_ERROR(cm, lc->map,
+                        vpx_malloc(mi_rows * mi_cols * sizeof(*lc->map)));
         memset(lc->map, 0, mi_rows * mi_cols);
-        last_coded_q_map_size = mi_rows * mi_cols * sizeof(uint8_t);
-        lc->last_coded_q_map = vpx_malloc(last_coded_q_map_size);
+        last_coded_q_map_size = mi_rows * mi_cols *
+                                sizeof(*lc->last_coded_q_map);
+        CHECK_MEM_ERROR(cm, lc->last_coded_q_map,
+                        vpx_malloc(last_coded_q_map_size));
         assert(MAXQ <= 255);
         memset(lc->last_coded_q_map, MAXQ, last_coded_q_map_size);
-        consec_zero_mv_size = mi_rows * mi_cols * sizeof(uint8_t);
-        lc->consec_zero_mv = vpx_malloc(consec_zero_mv_size);
+        consec_zero_mv_size = mi_rows * mi_cols * sizeof(*lc->consec_zero_mv);
+        CHECK_MEM_ERROR(cm, lc->consec_zero_mv,
+                        vpx_malloc(consec_zero_mv_size));
         memset(lc->consec_zero_mv, 0, consec_zero_mv_size);
        }
     }

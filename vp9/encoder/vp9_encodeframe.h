@@ -29,10 +29,6 @@ struct VP9_COMP;
 #define VAR_HIST_LARGE_CUT_OFF 75
 #define VAR_HIST_SMALL_CUT_OFF 45
 
-void duplicate_mode_info_in_sb(struct VP9Common *cm, struct macroblockd *xd,
-                               int mi_row, int mi_col,
-                               BLOCK_SIZE bsize);
-
 void set_offsets(struct VP9_COMP *cpi, const TileInfo *const tile,
                  struct macroblock *const x, int mi_row, int mi_col,
                  BLOCK_SIZE bsize);

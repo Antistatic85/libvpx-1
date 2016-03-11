@@ -806,7 +806,6 @@ struct stream_config {
   int                       arg_ctrls[ARG_CTRL_CNT_MAX][2];
   int                       arg_ctrl_cnt;
   int                       write_webm;
-  int                       have_kf_max_dist;
 #if CONFIG_VP9_HIGHBITDEPTH
   // whether to use 16bit internal buffers
   int                       use_16bit_internal;
@@ -1229,7 +1228,6 @@ static int parse_stream_params(struct VpxEncoderConfig *global,
       config->cfg.kf_min_dist = arg_parse_uint(&arg);
     } else if (arg_match(&arg, &kf_max_dist, argi)) {
       config->cfg.kf_max_dist = arg_parse_uint(&arg);
-      config->have_kf_max_dist = 1;
     } else if (arg_match(&arg, &kf_disabled, argi)) {
       config->cfg.kf_mode = VPX_KF_DISABLED;
 #if CONFIG_VP9_HIGHBITDEPTH
@@ -1357,19 +1355,6 @@ static void set_stream_dimensions(struct stream_state *stream,
   }
 }
 
-
-static void set_default_kf_interval(struct stream_state *stream,
-                                    struct VpxEncoderConfig *global) {
-  /* Use a max keyframe interval of 5 seconds, if none was
-   * specified on the command line.
-   */
-  if (!stream->config.have_kf_max_dist) {
-    double framerate = (double)global->framerate.num / global->framerate.den;
-    if (framerate > 0.0)
-      stream->config.cfg.kf_max_dist = (unsigned int)(5.0 * framerate);
-  }
-}
-
 static const char* file_type_to_string(enum VideoFileType t) {
   switch (t) {
     case FILE_TYPE_RAW: return "RAW";
@@ -1475,6 +1460,8 @@ static void open_output_file(struct stream_state *stream,
                            global->codec->fourcc,
                            pixel_aspect_ratio);
   }
+#else
+  (void)pixel_aspect_ratio;
 #endif
 
   if (!stream->config.write_webm) {
@@ -2094,8 +2081,6 @@ int main(int argc, const char **argv_) {
       FOREACH_STREAM(stream->config.cfg.g_timebase.den = global.framerate.num;
                      stream->config.cfg.g_timebase.num = global.framerate.den);
     }
-
-    FOREACH_STREAM(set_default_kf_interval(stream, &global));
 
     /* Show configuration */
     if (global.verbose && pass == 0)

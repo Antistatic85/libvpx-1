@@ -737,7 +737,8 @@ static void dec_build_inter_predictors_sb(VP9Decoder *const pbi,
                          "Reference frame has invalid dimensions");
 
     is_scaled = vp9_is_scaled(sf);
-    vp9_setup_pre_planes(xd, ref, ref_buf->buf, mi_row, mi_col, sf);
+    vp9_setup_pre_planes(xd, ref, ref_buf->buf, mi_row, mi_col,
+                         is_scaled ? sf : NULL);
     xd->block_refs[ref] = ref_buf;
 
     if (sb_type < BLOCK_8X8) {
@@ -858,7 +859,7 @@ static void decode_block(VP9Decoder *const pbi, MACROBLOCKD *const xd,
                          VPX_CODEC_CORRUPT_FRAME, "Invalid block size.");
   }
 
-  vpx_read_mode_info(pbi, xd, mi_row, mi_col, r, x_mis, y_mis);
+  vp9_read_mode_info(pbi, xd, mi_row, mi_col, r, x_mis, y_mis);
 
   if (mi->skip) {
     dec_reset_skip_context(xd);
@@ -1216,8 +1217,9 @@ static void resize_mv_buffer(VP9_COMMON *cm) {
   vpx_free(cm->cur_frame->mvs);
   cm->cur_frame->mi_rows = cm->mi_rows;
   cm->cur_frame->mi_cols = cm->mi_cols;
-  cm->cur_frame->mvs = (MV_REF *)vpx_calloc(cm->mi_rows * cm->mi_cols,
-                                            sizeof(*cm->cur_frame->mvs));
+  CHECK_MEM_ERROR(cm, cm->cur_frame->mvs,
+                  (MV_REF *)vpx_calloc(cm->mi_rows * cm->mi_cols,
+                                       sizeof(*cm->cur_frame->mvs)));
 }
 
 static void resize_context_buffers(VP9_COMMON *cm, int width, int height) {

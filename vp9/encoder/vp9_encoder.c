@@ -423,6 +423,9 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
   memset(&cpi->svc.scaled_frames[0], 0,
          MAX_LAG_BUFFERS * sizeof(cpi->svc.scaled_frames[0]));
 
+  vpx_free_frame_buffer(&cpi->svc.scaled_temp);
+  memset(&cpi->svc.scaled_temp, 0, sizeof(cpi->svc.scaled_temp));
+
   vpx_free_frame_buffer(&cpi->svc.empty_frame.img);
   memset(&cpi->svc.empty_frame, 0, sizeof(cpi->svc.empty_frame));
 
@@ -1605,6 +1608,7 @@ void vp9_change_config(struct VP9_COMP *cpi, const VP9EncoderConfig *oxcf) {
   if (last_w != cpi->oxcf.width || last_h != cpi->oxcf.height) {
     cm->width = cpi->oxcf.width;
     cm->height = cpi->oxcf.height;
+    cpi->external_resize = 1;
   }
 
   if (cpi->initial_width) {
@@ -1616,8 +1620,10 @@ void vp9_change_config(struct VP9_COMP *cpi, const VP9EncoderConfig *oxcf) {
       alloc_compressor_data(cpi);
       realloc_segmentation_maps(cpi);
       cpi->initial_width = cpi->initial_height = 0;
+      cpi->external_resize = 0;
     }
   }
+
   update_frame_size(cpi);
 
   if ((last_w != cpi->oxcf.width || last_h != cpi->oxcf.height) &&
@@ -1752,6 +1758,7 @@ VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
 
   cpi->use_svc = 0;
   cpi->resize_state = 0;
+  cpi->external_resize = 0;
   cpi->resize_avg_qp = 0;
   cpi->resize_buffer_underflow = 0;
   cpi->use_skin_detection = 0;
@@ -1853,8 +1860,9 @@ VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
   }
 
   if (cpi->b_calculate_consistency) {
-    cpi->ssim_vars = vpx_malloc(sizeof(*cpi->ssim_vars) *
-                                4 * cpi->common.mi_rows * cpi->common.mi_cols);
+    CHECK_MEM_ERROR(cm, cpi->ssim_vars,
+                    vpx_malloc(sizeof(*cpi->ssim_vars) * 4 *
+                               cpi->common.mi_rows * cpi->common.mi_cols));
     cpi->worst_consistency = 100.0;
   }
 
@@ -3007,16 +3015,16 @@ void vp9_pre_loopfilter(VP9_COMP *cpi) {
   }
 }
 
-static INLINE void alloc_frame_mvs(const VP9_COMMON *cm,
+static INLINE void alloc_frame_mvs(VP9_COMMON *const cm,
                                    int buffer_idx) {
   RefCntBuffer *const new_fb_ptr = &cm->buffer_pool->frame_bufs[buffer_idx];
   if (new_fb_ptr->mvs == NULL ||
       new_fb_ptr->mi_rows < cm->mi_rows ||
       new_fb_ptr->mi_cols < cm->mi_cols) {
     vpx_free(new_fb_ptr->mvs);
-    new_fb_ptr->mvs =
-      (MV_REF *)vpx_calloc(cm->mi_rows * cm->mi_cols,
-                           sizeof(*new_fb_ptr->mvs));
+    CHECK_MEM_ERROR(cm, new_fb_ptr->mvs,
+                    (MV_REF *)vpx_calloc(cm->mi_rows * cm->mi_cols,
+                                         sizeof(*new_fb_ptr->mvs)));
     new_fb_ptr->mi_rows = cm->mi_rows;
     new_fb_ptr->mi_cols = cm->mi_cols;
   }
@@ -3054,12 +3062,13 @@ void vp9_scale_references(VP9_COMP *cpi) {
         if (force_scaling ||
             new_fb_ptr->buf.y_crop_width != cm->width ||
             new_fb_ptr->buf.y_crop_height != cm->height) {
-          vpx_realloc_frame_buffer(&new_fb_ptr->buf,
-                                   cm->width, cm->height,
-                                   cm->subsampling_x, cm->subsampling_y,
-                                   cm->use_highbitdepth,
-                                   VP9_ENC_BORDER_IN_PIXELS, cm->byte_alignment,
-                                   NULL, NULL, NULL);
+          if (vpx_realloc_frame_buffer(&new_fb_ptr->buf, cm->width, cm->height,
+                                       cm->subsampling_x, cm->subsampling_y,
+                                       cm->use_highbitdepth,
+                                       VP9_ENC_BORDER_IN_PIXELS,
+                                       cm->byte_alignment, NULL, NULL, NULL))
+            vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
+                               "Failed to allocate frame buffer");
           scale_and_extend_frame(ref, &new_fb_ptr->buf, (int)cm->bit_depth);
           cpi->scaled_ref_idx[ref_frame - 1] = new_fb;
           alloc_frame_mvs(cm, new_fb);
@@ -3079,11 +3088,12 @@ void vp9_scale_references(VP9_COMP *cpi) {
         if (force_scaling ||
             new_fb_ptr->buf.y_crop_width != cm->width ||
             new_fb_ptr->buf.y_crop_height != cm->height) {
-          vpx_realloc_frame_buffer(&new_fb_ptr->buf,
-                                   cm->width, cm->height,
-                                   cm->subsampling_x, cm->subsampling_y,
-                                   VP9_ENC_BORDER_IN_PIXELS, cm->byte_alignment,
-                                   NULL, NULL, NULL);
+          if (vpx_realloc_frame_buffer(&new_fb_ptr->buf, cm->width, cm->height,
+                                       cm->subsampling_x, cm->subsampling_y,
+                                       VP9_ENC_BORDER_IN_PIXELS,
+                                       cm->byte_alignment, NULL, NULL, NULL))
+            vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
+                               "Failed to allocate frame buffer");
           vp9_scale_and_extend_frame(ref, &new_fb_ptr->buf);
           cpi->scaled_ref_idx[ref_frame - 1] = new_fb;
           alloc_frame_mvs(cm, new_fb);
@@ -3330,12 +3340,14 @@ static void setup_denoiser_buffer(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
   if (cpi->oxcf.noise_sensitivity > 0 &&
       !cpi->denoiser.frame_buffer_initialized) {
-    vp9_denoiser_alloc(&(cpi->denoiser), cm->width, cm->height,
-                       cm->subsampling_x, cm->subsampling_y,
+    if (vp9_denoiser_alloc(&cpi->denoiser, cm->width, cm->height,
+                           cm->subsampling_x, cm->subsampling_y,
 #if CONFIG_VP9_HIGHBITDEPTH
-                       cm->use_highbitdepth,
+                           cm->use_highbitdepth,
 #endif
-                       VP9_ENC_BORDER_IN_PIXELS);
+                           VP9_ENC_BORDER_IN_PIXELS))
+      vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
+                         "Failed to allocate denoiser");
   }
 }
 #endif
@@ -3428,13 +3440,15 @@ static void set_frame_size(VP9_COMP *cpi) {
 #endif
 
     // Reset the frame pointers to the current frame size.
-    vpx_realloc_frame_buffer(get_frame_new_buffer(cm), cm->width, cm->height,
-                             cm->subsampling_x, cm->subsampling_y,
+    if (vpx_realloc_frame_buffer(get_frame_new_buffer(cm), cm->width, cm->height,
+                                 cm->subsampling_x, cm->subsampling_y,
 #if CONFIG_VP9_HIGHBITDEPTH
-                             cm->use_highbitdepth,
+                                 cm->use_highbitdepth,
 #endif
-                             VP9_ENC_BORDER_IN_PIXELS, cm->byte_alignment,
-                             codec_frame_buffer, cb, cb_priv);
+                                 VP9_ENC_BORDER_IN_PIXELS, cm->byte_alignment,
+                                 codec_frame_buffer, cb, cb_priv))
+      vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
+                         "Failed to allocate frame buffer");
   }
 
   alloc_util_frame_buffers(cpi);
@@ -3477,17 +3491,30 @@ static void encode_without_recode_loop(VP9_COMP *cpi) {
   vpx_clear_system_state();
 
   set_frame_size(cpi);
-  cpi->Source = vp9_scale_if_required(cm,
-                                      cpi->un_scaled_source,
-                                      &cpi->scaled_source,
-                                      (cpi->oxcf.pass == 0));
 
+  if (is_one_pass_cbr_svc(cpi) &&
+      cpi->un_scaled_source->y_width == cm->width << 2 &&
+      cpi->un_scaled_source->y_height == cm->height << 2 &&
+      cpi->svc.scaled_temp.y_width == cm->width << 1 &&
+      cpi->svc.scaled_temp.y_height == cm->height << 1) {
+    cpi->Source = vp9_svc_twostage_scale(cm,
+                                         cpi->un_scaled_source,
+                                         &cpi->scaled_source,
+                                         &cpi->svc.scaled_temp);
+  } else {
+    cpi->Source = vp9_scale_if_required(cm,
+                                        cpi->un_scaled_source,
+                                        &cpi->scaled_source,
+                                        (cpi->oxcf.pass == 0));
+  }
   // Avoid scaling last_source unless its needed.
-  // Last source is currently only used for screen-content mode,
-  // if partition_search_type == SOURCE_VAR_BASED_PARTITION, or if noise
+  // Last source is needed if vp9_avg_source_sad() is used, or if
+  // partition_search_type == SOURCE_VAR_BASED_PARTITION, or if noise
   // estimation is enabled.
   if (cpi->unscaled_last_source != NULL &&
       (cpi->oxcf.content == VP9E_CONTENT_SCREEN ||
+      (cpi->oxcf.pass == 0 && cpi->oxcf.rc_mode == VPX_VBR &&
+      cpi->oxcf.mode == REALTIME && cpi->oxcf.speed >= 5) ||
       cpi->sf.partition_search_type == SOURCE_VAR_BASED_PARTITION ||
       cpi->noise_estimate.enabled))
     cpi->Last_Source = vp9_scale_if_required(cm,
@@ -3496,12 +3523,10 @@ static void encode_without_recode_loop(VP9_COMP *cpi) {
                                              (cpi->oxcf.pass == 0));
   vp9_update_noise_estimate(cpi);
 
-  // TODO(wonkap/marpan): For 1 pass SVC, since only ZERMOV is allowed for
-  // upsampled reference frame (i.e, svc->force_zero_mode_spatial_ref = 0),
-  // we should be able to avoid this frame-level upsampling.
-  // Keeping it for now as there is an asan error in the multi-threaded SVC
-  // rate control test if this upsampling is removed.
-  if (frame_is_intra_only(cm) == 0) {
+  // For 1 pass SVC, since only ZEROMV is allowed for upsampled reference
+  // frame (i.e, svc->force_zero_mode_spatial_ref = 0), we can avoid this
+  // frame-level upsampling.
+  if (frame_is_intra_only(cm) == 0 && !is_one_pass_cbr_svc(cpi)) {
     vp9_scale_references(cpi);
   }
 
@@ -3857,6 +3882,25 @@ static void set_ext_overrides(VP9_COMP *cpi) {
     cpi->refresh_last_frame = cpi->ext_refresh_last_frame;
     cpi->refresh_golden_frame = cpi->ext_refresh_golden_frame;
     cpi->refresh_alt_ref_frame = cpi->ext_refresh_alt_ref_frame;
+  }
+}
+
+YV12_BUFFER_CONFIG *vp9_svc_twostage_scale(VP9_COMMON *cm,
+                                           YV12_BUFFER_CONFIG *unscaled,
+                                           YV12_BUFFER_CONFIG *scaled,
+                                           YV12_BUFFER_CONFIG *scaled_temp) {
+  if (cm->mi_cols * MI_SIZE != unscaled->y_width ||
+      cm->mi_rows * MI_SIZE != unscaled->y_height) {
+#if CONFIG_VP9_HIGHBITDEPTH
+    scale_and_extend_frame(unscaled, scaled_temp, (int)cm->bit_depth);
+    scale_and_extend_frame(scaled_temp, scaled, (int)cm->bit_depth);
+#else
+    vp9_scale_and_extend_frame(unscaled, scaled_temp);
+    vp9_scale_and_extend_frame(scaled_temp, scaled);
+#endif  // CONFIG_VP9_HIGHBITDEPTH
+    return scaled;
+  } else {
+    return unscaled;
   }
 }
 
@@ -4261,13 +4305,16 @@ static void check_initial_width(VP9_COMP *cpi,
 int vp9_receive_raw_frame(VP9_COMP *cpi, unsigned int frame_flags,
                           YV12_BUFFER_CONFIG *sd, int64_t time_stamp,
                           int64_t end_time) {
-  VP9_COMMON *cm = &cpi->common;
+  VP9_COMMON *const cm = &cpi->common;
   struct vpx_usec_timer timer;
   int res = 0;
   const int subsampling_x = sd->subsampling_x;
   const int subsampling_y = sd->subsampling_y;
 #if CONFIG_VP9_HIGHBITDEPTH
   const int use_highbitdepth = (sd->flags & YV12_FLAG_HIGHBITDEPTH) != 0;
+#endif
+
+#if CONFIG_VP9_HIGHBITDEPTH
   check_initial_width(cpi, use_highbitdepth, subsampling_x, subsampling_y);
 #else
   check_initial_width(cpi, subsampling_x, subsampling_y);
@@ -4467,6 +4514,20 @@ int vp9_get_compressed_data(VP9_COMP *cpi, unsigned int *frame_flags,
   // Skip alt frame if we encode the empty frame
   if (is_two_pass_svc(cpi) && source != NULL)
     arf_src_index = 0;
+
+  if (arf_src_index) {
+    for (i = 0; i <= arf_src_index; ++i) {
+      struct lookahead_entry *e = vp9_lookahead_peek(cpi->lookahead, i);
+      // Avoid creating an alt-ref if there's a forced keyframe pending.
+      if (e == NULL) {
+        break;
+      } else if (e->flags == VPX_EFLAG_FORCE_KF) {
+        arf_src_index = 0;
+        flush = 1;
+        break;
+      }
+    }
+  }
 
   if (arf_src_index) {
     assert(arf_src_index <= rc->frames_to_key);

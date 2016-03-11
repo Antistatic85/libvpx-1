@@ -23,7 +23,7 @@ static const unsigned int NOISE_MOTION_THRESHOLD = 25 * 25;
  */
 static const unsigned int SSE_DIFF_THRESHOLD = 16 * 16 * 20;
 static const unsigned int SSE_THRESHOLD = 16 * 16 * 40;
-static const unsigned int SSE_THRESHOLD_HIGH = 16 * 16 * 60;
+static const unsigned int SSE_THRESHOLD_HIGH = 16 * 16 * 80;
 
 /*
  * The filter function was modified to reduce the computational complexity.
@@ -440,6 +440,11 @@ int vp8_denoiser_allocate(VP8_DENOISER *denoiser, int width, int height,
            denoiser->yv12_last_source.frame_size);
 
     denoiser->denoise_state = vpx_calloc((num_mb_rows * num_mb_cols), 1);
+    if (!denoiser->denoise_state)
+    {
+        vp8_denoiser_free(denoiser);
+        return 1;
+    }
     memset(denoiser->denoise_state, 0, (num_mb_rows * num_mb_cols));
     vp8_denoiser_set_parameters(denoiser, mode);
     denoiser->nmse_source_diff = 0;
