@@ -1317,6 +1317,7 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
                          int mi_row, int mi_col, RD_COST *rd_cost,
                          BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx) {
   VP9_COMMON *const cm = &cpi->common;
+  SPEED_FEATURES *const sf = &cpi->sf;
   const SVC *const svc = &cpi->svc;
   MACROBLOCKD *const xd = &x->e_mbd;
   MODE_INFO *const mi = xd->mi[0];
@@ -1415,6 +1416,17 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   mi->tx_size = VPXMIN(max_txsize_lookup[bsize],
                        tx_mode_to_biggest_tx_size[cm->tx_mode]);
 
+  if (sf->short_circuit_flat_blocks) {
+#if CONFIG_VP9_HIGHBITDEPTH
+    if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH)
+      x->source_variance = vp9_high_get_sby_perpixel_variance(
+          cpi, &x->plane[0].src, bsize, xd->bd);
+    else
+#endif  // CONFIG_VP9_HIGHBITDEPTH
+      x->source_variance =
+          vp9_get_sby_perpixel_variance(cpi, &x->plane[0].src, bsize);
+  }
+
 #if CONFIG_VP9_TEMPORAL_DENOISING
   vp9_denoiser_reset_frame_stats(ctx);
 #endif
@@ -1452,6 +1464,11 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
     PREDICTION_MODE this_mode = ref_mode_set[idx].pred_mode;
     if (cpi->use_svc)
       this_mode = ref_mode_set_svc[idx].pred_mode;
+
+    if (sf->short_circuit_flat_blocks && x->source_variance == 0 &&
+        this_mode != NEARESTMV) {
+      continue;
+    }
 
     if (!(cpi->sf.inter_mode_mask[bsize] & (1 << this_mode)))
       continue;
@@ -1928,6 +1945,10 @@ skip_gpu:
       const PREDICTION_MODE this_mode = intra_mode_list[i];
       THR_MODES mode_index = mode_idx[INTRA_FRAME][mode_offset(this_mode)];
       int mode_rd_thresh = rd_threshes[mode_index];
+      if (sf->short_circuit_flat_blocks && x->source_variance == 0 &&
+          this_mode != DC_PRED) {
+        continue;
+      }
 
       if (!((1 << this_mode) & cpi->sf.intra_y_mode_bsize_mask[bsize]))
         continue;

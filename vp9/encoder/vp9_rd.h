@@ -192,6 +192,15 @@ void vp9_gpu_rewrite_quant_info(struct VP9_COMP *cpi, struct macroblock *x,
                                 int q);
 #endif
 
+unsigned int vp9_get_sby_perpixel_variance(struct VP9_COMP *cpi,
+                                           const struct buf_2d *ref,
+                                           BLOCK_SIZE bs);
+#if CONFIG_VP9_HIGHBITDEPTH
+unsigned int vp9_high_get_sby_perpixel_variance(struct VP9_COMP *cpi,
+                                                const struct buf_2d *ref,
+                                                BLOCK_SIZE bs, int bd);
+#endif
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
