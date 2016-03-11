@@ -145,6 +145,9 @@ typedef uint8_t INTERP_FILTER;
 #define SKIP_TXFM_AC_DC 1
 #define SKIP_TXFM_AC_ONLY 2
 
+// The factor to scale from cost in bits to cost in vp9_prob_cost units.
+#define VP9_PROB_COST_SHIFT 9
+
 typedef short2 MV;
 #define row s0
 #define col s1
@@ -260,7 +263,8 @@ __constant BLOCK_SIZE ss_size_lookup[BLOCK_SIZES] = {
 
 //=====   FUNCTION MACROS   =====
 //--------------------------------------
-#define RDCOST(RM, DM, R, D) (((128 + ((int64_t)R) * (RM)) >> 8) + (D << DM))
+#define RDCOST(RM, DM, R, D) \
+  (ROUND_POWER_OF_TWO(((int64_t)R) * (RM), VP9_PROB_COST_SHIFT) + (D << DM))
 
 // The VP9_BILINEAR_FILTERS_2TAP macro returns a pointer to the bilinear
 // filter kernel as a 2 tap filter.
