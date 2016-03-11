@@ -59,29 +59,6 @@ void vp9_cyclic_refresh_free(CYCLIC_REFRESH *cr) {
   vpx_free(cr);
 }
 
-// Check if we should turn off cyclic refresh based on bitrate condition.
-// TODO(marpan): May be better in some cases to just reduce the amount/delta-qp
-// instead of completely shutting off.
-static int apply_cyclic_refresh_bitrate(const VP9_COMMON *cm,
-                                        const RATE_CONTROL *rc) {
-  // Turn off cyclic refresh if bits available per frame is not sufficiently
-  // larger than bit cost of segmentation. Segment map bit cost should scale
-  // with number of seg blocks, so compare available bits to number of blocks.
-  // Average bits available per frame = avg_frame_bandwidth
-  // Number of (8x8) blocks in frame = mi_rows * mi_cols;
-  const float factor = 0.15f;
-  const int number_blocks = cm->mi_rows  * cm->mi_cols;
-  // The condition below corresponds to turning off at target bitrates:
-  // (at 30fps), ~8kbps for CIF, 20kbps for VGA, 60kps for HD/720p.
-  // Also turn off at very small frame sizes, to avoid too large fraction of
-  // superblocks to be refreshed per frame. Threshold below is less than QCIF.
-  if (rc->avg_frame_bandwidth < factor * number_blocks ||
-      number_blocks / 64 < 5)
-    return 0;
-  else
-    return 1;
-}
-
 // Check if this coding block, of size bsize, should be considered for refresh
 // (lower-qp coding). Decision can be based on various factors, such as
 // size of the coding block (i.e., below min_block size rejected), coding
@@ -210,7 +187,7 @@ void vp9_cyclic_refresh_update_segment(VP9_COMP *const cpi,
   int is_skin = 0;
   if (refresh_this_block == 0 &&
       bsize <= BLOCK_16X16 &&
-      cpi->oxcf.content != VP9E_CONTENT_SCREEN) {
+      cpi->use_skin_detection) {
     is_skin = vp9_compute_skin_block(p[0].src.buf,
                                      p[1].src.buf,
                                      p[2].src.buf,
@@ -321,11 +298,11 @@ void vp9_cyclic_refresh_postencode(VP9_COMP *const cpi) {
 void vp9_cyclic_refresh_set_golden_update(VP9_COMP *const cpi) {
   RATE_CONTROL *const rc = &cpi->rc;
   CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
-  // Set minimum gf_interval for GF update to a multiple (== 2) of refresh
-  // period. Depending on past encoding stats, GF flag may be reset and update
-  // may not occur until next baseline_gf_interval.
+  // Set minimum gf_interval for GF update to a multiple of the refresh period,
+  // with some max limit. Depending on past encoding stats, GF flag may be
+  // reset and update may not occur until next baseline_gf_interval.
   if (cr->percent_refresh > 0)
-    rc->baseline_gf_interval = 4 * (100 / cr->percent_refresh);
+    rc->baseline_gf_interval = VPXMIN(4 * (100 / cr->percent_refresh), 40);
   else
     rc->baseline_gf_interval = 40;
 }
@@ -540,7 +517,10 @@ void vp9_cyclic_refresh_setup(VP9_COMP *const cpi) {
   const RATE_CONTROL *const rc = &cpi->rc;
   CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
   struct segmentation *const seg = &cm->seg;
-  const int apply_cyclic_refresh  = apply_cyclic_refresh_bitrate(cm, rc);
+  // TODO(marpan): Look into whether we should reduce the amount/delta-qp
+  // instead of completely shutting off at low bitrates. For now keep it on.
+  // const int apply_cyclic_refresh = apply_cyclic_refresh_bitrate(cm, rc);
+  const int apply_cyclic_refresh = 1;
   if (cm->current_video_frame == 0)
     cr->low_content_avg = 0.0;
   // Don't apply refresh on key frame or temporal enhancement layer frames.
@@ -642,6 +622,7 @@ void vp9_cyclic_refresh_reset_resize(VP9_COMP *const cpi) {
   memset(cr->consec_zero_mv, 0, cm->mi_rows * cm->mi_cols);
   cr->sb_index = 0;
   cpi->refresh_golden_frame = 1;
+  cpi->refresh_alt_ref_frame = 1;
 }
 
 void vp9_gpu_cyclic_refresh_qindex_setup(VP9_COMP *const cpi,

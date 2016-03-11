@@ -42,7 +42,6 @@
 #include "vp9/encoder/vp9_encodeframe.h"
 
 #define RD_THRESH_POW      1.25
-#define RD_MULT_EPB_RATIO  64
 
 // Factor to weigh the rate for switchable interp filters.
 #define SWITCHABLE_INTERP_RATE_FACTOR 1
@@ -290,6 +289,11 @@ static void set_block_thresholds(const VP9_COMMON *cm, RD_OPT *rd) {
   }
 }
 
+void set_error_per_bit(MACROBLOCK *x, int rdmult) {
+  x->errorperbit = rdmult >> RD_EPB_SHIFT;
+  x->errorperbit += (x->errorperbit == 0);
+}
+
 void vp9_initialize_rd_consts(VP9_COMP *cpi, MACROBLOCK *const x) {
   VP9_COMMON *const cm = &cpi->common;
   MACROBLOCKD *const xd = &x->e_mbd;
@@ -301,8 +305,7 @@ void vp9_initialize_rd_consts(VP9_COMP *cpi, MACROBLOCK *const x) {
   rd->RDDIV = RDDIV_BITS;  // In bits (to multiply D by 128).
   rd->RDMULT = vp9_compute_rd_mult(cpi, cm->base_qindex + cm->y_dc_delta_q);
 
-  x->errorperbit = rd->RDMULT / RD_MULT_EPB_RATIO;
-  x->errorperbit += (x->errorperbit == 0);
+  set_error_per_bit(x, rd->RDMULT);
 
   x->select_tx_size = (cpi->sf.tx_size_search_method == USE_LARGESTALL &&
                        cm->frame_type != KEY_FRAME) ? 0 : 1;
@@ -350,9 +353,7 @@ void vp9_gpu_rewrite_quant_info(VP9_COMP *cpi, MACROBLOCK *x, int q) {
   vp9_frame_init_quantizer(cpi, x);
   rd->RDDIV = RDDIV_BITS;  // In bits (to multiply D by 128).
   rd->RDMULT = vp9_compute_rd_mult(cpi, cm->base_qindex + cm->y_dc_delta_q);
-
-  x->errorperbit = rd->RDMULT / RD_MULT_EPB_RATIO;
-  x->errorperbit += (x->errorperbit == 0);
+  set_error_per_bit(x, rd->RDMULT);
   set_block_thresholds(cm, rd);
 }
 #endif

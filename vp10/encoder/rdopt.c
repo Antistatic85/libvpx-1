@@ -132,16 +132,6 @@ static const REF_DEFINITION vp10_ref_order[MAX_REFS] = {
   {{INTRA_FRAME,  NONE}},
 };
 
-static INLINE int write_uniform_cost(int n, int v) {
-  int l = get_unsigned_bits(n), m = (1 << l) - n;
-  if (l == 0)
-    return 0;
-  if (v < m)
-    return (l - 1) * vp10_cost_bit(128, 0);
-  else
-    return l * vp10_cost_bit(128, 0);
-}
-
 static void swap_block_ptr(MACROBLOCK *x, PICK_MODE_CONTEXT *ctx,
                            int m, int n, int min_plane, int max_plane) {
   int i;
@@ -1083,6 +1073,12 @@ static int64_t rd_pick_intra_sub_8x8_y_mode(VP10_COMP *cpi, MACROBLOCK *mb,
   memcpy(t_above, xd->plane[0].above_context, sizeof(t_above));
   memcpy(t_left, xd->plane[0].left_context, sizeof(t_left));
 
+  // TODO(any): Add search of the tx_type to improve rd performance at the
+  // expense of speed.
+  mic->mbmi.tx_type = DCT_DCT;
+
+  // Later we can add search of the tx_type to improve results.
+  // For now just set it to DCT_DCT
   // Pick modes for each sub-block (of size 4x4, 4x8, or 8x4) in an 8x8 block.
   for (idy = 0; idy < 2; idy += num_4x4_blocks_high) {
     for (idx = 0; idx < 2; idx += num_4x4_blocks_wide) {
@@ -3949,6 +3945,10 @@ void vp10_rd_pick_inter_mode_sub8x8(VP10_COMP *cpi,
       rd_opt->threshes[segment_id][bsize][THR_GOLD] : this_rd_thresh;
       for (i = 0; i < SWITCHABLE_FILTER_CONTEXTS; ++i)
         filter_cache[i] = INT64_MAX;
+
+      // TODO(any): Add search of the tx_type to improve rd performance at the
+      // expense of speed.
+      mbmi->tx_type = DCT_DCT;
 
       if (cm->interp_filter != BILINEAR) {
         tmp_best_filter = EIGHTTAP;

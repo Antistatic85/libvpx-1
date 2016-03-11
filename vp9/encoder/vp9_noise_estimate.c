@@ -51,7 +51,6 @@ int enable_noise_estimation(VP9_COMP *const cpi) {
   // Enabled for 1 pass CBR, speed >=5, and if resolution is same as original.
   // Not enabled for SVC mode and screen_content_mode.
   // Not enabled for low resolutions.
-#if 0
   if (cpi->oxcf.pass == 0 &&
       cpi->oxcf.rc_mode == VPX_CBR &&
       cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ &&
@@ -61,16 +60,14 @@ int enable_noise_estimation(VP9_COMP *const cpi) {
       !cpi->use_svc &&
       cpi->oxcf.content != VP9E_CONTENT_SCREEN &&
       cpi->common.width >= 640 &&
-      cpi->common.height >= 480)
+      cpi->common.height >= 480 &&
+      cpi->common.use_gpu == 0)
     return 1;
   else
     return 0;
-#else
-  (void) cpi;
-  return 0;
-#endif
 }
 
+#if CONFIG_VP9_TEMPORAL_DENOISING
 static void copy_frame(YV12_BUFFER_CONFIG * const dest,
                        const YV12_BUFFER_CONFIG * const src) {
   int r;
@@ -86,6 +83,7 @@ static void copy_frame(YV12_BUFFER_CONFIG * const dest,
     srcbuf += src->y_stride;
   }
 }
+#endif  // CONFIG_VP9_TEMPORAL_DENOISING
 
 NOISE_LEVEL vp9_noise_estimate_extract_level(NOISE_ESTIMATE *const ne) {
   int noise_level = kLowLow;
@@ -165,7 +163,9 @@ void vp9_update_noise_estimate(VP9_COMP *const cpi) {
     for (mi_row = 0; mi_row < cm->mi_rows; mi_row++) {
       for (mi_col = 0; mi_col < cm->mi_cols; mi_col++) {
         // 16x16 blocks, 1/4 sample of frame.
-        if (mi_row % 4 == 0 && mi_col % 4 == 0) {
+        if (mi_row % 4 == 0 && mi_col % 4 == 0 &&
+            mi_row < cm->mi_rows - 1 &&
+            mi_col < cm->mi_cols - 1) {
           int bl_index = mi_row * cm->mi_cols + mi_col;
           int bl_index1 = bl_index + 1;
           int bl_index2 = bl_index + cm->mi_cols;

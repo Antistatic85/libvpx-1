@@ -24,6 +24,7 @@ extern "C" {
 #endif
 
 #define RDDIV_BITS          7
+#define RD_EPB_SHIFT        6
 
 #define RDCOST(RM, DM, R, D) \
   (ROUND_POWER_OF_TWO(((int64_t)R) * (RM), VP9_PROB_COST_SHIFT) + (D << DM))
@@ -172,6 +173,8 @@ static INLINE int rd_less_than_thresh(int64_t best_rd, int thresh,
                                       int thresh_fact) {
     return best_rd < ((int64_t)thresh * thresh_fact >> 5) || thresh == INT_MAX;
 }
+
+void set_error_per_bit(struct macroblock *x, int rdmult);
 
 void vp9_mv_pred(struct VP9_COMP *cpi, struct macroblock *x,
                  uint8_t *ref_y_buffer, int ref_y_stride,

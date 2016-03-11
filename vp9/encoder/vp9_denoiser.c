@@ -332,7 +332,7 @@ void vp9_denoiser_denoise(VP9_DENOISER *denoiser, MACROBLOCK *mb,
   struct buf_2d src = mb->plane[0].src;
   int is_skin = 0;
 
-  if (bs <= BLOCK_16X16 && denoiser->denoising_level >= kDenLow) {
+  if (bs <= BLOCK_32X32 && denoiser->denoising_level >= kDenLow) {
     is_skin = vp9_compute_skin_block(mb->plane[0].src.buf,
                                      mb->plane[1].src.buf,
                                      mb->plane[2].src.buf,
@@ -344,7 +344,9 @@ void vp9_denoiser_denoise(VP9_DENOISER *denoiser, MACROBLOCK *mb,
   mv_col = ctx->best_sse_mv.as_mv.col;
   mv_row = ctx->best_sse_mv.as_mv.row;
   motion_magnitude = mv_row * mv_row + mv_col * mv_col;
-  if (denoiser->denoising_level == kDenHigh && motion_magnitude < 16) {
+  if (!is_skin &&
+      denoiser->denoising_level == kDenHigh &&
+      motion_magnitude < 16) {
     denoiser->increase_denoising = 1;
   } else {
     denoiser->increase_denoising = 0;

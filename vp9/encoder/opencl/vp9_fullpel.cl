@@ -70,9 +70,10 @@ int mvsad_err_cost(MV *mv,
   diff.row = mv->row - ref->row;
   diff.col = mv->col - ref->col;
 
-  return ROUND_POWER_OF_TWO(mv_cost_constant(&diff, nmvjointsadcost,
-                                             nmvsadcost_0,
-                                             nmvsadcost_1) * sad_per_bit, 8);
+  return ROUND_POWER_OF_TWO(
+      (unsigned)mv_cost_constant(&diff, nmvjointsadcost, 
+                                 nmvsadcost_0, nmvsadcost_1) * sad_per_bit, 
+                                 VP9_PROB_COST_SHIFT);
 }
 
 int clamp_it(int value, int low, int high) {
