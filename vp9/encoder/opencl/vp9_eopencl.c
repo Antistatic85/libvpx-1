@@ -8,17 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-
+#include "vp9_eopencl_rtdef.h"
 #include "vp9/common/opencl/vp9_opencl.h"
 #include "vp9/encoder/opencl/vp9_eopencl.h"
 
-#define OPENCL_DEVELOPER_MODE 1
-#define BUILD_OPTION_LENGTH 128
-#if ARCH_ARM
-#define PREFIX_PATH "./"
-#else
-#define PREFIX_PATH "../../vp9/encoder/opencl/"
-#endif
+#define OPENCL_DEVELOPER_MODE 0
 
 static const int pixel_rows_per_workitem_log2_pro_me = 4;
 
@@ -32,43 +26,6 @@ static const int pixel_rows_per_workitem_log2_full_pixel[GPU_BLOCK_SIZES]
 
 static const int pixel_rows_per_workitem_log2_sub_pixel[GPU_BLOCK_SIZES]
                                                                 = {4, 5};
-
-static char *read_src(const char *src_file_name) {
-  FILE *fp;
-  int32_t err;
-  int32_t size;
-  char *src;
-
-  fp = fopen(src_file_name, "r");
-  if (fp == NULL)
-    return NULL;
-
-  err = fseek(fp, 0, SEEK_END);
-  if (err != 0)
-    return NULL;
-
-  size = ftell(fp);
-  if (size < 0)
-    return NULL;
-
-  err = fseek(fp, 0, SEEK_SET);
-  if (err != 0)
-    return NULL;
-
-  src = (char *)vpx_malloc(size + 1);
-  if (src == NULL)
-    return NULL;
-
-  err = fread(src, 1, size, fp);
-  if (err != size) {
-    vpx_free(src);
-    return NULL;
-  }
-
-  src[size] = '\0';
-
-  return src;
-}
 
 #if OPENCL_PROFILING
 static cl_ulong get_event_time_elapsed(cl_event event, cl_ulong *startTime,
@@ -1193,9 +1150,6 @@ skip_execution:
                          NULL, NULL, &status);
   assert(status == CL_SUCCESS);
 
-  status = clFlush(opencl->cmd_queue);
-  assert(status == CL_SUCCESS);
-
   if (eopencl->event[buffer_set][sub_frame_idx] != NULL) {
     status = clReleaseEvent(eopencl->event[buffer_set][sub_frame_idx]);
     eopencl->event[buffer_set][sub_frame_idx] = NULL;
@@ -1204,6 +1158,9 @@ skip_execution:
 
   status = clEnqueueMarker(opencl->cmd_queue,
                            &eopencl->event[buffer_set][sub_frame_idx]);
+  assert(status == CL_SUCCESS);
+
+  status = clFlush(opencl->cmd_queue);
   assert(status == CL_SUCCESS);
 
   return;
@@ -1313,22 +1270,16 @@ fail:
   return;
 }
 
-static int vp9_eopencl_build_subpel_kernel(VP9_COMP *cpi) {
+static int vp9_eopencl_build_subpel_kernel(VP9_COMP *cpi,
+                                           const char *kernel_src) {
   VP9_OPENCL *opencl = cpi->common.gpu.compute_framework;
   VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
   cl_int status = CL_SUCCESS;
-  cl_device_id device = opencl->device;
+  cl_device_id *device = opencl->device;
   cl_program program;
-  const char *kernel_file_name= PREFIX_PATH"vp9_subpel.cl";
-  char build_options[BUILD_OPTION_LENGTH];
-  char *kernel_src = NULL;
+  char build_options[64];
   GPU_BLOCK_SIZE gpu_bsize;
   BLOCK_SIZE bsize;
-
-  // Read kernel source files
-  kernel_src = read_src(kernel_file_name);
-  if (kernel_src == NULL)
-    goto fail;
 
   for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
     bsize = get_actual_block_size(gpu_bsize);
@@ -1340,13 +1291,12 @@ static int vp9_eopencl_build_subpel_kernel(VP9_COMP *cpi) {
       goto fail;
 
     sprintf(build_options,
-            "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
-            PREFIX_PATH,
+            "-DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
             num_8x8_blocks_wide_lookup[bsize] * 8,
             1 << pixel_rows_per_workitem_log2_sub_pixel[gpu_bsize]);
 
     // Build the program
-    status = clBuildProgram(program, 1, &device,
+    status = clBuildProgram(program, 1, device,
                             build_options,
                             NULL, NULL);
     if (status != CL_SUCCESS) {
@@ -1357,7 +1307,7 @@ static int vp9_eopencl_build_subpel_kernel(VP9_COMP *cpi) {
       size_t build_log_size;
 
       clGetProgramBuildInfo(program,
-                            device,
+                            device[0],
                             CL_PROGRAM_BUILD_LOG,
                             0,
                             NULL,
@@ -1367,7 +1317,7 @@ static int vp9_eopencl_build_subpel_kernel(VP9_COMP *cpi) {
         goto fail;
 
       clGetProgramBuildInfo(program,
-                            device,
+                            device[0],
                             CL_PROGRAM_BUILD_LOG,
                             build_log_size,
                             build_log,
@@ -1394,31 +1344,22 @@ static int vp9_eopencl_build_subpel_kernel(VP9_COMP *cpi) {
       goto fail;
   }
 
-  vpx_free(kernel_src);
   return 0;
 
-  fail:
-  if (kernel_src != NULL)
-    vpx_free(kernel_src);
+fail:
   return 1;
 }
 
-static int vp9_eopencl_build_fullpel_kernel(VP9_COMP *cpi) {
+static int vp9_eopencl_build_fullpel_kernel(VP9_COMP *cpi,
+                                            const char *kernel_src) {
   VP9_OPENCL *opencl = cpi->common.gpu.compute_framework;
   VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
   cl_int status = CL_SUCCESS;
-  cl_device_id device = opencl->device;
+  cl_device_id *device = opencl->device;
   cl_program program;
-  const char *kernel_file_name= PREFIX_PATH"vp9_fullpel.cl";
-  char build_options[BUILD_OPTION_LENGTH];
-  char *kernel_src = NULL;
+  char build_options[64];
   GPU_BLOCK_SIZE gpu_bsize;
   BLOCK_SIZE bsize;
-
-  // Read kernel source files
-  kernel_src = read_src(kernel_file_name);
-  if (kernel_src == NULL)
-    goto fail;
 
   for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
     bsize = get_actual_block_size(gpu_bsize);
@@ -1430,13 +1371,12 @@ static int vp9_eopencl_build_fullpel_kernel(VP9_COMP *cpi) {
       goto fail;
 
     sprintf(build_options,
-            "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
-            PREFIX_PATH,
+            "-DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
             num_8x8_blocks_wide_lookup[bsize] * 8,
             1 << pixel_rows_per_workitem_log2_full_pixel[gpu_bsize]);
 
     // Build the program
-    status = clBuildProgram(program, 1, &device, build_options,
+    status = clBuildProgram(program, 1, device, build_options,
                             NULL, NULL);
     if (status != CL_SUCCESS) {
       // Enable this if you are a OpenCL developer and need to print the build
@@ -1446,7 +1386,7 @@ static int vp9_eopencl_build_fullpel_kernel(VP9_COMP *cpi) {
       size_t build_log_size;
 
       clGetProgramBuildInfo(program,
-                            device,
+                            device[0],
                             CL_PROGRAM_BUILD_LOG,
                             0,
                             NULL,
@@ -1456,7 +1396,7 @@ static int vp9_eopencl_build_fullpel_kernel(VP9_COMP *cpi) {
         goto fail;
 
       clGetProgramBuildInfo(program,
-                            device,
+                            device[0],
                             CL_PROGRAM_BUILD_LOG,
                             build_log_size,
                             build_log,
@@ -1478,31 +1418,22 @@ static int vp9_eopencl_build_fullpel_kernel(VP9_COMP *cpi) {
       goto fail;
   }
 
-  vpx_free(kernel_src);
   return 0;
 
-  fail:
-  if (kernel_src != NULL)
-    vpx_free(kernel_src);
+fail:
   return 1;
 }
 
-static int vp9_eopencl_build_zeromv_kernel(VP9_COMP *cpi) {
+static int vp9_eopencl_build_zeromv_kernel(VP9_COMP *cpi,
+                                           const char *kernel_src) {
   VP9_OPENCL *opencl = cpi->common.gpu.compute_framework;
   VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
   cl_int status = CL_SUCCESS;
-  cl_device_id device = opencl->device;
+  cl_device_id *device = opencl->device;
   cl_program program;
-  const char *kernel_file_name= PREFIX_PATH"vp9_rd.cl";
-  char build_options[BUILD_OPTION_LENGTH];
-  char *kernel_src = NULL;
+  char build_options[64];
   GPU_BLOCK_SIZE gpu_bsize;
   BLOCK_SIZE bsize;
-
-  // Read kernel source files
-  kernel_src = read_src(kernel_file_name);
-  if (kernel_src == NULL)
-    goto fail;
 
   for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
     bsize = get_actual_block_size(gpu_bsize);
@@ -1514,13 +1445,12 @@ static int vp9_eopencl_build_zeromv_kernel(VP9_COMP *cpi) {
       goto fail;
 
     sprintf(build_options,
-            "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
-            PREFIX_PATH,
+            "-DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
             num_8x8_blocks_wide_lookup[bsize] * 8,
             1 << pixel_rows_per_workitem_log2_zeromv);
 
     // Build the program
-    status = clBuildProgram(program, 1, &device,
+    status = clBuildProgram(program, 1, device,
                             build_options,
                             NULL, NULL);
     if (status != CL_SUCCESS) {
@@ -1531,7 +1461,7 @@ static int vp9_eopencl_build_zeromv_kernel(VP9_COMP *cpi) {
       size_t build_log_size;
 
       clGetProgramBuildInfo(program,
-                            device,
+                            device[0],
                             CL_PROGRAM_BUILD_LOG,
                             0,
                             NULL,
@@ -1541,7 +1471,7 @@ static int vp9_eopencl_build_zeromv_kernel(VP9_COMP *cpi) {
         goto fail;
 
       clGetProgramBuildInfo(program,
-                            device,
+                            device[0],
                             CL_PROGRAM_BUILD_LOG,
                             build_log_size,
                             build_log,
@@ -1563,31 +1493,22 @@ static int vp9_eopencl_build_zeromv_kernel(VP9_COMP *cpi) {
       goto fail;
   }
 
-  vpx_free(kernel_src);
   return 0;
 
 fail:
-  if (kernel_src != NULL)
-    vpx_free(kernel_src);
   return 1;
 }
 
-static int vp9_eopencl_build_rd_kernel(VP9_COMP *cpi) {
+static int vp9_eopencl_build_rd_kernel(VP9_COMP *cpi,
+                                       const char *kernel_src) {
   VP9_OPENCL *opencl = cpi->common.gpu.compute_framework;
   VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
   cl_int status = CL_SUCCESS;
-  cl_device_id device = opencl->device;
+  cl_device_id *device = opencl->device;
   cl_program program;
-  const char *kernel_file_name= PREFIX_PATH"vp9_rd.cl";
-  char build_options[BUILD_OPTION_LENGTH];
-  char *kernel_src = NULL;
+  char build_options[64];
   GPU_BLOCK_SIZE gpu_bsize;
   BLOCK_SIZE bsize;
-
-  // Read kernel source files
-  kernel_src = read_src(kernel_file_name);
-  if (kernel_src == NULL)
-    goto fail;
 
   for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
     bsize = get_actual_block_size(gpu_bsize);
@@ -1599,13 +1520,12 @@ static int vp9_eopencl_build_rd_kernel(VP9_COMP *cpi) {
       goto fail;
 
     sprintf(build_options,
-            "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
-            PREFIX_PATH,
+            "-DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
             num_8x8_blocks_wide_lookup[bsize] * 8,
             1 << pixel_rows_per_workitem_log2_inter_pred[gpu_bsize]);
 
     // Build the program
-    status = clBuildProgram(program, 1, &device,
+    status = clBuildProgram(program, 1, device,
                             build_options,
                             NULL, NULL);
     if (status != CL_SUCCESS) {
@@ -1616,7 +1536,7 @@ static int vp9_eopencl_build_rd_kernel(VP9_COMP *cpi) {
       size_t build_log_size;
 
       clGetProgramBuildInfo(program,
-                            device,
+                            device[0],
                             CL_PROGRAM_BUILD_LOG,
                             0,
                             NULL,
@@ -1626,7 +1546,7 @@ static int vp9_eopencl_build_rd_kernel(VP9_COMP *cpi) {
         goto fail;
 
       clGetProgramBuildInfo(program,
-                            device,
+                            device[0],
                             CL_PROGRAM_BUILD_LOG,
                             build_log_size,
                             build_log,
@@ -1653,29 +1573,20 @@ static int vp9_eopencl_build_rd_kernel(VP9_COMP *cpi) {
       goto fail;
   }
 
-  vpx_free(kernel_src);
   return 0;
 
   fail:
-  if (kernel_src != NULL)
-    vpx_free(kernel_src);
   return 1;
 }
 
-static int vp9_eopencl_build_choose_partitioning_kernel(VP9_COMP *cpi) {
+static int vp9_eopencl_build_choose_partitioning_kernel(VP9_COMP *cpi,
+                                                        const char *kernel_src) {
   VP9_OPENCL *opencl = cpi->common.gpu.compute_framework;
   VP9_EOPENCL *eopencl = cpi->egpu.compute_framework;
   cl_int status = CL_SUCCESS;
-  cl_device_id device = opencl->device;
+  cl_device_id *device = opencl->device;
   cl_program program;
-  const char *kernel_file_name= PREFIX_PATH"vp9_partitioning.cl";
-  char build_options[BUILD_OPTION_LENGTH];
-  char *kernel_src = NULL;
-
-  // Read kernel source files
-  kernel_src = read_src(kernel_file_name);
-  if (kernel_src == NULL)
-    goto fail;
+  char build_options[64];
 
   program = clCreateProgramWithSource(opencl->context, 1,
                                       (const char**)(void *)&kernel_src,
@@ -1685,13 +1596,11 @@ static int vp9_eopencl_build_choose_partitioning_kernel(VP9_COMP *cpi) {
     goto fail;
 
   sprintf(build_options,
-          "-I %s -DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
-          PREFIX_PATH,
-          64,
-          1 << pixel_rows_per_workitem_log2_pro_me);
+          "-DBLOCK_SIZE_IN_PIXELS=%d -DPIXEL_ROWS_PER_WORKITEM=%d",
+          64, 1 << pixel_rows_per_workitem_log2_pro_me);
 
   // Build the program
-  status = clBuildProgram(program, 1, &device, build_options, NULL, NULL);
+  status = clBuildProgram(program, 1, device, build_options, NULL, NULL);
   if (status != CL_SUCCESS) {
     // Enable this if you are a OpenCL developer and need to print the build
     // errors of the OpenCL kernel
@@ -1700,7 +1609,7 @@ static int vp9_eopencl_build_choose_partitioning_kernel(VP9_COMP *cpi) {
     size_t build_log_size;
 
     clGetProgramBuildInfo(program,
-                          device,
+                          device[0],
                           CL_PROGRAM_BUILD_LOG,
                           0,
                           NULL,
@@ -1710,7 +1619,7 @@ static int vp9_eopencl_build_choose_partitioning_kernel(VP9_COMP *cpi) {
       goto fail;
 
     clGetProgramBuildInfo(program,
-                          device,
+                          device[0],
                           CL_PROGRAM_BUILD_LOG,
                           build_log_size,
                           build_log,
@@ -1751,12 +1660,9 @@ static int vp9_eopencl_build_choose_partitioning_kernel(VP9_COMP *cpi) {
   if (status != CL_SUCCESS)
     goto fail;
 
-  vpx_free(kernel_src);
   return 0;
 
 fail:
-  if (kernel_src != NULL)
-    vpx_free(kernel_src);
   return 1;
 }
 
@@ -1783,19 +1689,19 @@ int vp9_eopencl_init(VP9_COMP *cpi) {
   eopencl = egpu->compute_framework;
   eopencl->opencl = opencl;
 
-  if (vp9_eopencl_build_choose_partitioning_kernel(cpi))
+  if (vp9_eopencl_build_choose_partitioning_kernel(cpi, kernel_src))
     return 1;
 
-  if (vp9_eopencl_build_zeromv_kernel(cpi))
+  if (vp9_eopencl_build_zeromv_kernel(cpi, kernel_src))
     return 1;
 
-  if (vp9_eopencl_build_rd_kernel(cpi))
+  if (vp9_eopencl_build_rd_kernel(cpi, kernel_src))
     return 1;
 
-  if (vp9_eopencl_build_fullpel_kernel(cpi))
+  if (vp9_eopencl_build_fullpel_kernel(cpi, kernel_src))
     return 1;
 
-  if (vp9_eopencl_build_subpel_kernel(cpi))
+  if (vp9_eopencl_build_subpel_kernel(cpi, kernel_src))
     return 1;
 
   return 0;

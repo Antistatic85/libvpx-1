@@ -174,6 +174,9 @@ void vp9_opencl_remove(VP9_COMMON *cm) {
   if (status != CL_SUCCESS)
     goto fail;
 
+  free(opencl->device);
+  opencl->device = NULL;
+
   return;
 
 fail:
@@ -187,7 +190,7 @@ int vp9_opencl_init(VP9_COMMON *cm) {
   cl_uint num_platforms = 0;
   cl_platform_id platform;
   cl_uint num_devices = 0;
-  cl_device_id device;
+  cl_device_id *device = NULL;
   cl_command_queue_properties command_queue_properties = 0;
 
 #if OPENCL_PROFILING
@@ -216,26 +219,32 @@ int vp9_opencl_init(VP9_COMMON *cm) {
   status = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, NULL, &num_devices);
   if (status != CL_SUCCESS || num_devices == 0)
     goto fail;
+  opencl->num_devices = num_devices;
 
   // Get the device ID for one device
-  status = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
+  device = malloc(sizeof(*device) * num_devices);
+  if (device == NULL)
+    goto fail;
+  status = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, num_devices, device,
+                          NULL);
   if (status != CL_SUCCESS)
     goto fail;
   opencl->device = device;
 
- // Create OpenCL context for one device
-  opencl->context = clCreateContext(NULL, 1, &device, NULL, NULL, &status);
+  // Create OpenCL context for devices
+  opencl->context = clCreateContext(NULL, num_devices, device, NULL, NULL,
+                                    &status);
   if (status != CL_SUCCESS || opencl->context == NULL)
     goto fail;
 
   // Create command queues for the device
-  opencl->cmd_queue_memory = clCreateCommandQueue(opencl->context, device,
+  opencl->cmd_queue_memory = clCreateCommandQueue(opencl->context, device[0],
                                                   command_queue_properties,
                                                   &status);
   if (status != CL_SUCCESS || opencl->cmd_queue_memory == NULL)
     goto fail;
 
-  opencl->cmd_queue = clCreateCommandQueue(opencl->context, device,
+  opencl->cmd_queue = clCreateCommandQueue(opencl->context, device[0],
                                            command_queue_properties,
                                            &status);
   if (status != CL_SUCCESS || opencl->cmd_queue == NULL)

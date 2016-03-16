@@ -1,16 +1,12 @@
-/*
- *  Copyright (c) 2015 The WebM project authors. All Rights Reserved.
- *
- *  Use of this source code is governed by a BSD-style license
- *  that can be found in the LICENSE file in the root of the source
- *  tree. An additional intellectual property rights grant can be found
- *  in the file PATENTS.  All contributing project authors may
- *  be found in the AUTHORS file in the root of the source tree.
- */
-
-//=====   HEADER DECLARATIONS   =====
-//--------------------------------------
-#include "vp9_cl_common.h"
+//
+//  Copyright (c) 2015 The WebM project authors. All Rights Reserved.
+//
+//  Use of this source code is governed by a BSD-style license
+//  that can be found in the LICENSE file in the root of the source
+//  tree. An additional intellectual property rights grant can be found
+//  in the file PATENTS.  All contributing project authors may
+//  be found in the AUTHORS file in the root of the source tree.
+//
 
 typedef struct {
   SUM_SSE sum_sse[EIGHTTAP_SMOOTH + 1][64];
@@ -342,7 +338,7 @@ void inter_prediction(__global uchar *ref_data,
   int i;
 
   if (!vert_subpel) {
-    /* L0 only x_frac */
+    // L0 only x_frac
     char8 filt = filter[filter_type][horz_subpel];
 
     for (i = 0; i < PIXEL_ROWS_PER_WORKITEM; i++) {
@@ -396,7 +392,7 @@ void inter_prediction(__global uchar *ref_data,
     }
     ACCUMULATE_SUM_SSE_INTER_PRED(sum, sse)
   } else if(!horz_subpel) {
-    /* L0 only y_frac */
+    // L0 only y_frac
     char8 filt = filter[filter_type][vert_subpel];
     ref_data -= (3 * stride);
     for(i = 0; i < PIXEL_ROWS_PER_WORKITEM; i++) {

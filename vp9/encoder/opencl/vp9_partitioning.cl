@@ -1,16 +1,12 @@
-/*
- *  Copyright (c) 2015 The WebM project authors. All Rights Reserved.
- *
- *  Use of this source code is governed by a BSD-style license
- *  that can be found in the LICENSE file in the root of the source
- *  tree. An additional intellectual property rights grant can be found
- *  in the file PATENTS.  All contributing project authors may
- *  be found in the AUTHORS file in the root of the source tree.
- */
-
-//=====   HEADER DECLARATIONS   =====
-//--------------------------------------
-#include "vp9_cl_common.h"
+//
+//  Copyright (c) 2015 The WebM project authors. All Rights Reserved.
+//
+//  Use of this source code is governed by a BSD-style license
+//  that can be found in the LICENSE file in the root of the source
+//  tree. An additional intellectual property rights grant can be found
+//  in the file PATENTS.  All contributing project authors may
+//  be found in the AUTHORS file in the root of the source tree.
+//
 
 #define CR_SEGMENT_ID_BASE    0
 
@@ -195,12 +191,12 @@ int set_vt_partitioning(__local int *var,
   return 0;
 }
 
-void var_filter_block2d_bil_both(__global uchar *ref_data,
-                                 __global uchar *cur_data,
-                                 int stride,
-                                 ushort2 horz_filter,
-                                 ushort2 vert_filter,
-                                 int *sum) {
+void var_filter_block2d_bil_both_sad(__global uchar *ref_data,
+                                     __global uchar *cur_data,
+                                     int stride,
+                                     ushort2 horz_filter,
+                                     ushort2 vert_filter,
+                                     int *sum) {
   uchar8 output;
   uchar16 src;
   ushort8 round_factor = 1 << (FILTER_BITS - 1);
@@ -274,10 +270,10 @@ int get_uv_filtered_sad(__global uchar *ref_frame,
   barrier(CLK_LOCAL_MEM_FENCE);
   atomic_sad[0] = 0;
 
-  var_filter_block2d_bil_both(ref_frame, cur_frame, stride,
-                              BILINEAR_FILTERS_2TAP(sp(this_mv.col >> 1)),
-                              BILINEAR_FILTERS_2TAP(sp(this_mv.row >> 1)),
-                              &intermediate_sad);
+  var_filter_block2d_bil_both_sad(ref_frame, cur_frame, stride,
+                                  BILINEAR_FILTERS_2TAP(sp(this_mv.col >> 1)),
+                                  BILINEAR_FILTERS_2TAP(sp(this_mv.row >> 1)),
+                                  &intermediate_sad);
 
   barrier(CLK_LOCAL_MEM_FENCE);
   atomic_add(atomic_sad, intermediate_sad);
@@ -655,6 +651,8 @@ void vp9_pro_motion_estimation(__global uchar *cur,
     gpu_output_pro_me->pred_mv_sad = bestsad;
   }
 }
+
+#undef CHECK_BETTER
 
 __kernel
 void vp9_color_sensitivity(__global uchar *src,

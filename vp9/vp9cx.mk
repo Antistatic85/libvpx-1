@@ -97,6 +97,7 @@ VP9_CX_SRCS-yes += encoder/vp9_egpu.c
 VP9_CX_SRCS-yes += encoder/vp9_egpu.h
 VP9_CX_SRCS-$(CONFIG_OPENCL) += encoder/opencl/vp9_eopencl.c
 VP9_CX_SRCS-$(CONFIG_OPENCL) += encoder/opencl/vp9_eopencl.h
+VP9_CX_SRCS-$(CONFIG_OPENCL) += encoder/opencl/vp9_eopencl_rtdef.h
 
 VP9_CX_SRCS-$(HAVE_SSE2) += encoder/x86/vp9_temporal_filter_apply_sse2.asm
 VP9_CX_SRCS-$(HAVE_SSE2) += encoder/x86/vp9_quantize_sse2.c

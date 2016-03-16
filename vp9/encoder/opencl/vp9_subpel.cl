@@ -1,16 +1,12 @@
-/*
- *  Copyright (c) 2015 The WebM project authors. All Rights Reserved.
- *
- *  Use of this source code is governed by a BSD-style license
- *  that can be found in the LICENSE file in the root of the source
- *  tree. An additional intellectual property rights grant can be found
- *  in the file PATENTS.  All contributing project authors may
- *  be found in the AUTHORS file in the root of the source tree.
- */
-
-//=====   HEADER DECLARATIONS   =====
-//--------------------------------------
-#include "vp9_cl_common.h"
+//
+//  Copyright (c) 2015 The WebM project authors. All Rights Reserved.
+//
+//  Use of this source code is governed by a BSD-style license
+//  that can be found in the LICENSE file in the root of the source
+//  tree. An additional intellectual property rights grant can be found
+//  in the file PATENTS.  All contributing project authors may
+//  be found in the AUTHORS file in the root of the source tree.
+//
 
 typedef struct {
   SUM_SSE sum_sse[9];
@@ -207,7 +203,7 @@ void vp9_sub_pixel_search_halfpel_filtering(__global uchar *ref_frame,
 
   __global int *intermediate_sum_sse = (__global int *)gpu_scratch;
 
-  /* Half pel */
+  // Half pel
   best_mv = best_mv + hpel_offset[idx];
 
   idx *= 2;
@@ -244,7 +240,7 @@ void vp9_sub_pixel_search_halfpel_filtering(__global uchar *ref_frame,
     MV best_mv = gpu_output_me->mv.as_mv;
     MV this_mv = best_mv;
     besterr = INT32_MAX;
-    /*Part 1*/
+    // Part 1
     tr = best_mv.row;
     tc = best_mv.col;
 
@@ -322,7 +318,7 @@ void vp9_sub_pixel_search_quarterpel_filtering(__global uchar *ref_frame,
 
   __global int *intermediate_sum_sse = (__global int *)gpu_scratch;
 
-  /* Quarter pel */
+  // Quarter pel
   best_mv = best_mv + qpel_offset[idx];
 
   idx *= 2;
@@ -348,7 +344,7 @@ void vp9_sub_pixel_search_quarterpel_filtering(__global uchar *ref_frame,
     MV this_mv = best_mv;
     besterr = intermediate_sum_sse[16];
 
-    /*Part 2*/
+    // Part 2
     tr = best_mv.row;
     tc = best_mv.col;
 
