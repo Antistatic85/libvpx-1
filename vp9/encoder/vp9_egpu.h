@@ -104,8 +104,8 @@ typedef struct SubFrameInfo {
 
 typedef struct VP9_EGPU {
   void *compute_framework;
-  void (*alloc_buffers)(struct VP9_COMP *cpi);
-  void (*free_buffers)(struct VP9_COMP *cpi);
+  int (*alloc_buffers)(struct VP9_COMP *cpi);
+  int (*free_buffers)(struct VP9_COMP *cpi);
   void (*acquire_input_buffer)(struct VP9_COMP *cpi, void **host_ptr);
   void (*acquire_output_me_buffer)(struct VP9_COMP *cpi, void **host_ptr,
       int sub_frame_idx);
@@ -117,7 +117,7 @@ typedef struct VP9_EGPU {
   void (*enc_sync_read)(struct VP9_COMP *cpi, int sub_frame_idx);
   void (*execute)(struct VP9_COMP *cpi, int sub_frame_idx, int async);
   void (*execute_prologue)(struct VP9_COMP *cpi);
-  void (*remove)(struct VP9_COMP *cpi);
+  int (*remove)(struct VP9_COMP *cpi);
   void (*enc_profile)(struct VP9_COMP *cpi, int sub_frame_idx);
 } VP9_EGPU;
 

@@ -51,9 +51,8 @@ const BLOCK_SIZE vp9_gpu_block_size_lookup[BLOCK_SIZES] = {
 #if CONFIG_GPU_COMPUTE
 
 void vp9_egpu_remove(VP9_COMP *cpi) {
-  VP9_EGPU *egpu = &cpi->egpu;
-
-  egpu->remove(cpi);
+  if (cpi->egpu.remove)
+    cpi->egpu.remove(cpi);
 }
 
 int vp9_egpu_init(VP9_COMP *cpi) {
@@ -358,7 +357,8 @@ void vp9_free_gpu_interface_buffers(VP9_COMP *cpi) {
   vpx_free(cpi->gpu_output_me[0]);
   cpi->gpu_output_me[0] = NULL;
 #else
-  cpi->egpu.free_buffers(cpi);
+  if (cpi->egpu.free_buffers)
+    cpi->egpu.free_buffers(cpi);
 #endif
 }
 

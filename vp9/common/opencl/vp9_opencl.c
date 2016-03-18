@@ -63,7 +63,7 @@ static void vp9_opencl_release_frame_buffers(VP9_COMMON *cm,
                                              void **opencl_mem_dup,
                                              uint8_t **mapped_pointer_dup) {
   VP9_OPENCL *opencl = cm->gpu.compute_framework;
-  cl_int status;
+  cl_int status = CL_SUCCESS;
 
   if (*mapped_pointer != NULL) {
     status = clEnqueueUnmapMemObject(opencl->cmd_queue,
@@ -108,13 +108,14 @@ fail:
   assert(0);
 }
 
-// NOTE : Mapping happens in a different command queue than NDRangeKernel
 int vp9_opencl_map_buffer(VP9_OPENCL *const opencl,
                           opencl_buffer *opencl_buf,
                           cl_map_flags map_flags) {
-  cl_int status;
+  cl_int status = CL_SUCCESS;
 
   if (opencl_buf->mapped_pointer == NULL) {
+    // GPU jobs that acquire pointer to the host are queued in to a different
+    // command queue
     opencl_buf->mapped_pointer = clEnqueueMapBuffer(opencl->cmd_queue_memory,
                                                     opencl_buf->opencl_mem,
                                                     CL_TRUE,
@@ -125,20 +126,19 @@ int vp9_opencl_map_buffer(VP9_OPENCL *const opencl,
     if (status != CL_SUCCESS)
       goto fail;
   }
-  return 0;
 
 fail:
-  return 1;
+  return (int)status;
 }
 
-// NOTE : Unmapping happens in the same command queue as NDRangeKernel
 int vp9_opencl_unmap_buffer(VP9_OPENCL *const opencl,
                             opencl_buffer *opencl_buf,
                             cl_bool is_blocking) {
-  cl_int status;
-
+  cl_int status = CL_SUCCESS;
 
   if (opencl_buf->mapped_pointer != NULL) {
+    // unmap jobs are queued to the same command queue where GPU ME and PRO-ME
+    // jobs are queued
     status = clEnqueueUnmapMemObject(opencl->cmd_queue,
                                      opencl_buf->opencl_mem,
                                      opencl_buf->mapped_pointer,
@@ -153,34 +153,45 @@ int vp9_opencl_unmap_buffer(VP9_OPENCL *const opencl,
         goto fail;
     }
   }
-  return 0;
 
 fail:
-  return 1;
+  return (int)status;
 }
 
-void vp9_opencl_remove(VP9_COMMON *cm) {
+int vp9_opencl_remove(VP9_COMMON *cm) {
   VP9_OPENCL *opencl = cm->gpu.compute_framework;
-  cl_int status;
+  cl_int status = CL_SUCCESS;
 
-  status = clReleaseCommandQueue(opencl->cmd_queue);
-  if (status != CL_SUCCESS)
-    goto fail;
-  status = clReleaseCommandQueue(opencl->cmd_queue_memory);
-  if (status != CL_SUCCESS)
-    goto fail;
+  if (cm->gpu.compute_framework == NULL)
+    return (int)status;
 
-  status = clReleaseContext(opencl->context);
-  if (status != CL_SUCCESS)
-    goto fail;
-
-  free(opencl->device);
-  opencl->device = NULL;
-
-  return;
+  if (opencl->cmd_queue) {
+    status = clReleaseCommandQueue(opencl->cmd_queue);
+    if (status != CL_SUCCESS)
+      goto fail;
+    opencl->cmd_queue = NULL;
+  }
+  if (opencl->cmd_queue_memory) {
+    status = clReleaseCommandQueue(opencl->cmd_queue_memory);
+    if (status != CL_SUCCESS)
+      goto fail;
+    opencl->cmd_queue_memory = NULL;
+  }
+  if (opencl->context) {
+    status = clReleaseContext(opencl->context);
+    if (status != CL_SUCCESS)
+      goto fail;
+    opencl->context = NULL;
+  }
+  if (opencl->device) {
+    free(opencl->device);
+    opencl->device = NULL;
+  }
+  vpx_free(cm->gpu.compute_framework);
+  cm->gpu.compute_framework = NULL;
 
 fail:
-  assert(0);
+  return (int)status;
 }
 
 int vp9_opencl_init(VP9_COMMON *cm) {
@@ -196,13 +207,11 @@ int vp9_opencl_init(VP9_COMMON *cm) {
 #if OPENCL_PROFILING
   command_queue_properties = CL_QUEUE_PROFILING_ENABLE;
 #endif
-
-  gpu->compute_framework = vpx_calloc(1, sizeof(VP9_OPENCL));
-
+  CHECK_MEM_ERROR(cm, gpu->compute_framework,
+                  vpx_calloc(1, sizeof(VP9_OPENCL)));
   gpu->alloc_frame_buffers = vp9_opencl_alloc_frame_buffers;
   gpu->release_frame_buffers = vp9_opencl_release_frame_buffers;
   gpu->remove = vp9_opencl_remove;
-
   opencl = gpu->compute_framework;
 
   // Get the number of platforms in the system.
@@ -249,8 +258,7 @@ int vp9_opencl_init(VP9_COMMON *cm) {
                                            &status);
   if (status != CL_SUCCESS || opencl->cmd_queue == NULL)
     goto fail;
-  return 0;
 
 fail:
-  return 1;
+  return (int)status;
 }

@@ -42,7 +42,7 @@ int vp9_opencl_unmap_buffer(VP9_OPENCL *const opencl,
                             opencl_buffer *opencl_buf,
                             cl_bool is_blocking);
 
-void vp9_opencl_remove(VP9_COMMON *cm);
+int vp9_opencl_remove(VP9_COMMON *cm);
 
 int vp9_opencl_init(VP9_COMMON *cm);
 

@@ -76,7 +76,7 @@ typedef struct VP9_EOPENCL {
 #endif
 } VP9_EOPENCL;
 
-void vp9_eopencl_remove(VP9_COMP *cpi);
+int vp9_eopencl_remove(VP9_COMP *cpi);
 
 int vp9_eopencl_init(VP9_COMP *cpi);
 

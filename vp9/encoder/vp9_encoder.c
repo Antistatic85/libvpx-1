@@ -369,8 +369,10 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
   cpi->nmvsadcosts_hp[0] = NULL;
   cpi->nmvsadcosts_hp[1] = NULL;
 
-  vp9_cyclic_refresh_free(cpi->cyclic_refresh);
-  cpi->cyclic_refresh = NULL;
+  if (cpi->cyclic_refresh) {
+    vp9_cyclic_refresh_free(cpi->cyclic_refresh);
+    cpi->cyclic_refresh = NULL;
+  }
 
   vpx_free(cpi->active_map.map);
   cpi->active_map.map = NULL;
@@ -388,7 +390,7 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
   vp9_lookahead_destroy(cm, cpi->lookahead);
 
   vpx_free(cpi->tok);
-  cpi->tok = 0;
+  cpi->tok = NULL;
 
   vpx_free(cpi->tplist);
   cpi->tplist = NULL;
@@ -401,6 +403,7 @@ static void dealloc_compressor_data(VP9_COMP *cpi) {
     vpx_get_worker_interface()->end(&cpi->egpu_thread_hndl);
 #endif
     vpx_free(cpi->seg_map_pred);
+    cpi->seg_map_pred = NULL;
   }
 
   vp9_free_pc_tree(&cpi->td);
@@ -835,9 +838,6 @@ static void init_config(struct VP9_COMP *cpi, VP9EncoderConfig *oxcf) {
   }
   alloc_compressor_data(cpi);
   if (cm->use_gpu) {
-    // TODO(karthick-ittiam): If the GPU initialization fails, the calling
-    // function signals it as memory allocation error, instead of the error
-    // signaled below. This needs to be fixed.
 #if CONFIG_GPU_COMPUTE
     const VPxWorkerInterface * const winterface = vpx_get_worker_interface();
     VPxWorker *const worker = &cpi->egpu_thread_hndl;
@@ -2196,21 +2196,28 @@ void vp9_remove_compressor(VP9_COMP *cpi) {
     int j;
     vp9_loop_filter_dealloc(&cpi->lf_row_sync);
 
-    for (j = 0; j < cpi->max_threads; ++j) {
-      VPxWorker *const worker = &cpi->enc_thread_hndl[j];
-      vpx_get_worker_interface()->end(worker);
-      vpx_free(cpi->enc_thread_ctxt[j]->td.counts);
-      vp9_free_pc_tree(&cpi->enc_thread_ctxt[j]->td);
-      vpx_free(cpi->enc_thread_ctxt[j]);
+    if (cpi->enc_thread_hndl != NULL) {
+      for (j = 0; j < cpi->max_threads; ++j) {
+        VPxWorker *const worker = &cpi->enc_thread_hndl[j];
+
+        vpx_get_worker_interface()->end(worker);
+        vpx_free(cpi->enc_thread_ctxt[j]->td.counts);
+        cpi->enc_thread_ctxt[j]->td.counts = NULL;
+        vp9_free_pc_tree(&cpi->enc_thread_ctxt[j]->td);
+        vpx_free(cpi->enc_thread_ctxt[j]);
+        cpi->enc_thread_ctxt[j] = NULL;
+      }
     }
     vpx_free(cpi->enc_thread_hndl);
+    cpi->enc_thread_hndl = NULL;
     vpx_free(cpi->enc_thread_ctxt);
+    cpi->enc_thread_ctxt = NULL;
     vpx_free(cpi->cur_sb_col);
+    cpi->cur_sb_col = NULL;
     vp9_entropy_dealloc(cpi);
   }
 
   dealloc_compressor_data(cpi);
-  vpx_free(cpi->tok);
 
   for (i = 0; i < sizeof(cpi->mbgraph_stats) /
                   sizeof(cpi->mbgraph_stats[0]); ++i) {

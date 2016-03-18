@@ -32,7 +32,7 @@ typedef struct VP9GPU {
   void (*release_frame_buffers)(struct VP9Common *cm, void **opencl_mem,
                                 void **mapped_pointer, void **opencl_mem_dup,
                                 uint8_t **mapped_ptr_dup);
-  void (*remove)(struct VP9Common *cm);
+  int (*remove)(struct VP9Common *cm);
 
 } VP9_GPU;
 

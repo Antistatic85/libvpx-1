@@ -61,9 +61,8 @@ int vp9_gpu_free_frame_buffer(VP9_COMMON *cm, YV12_BUFFER_CONFIG *ybf) {
 }
 
 void vp9_gpu_remove(VP9_COMMON *cm) {
-  VP9_GPU *gpu = &cm->gpu;
-
-  gpu->remove(cm);
+  if (cm->gpu.remove)
+    cm->gpu.remove(cm);
 }
 
 int vp9_gpu_init(VP9_COMMON *cm) {

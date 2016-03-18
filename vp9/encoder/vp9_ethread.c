@@ -62,7 +62,6 @@ static int get_sync_range(int width) {
 void vp9_entropy_alloc(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
 
-  pthread_mutex_init(&cpi->entropy_mutex, NULL);
   {
     // mb_rows, cols are in units of 16 pixels. We assume 4 planes all at full
     // resolution and high bit depth
@@ -70,13 +69,25 @@ void vp9_entropy_alloc(VP9_COMP *cpi) {
 
     cpi->out_buffer_tiles[0][0] = malloc(out_buffer_size *
                                          sizeof(*cpi->out_buffer_tiles[0][0]));
+    if (cpi->out_buffer_tiles[0][0] == NULL) {
+      vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
+                         "Memory allocation failed");
+    }
     cpi->out_buffer_size = out_buffer_size;
+  }
+
+  if (pthread_mutex_init(&cpi->entropy_mutex, NULL)) {
+    vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
+                       "Memory allocation failed");
   }
 }
 
 void vp9_entropy_dealloc(VP9_COMP *cpi) {
+  if (cpi->out_buffer_tiles[0][0]) {
+    free(cpi->out_buffer_tiles[0][0]);
+    cpi->out_buffer_tiles[0][0] = NULL;
+  }
   pthread_mutex_destroy(&cpi->entropy_mutex);
-  free(cpi->out_buffer_tiles[0][0]);
 }
 
 void vp9_create_encoding_threads(VP9_COMP *cpi) {
