@@ -3564,12 +3564,6 @@ void vp9_rd_pick_inter_mode_sb(VP9_COMP *cpi,
   }
 
   if (best_mode_index < 0 || best_rd >= best_rd_so_far) {
-    // If adaptive_pred_interp_filter is enabled, the sub 8x8 modes use the
-    // mbmi interp filter info in the pc_leaf context of 8x8 block. So preserve
-    // this data  before returning
-    // TODO (ram-ittiam): Reposition this init at an appropriate place.
-    if (bsize == BLOCK_8X8)
-      ctx->mic = *xd->mi[0];
     rd_cost->rate = INT_MAX;
     rd_cost->rdcost = INT64_MAX;
     return;

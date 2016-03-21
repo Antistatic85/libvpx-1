@@ -48,7 +48,6 @@ void vp9_enc_sync_write(VP9_COMP *cpi, int sb_row) {
 // The optimal sync_range for different resolution and platform should be
 // determined by testing. Currently, it is chosen to be a power-of-2 number.
 static int get_sync_range(int width) {
-  // TODO(ram-ittiam): nsync numbers have to be picked by testing
   if (width < 640)
     return 1;
   else if (width <= 1280)

@@ -84,7 +84,6 @@ typedef struct {
   uint16_t above_uv[TX_SIZES];
   uint16_t int_4x4_uv;
   uint8_t lfl_y[64];
-  uint8_t lfl_uv[16];
 } LOOP_FILTER_MASK;
 
 /* assorted loopfilter functions which get used elsewhere */
