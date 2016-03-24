@@ -4170,7 +4170,9 @@ static void encode_sb_rows(VP9_COMP *cpi, ThreadData *const td,
   for (mi_row = mi_row_start; mi_row < mi_row_end; mi_row += mi_row_step) {
     const int sb_row = mi_row >> MI_BLOCK_SIZE_LOG2;
     tile_row = vp9_get_tile_row_index(&tile, cm, mi_row);
-    vp9_enc_sync_gpu(cpi, td, mi_row, mi_row_step);
+#if CONFIG_GPU_COMPUTE
+    vp9_enc_sync_gpu(cpi, td, mi_row);
+#endif
     for (tile_col = 0; tile_col < tile_cols; ++tile_col) {
       vp9_tile_set_col(&tile, cm, tile_col);
       get_start_tok(cpi, tile_row, tile_col, mi_row, &tok);
@@ -4183,6 +4185,9 @@ static void encode_sb_rows(VP9_COMP *cpi, ThreadData *const td,
       assert(tok - cpi->tplist[sb_row][tile_row][0].start <=
              get_token_alloc(MI_BLOCK_SIZE >> 1, cm->mb_cols));
     }
+#if CONFIG_GPU_COMPUTE
+      vp9_enc_enqueue_jobs_gpu(cpi, td, mi_row);
+#endif
   }
 }
 

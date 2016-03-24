@@ -362,51 +362,63 @@ void vp9_free_gpu_interface_buffers(VP9_COMP *cpi) {
 #endif
 }
 
-void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row, int mi_row_step) {
+#if CONFIG_GPU_COMPUTE
+static void enqueue_jobs_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
+  const VPxWorkerInterface * const winterface = vpx_get_worker_interface();
+  VPxWorker * const worker = &cpi->egpu_thread_hndl;
+  thread_context_gpu * const egpu_thread_ctxt =
+      (thread_context_gpu*) worker->data1;
+
+  winterface->sync(worker);
+  worker->hook = (VPxWorkerHook) vp9_gpu_mv_compute_async;
+  egpu_thread_ctxt->cpi = cpi;
+  egpu_thread_ctxt->td = td;
+  egpu_thread_ctxt->mi_row = mi_row;
+  winterface->launch(worker);
+}
+
+void vp9_enc_enqueue_jobs_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
   VP9_COMMON *const cm = &cpi->common;
   MACROBLOCK *const x = &td->mb;
 
-  (void) mi_row_step;
-  (void) x;
-  // When gpu is enabled, before encoding the current row, make sure the
-  // necessary dependencies are met.
+  // When gpu is enabled, enqueue jobs to GPU on time.
   if (x->use_gpu && cpi->sf.use_nonrd_pick_mode) {
     SubFrameInfo subframe;
-    int subframe_idx;
 
-    subframe_idx = vp9_get_subframe_index(cm, mi_row);
-    vp9_subframe_init(&subframe, cm, subframe_idx);
-#if CONFIG_GPU_COMPUTE
-    if (!x->data_parallel_processing) {
-      if (mi_row == 0 ||
-          ((mi_row - mi_row_step == subframe.mi_row_start - MI_BLOCK_SIZE) &&
-              subframe_idx == MAX_SUB_FRAMES - 1)) {
-        const VPxWorkerInterface *const winterface = vpx_get_worker_interface();
-        VPxWorker *const worker = &cpi->egpu_thread_hndl;
-        thread_context_gpu *const egpu_thread_ctxt = (thread_context_gpu*)worker->data1;
-
-        winterface->sync(worker);
-        worker->hook = (VPxWorkerHook) vp9_gpu_mv_compute_async;
-        egpu_thread_ctxt->cpi = cpi;
-        egpu_thread_ctxt->td = td;
-        egpu_thread_ctxt->mi_row = subframe.mi_row_start;
-        winterface->launch(worker);
-      }
+    vp9_subframe_init(&subframe, cm, MAX_SUB_FRAMES - 1);
+    if (mi_row == subframe.mi_row_start - MI_BLOCK_SIZE) {
+      enqueue_jobs_gpu(cpi, td, subframe.mi_row_start);
     }
-    if (!frame_is_intra_only(cm)) {
-      if (!x->data_parallel_processing) {
-        VP9_EGPU *egpu = &cpi->egpu;
-
-        egpu->enc_sync_read(cpi, subframe_idx);
-        if (mi_row == subframe.mi_row_start) {
-          egpu->acquire_output_pro_me_buffer(
-              cpi, (void **) &cpi->gpu_output_pro_me[subframe_idx], subframe_idx);
-          egpu->acquire_output_me_buffer(
-              cpi, (void **) &cpi->gpu_output_me[subframe_idx], subframe_idx);
-          egpu->enc_profile(cpi, subframe_idx);
-        }
-      }
-    }
-#endif
   }
 }
+
+void vp9_enc_sync_gpu(VP9_COMP *cpi, ThreadData *td, int mi_row) {
+  VP9_COMMON *const cm = &cpi->common;
+  MACROBLOCK *const x = &td->mb;
+
+  if (x->use_gpu && cpi->sf.use_nonrd_pick_mode) {
+    VP9_EGPU *egpu = &cpi->egpu;
+
+    if (mi_row == 0) {
+      enqueue_jobs_gpu(cpi, td, mi_row);
+    }
+    // When gpu is enabled, before encoding the current row, make sure the
+    // necessary dependencies are met.
+    if (!frame_is_intra_only(cm)) {
+      SubFrameInfo subframe;
+      int subframe_idx;
+
+      subframe_idx = vp9_get_subframe_index(cm, mi_row);
+      vp9_subframe_init(&subframe, cm, subframe_idx);
+      egpu->enc_sync_read(cpi, subframe_idx);
+      if (mi_row == subframe.mi_row_start) {
+        egpu->acquire_output_pro_me_buffer(
+            cpi, (void **) &cpi->gpu_output_pro_me[subframe_idx], subframe_idx);
+        egpu->acquire_output_me_buffer(
+            cpi, (void **) &cpi->gpu_output_me[subframe_idx], subframe_idx);
+        egpu->enc_profile(cpi, subframe_idx);
+      }
+    }
+  }
+}
+#endif
