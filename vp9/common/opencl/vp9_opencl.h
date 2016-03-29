@@ -26,6 +26,11 @@ typedef struct opencl_buffer {
   int size;
 }opencl_buffer;
 
+typedef struct opencl_pic_buf {
+  opencl_buffer frame_buffer;
+  opencl_buffer sub_buffer;
+}opencl_pic_buf;
+
 typedef struct VP9_OPENCL {
   cl_int num_devices;
   cl_device_id *device;

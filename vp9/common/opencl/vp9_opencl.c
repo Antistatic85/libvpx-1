@@ -11,97 +11,109 @@
 #include "vp9/common/opencl/vp9_opencl.h"
 
 static void *vp9_opencl_alloc_frame_buffers(VP9_COMMON *cm, int frame_size,
-                                            void **opencl_mem,
-                                            void **opencl_mem_dup,
-                                            uint8_t **mapped_ptr_dup) {
+                                            void **frame_buffer) {
   VP9_OPENCL *opencl = cm->gpu.compute_framework;
+  opencl_pic_buf *frame_buff = NULL;
+  cl_mem opencl_mem, opencl_mem_sub;
   void *mapped_pointer;
   cl_buffer_region sf_region;
-  cl_int status;
+  cl_int status = CL_SUCCESS;
+
+  frame_buff = calloc(1, sizeof(*frame_buff));
+  *frame_buffer = frame_buff;
+  if (frame_buff == NULL)
+    return NULL;
 
   // allocate buffer to store source/reference
-  *opencl_mem = clCreateBuffer(opencl->context,
-                               CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR,
-                               frame_size, NULL, &status);
+  opencl_mem = clCreateBuffer(opencl->context,
+                              CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR,
+                              frame_size, NULL, &status);
   if (status != CL_SUCCESS)
     return NULL;
-  mapped_pointer = clEnqueueMapBuffer(opencl->cmd_queue, *opencl_mem,
-                                      CL_TRUE, CL_MAP_READ | CL_MAP_WRITE,
-                                      0, frame_size, 0, NULL, NULL,
-                                      &status);
+  mapped_pointer = clEnqueueMapBuffer(opencl->cmd_queue, opencl_mem, CL_TRUE,
+                                      CL_MAP_READ | CL_MAP_WRITE, 0, frame_size,
+                                      0, NULL, NULL, &status);
   if (status != CL_SUCCESS) {
-    clReleaseMemObject(*opencl_mem);
-    *opencl_mem = NULL;
+    clReleaseMemObject(opencl_mem);
+    opencl_mem = NULL;
     return NULL;
   }
+  frame_buff->frame_buffer.mapped_pointer = mapped_pointer;
+  frame_buff->frame_buffer.opencl_mem = opencl_mem;
+  frame_buff->frame_buffer.size = frame_size;
 
   // create a duplicate buffer for the above buffer
   // used while mantaining cache sync b/w cpu & gpu
   sf_region.origin = 0;
   sf_region.size = frame_size;
-  *opencl_mem_dup = clCreateSubBuffer(*opencl_mem, CL_MEM_READ_ONLY,
-                                      CL_BUFFER_CREATE_TYPE_REGION,
-                                      &sf_region, &status);
+  opencl_mem_sub = clCreateSubBuffer(opencl_mem, CL_MEM_READ_ONLY,
+                                     CL_BUFFER_CREATE_TYPE_REGION, &sf_region,
+                                     &status);
   if (status != CL_SUCCESS)
     return NULL;
-  *mapped_ptr_dup = clEnqueueMapBuffer(opencl->cmd_queue, *opencl_mem_dup,
-                                       CL_TRUE, CL_MAP_READ | CL_MAP_WRITE,
-                                       0, frame_size, 0, NULL, NULL,
-                                       &status);
+  mapped_pointer = clEnqueueMapBuffer(opencl->cmd_queue, opencl_mem_sub,
+                                      CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0,
+                                      frame_size, 0, NULL, NULL, &status);
   if (status != CL_SUCCESS) {
-    clReleaseMemObject(*opencl_mem_dup);
-    *opencl_mem_dup = NULL;
+    clReleaseMemObject(opencl_mem_sub);
+    opencl_mem_sub = NULL;
     return NULL;
   }
+  frame_buff->sub_buffer.mapped_pointer = mapped_pointer;
+  frame_buff->sub_buffer.opencl_mem = opencl_mem_sub;
+  frame_buff->sub_buffer.size = frame_size;
 
-  return mapped_pointer;
+  return frame_buff->frame_buffer.mapped_pointer;
 }
 
 static void vp9_opencl_release_frame_buffers(VP9_COMMON *cm,
-                                             void **opencl_mem,
-                                             void **mapped_pointer,
-                                             void **opencl_mem_dup,
-                                             uint8_t **mapped_pointer_dup) {
+                                             void *frame_buffer) {
   VP9_OPENCL *opencl = cm->gpu.compute_framework;
+  opencl_pic_buf *frame_buff = frame_buffer;
   cl_int status = CL_SUCCESS;
 
-  if (*mapped_pointer != NULL) {
+  if (frame_buff == NULL)
+    return;
+
+  if (frame_buff->sub_buffer.mapped_pointer != NULL) {
     status = clEnqueueUnmapMemObject(opencl->cmd_queue,
-                                     *opencl_mem,
-                                     *mapped_pointer,
+                                     frame_buff->sub_buffer.opencl_mem,
+                                     frame_buff->sub_buffer.mapped_pointer,
                                      0, NULL, NULL);
     status |= clFinish(opencl->cmd_queue);
     if (status != CL_SUCCESS)
       goto fail;
-    *mapped_pointer = NULL;
-
+    frame_buff->sub_buffer.mapped_pointer = NULL;
   }
-
-  if (*opencl_mem != NULL) {
-    status = clReleaseMemObject(*opencl_mem);
+  if (frame_buff->sub_buffer.opencl_mem != NULL) {
+    status = clReleaseMemObject(frame_buff->sub_buffer.opencl_mem);
     if (status != CL_SUCCESS)
       goto fail;
-    *opencl_mem = NULL;
+    frame_buff->sub_buffer.opencl_mem = NULL;
   }
 
-  if (*mapped_pointer_dup != NULL) {
+  if (frame_buff->frame_buffer.mapped_pointer != NULL) {
     status = clEnqueueUnmapMemObject(opencl->cmd_queue,
-                                     *opencl_mem_dup,
-                                     *mapped_pointer_dup,
+                                     frame_buff->frame_buffer.opencl_mem,
+                                     frame_buff->frame_buffer.mapped_pointer,
                                      0, NULL, NULL);
     status |= clFinish(opencl->cmd_queue);
     if (status != CL_SUCCESS)
       goto fail;
-    *mapped_pointer_dup = NULL;
+    frame_buff->frame_buffer.mapped_pointer = NULL;
 
   }
-
-  if (*opencl_mem_dup != NULL) {
-    status = clReleaseMemObject(*opencl_mem_dup);
+  if (frame_buff->frame_buffer.opencl_mem != NULL) {
+    status = clReleaseMemObject(frame_buff->frame_buffer.opencl_mem);
     if (status != CL_SUCCESS)
       goto fail;
-    *opencl_mem_dup = NULL;
+    frame_buff->frame_buffer.opencl_mem = NULL;
+    frame_buff->frame_buffer.size = 0;
   }
+
+  free(frame_buff);
+  frame_buff = NULL;
+
   return;
 
 fail:

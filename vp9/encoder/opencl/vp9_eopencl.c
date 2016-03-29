@@ -228,19 +228,26 @@ static int vp9_eopencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
   VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
   YV12_BUFFER_CONFIG *img_src;
   YV12_BUFFER_CONFIG *last_img_src = cpi->Source;
+  cl_mem img_src_mem, last_img_src_mem;
   struct lookahead_entry *next_source = NULL;
   cl_mem *gpu_op_pro_me =
       &eopencl->gpu_output_pro_me[(cm->current_video_frame + 1) & 1];
+  opencl_pic_buf *frame_buff = NULL;
   cl_int status;
 
   next_source = vp9_lookahead_peek(cpi->lookahead, 0);
   img_src = &next_source->img;
 
+  frame_buff = img_src->frame_buff;
+  img_src_mem = frame_buff->frame_buffer.opencl_mem;
+  frame_buff = last_img_src->frame_buff;
+  last_img_src_mem = frame_buff->frame_buffer.opencl_mem;
+
   // project Source SB Cols of each SB on to a horizontal plane
   status = clSetKernelArg(eopencl->col_row_projection, 0, sizeof(cl_mem),
-                          &img_src->gpu_mem);
+                          &img_src_mem);
   status |= clSetKernelArg(eopencl->col_row_projection, 1, sizeof(cl_mem),
-                           &last_img_src->gpu_mem);
+                           &last_img_src_mem);
   if (status != CL_SUCCESS)
     goto fail;
 
@@ -252,9 +259,9 @@ static int vp9_eopencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
 
   // Pro Motion Estimation
   status = clSetKernelArg(eopencl->pro_motion_estimation, 0, sizeof(cl_mem),
-                          &img_src->gpu_mem);
+                          &img_src_mem);
   status |= clSetKernelArg(eopencl->pro_motion_estimation, 1, sizeof(cl_mem),
-                           &last_img_src->gpu_mem);
+                           &last_img_src_mem);
   status |= clSetKernelArg(eopencl->pro_motion_estimation, 3, sizeof(cl_mem),
                            gpu_op_pro_me);
   if (status != CL_SUCCESS)
@@ -262,9 +269,9 @@ static int vp9_eopencl_set_dynamic_kernel_args_pro_me(VP9_COMP *cpi) {
 
   // color sensitivity
   status = clSetKernelArg(eopencl->color_sensitivity, 0, sizeof(cl_mem),
-                          &img_src->gpu_mem);
+                          &img_src_mem);
   status |= clSetKernelArg(eopencl->color_sensitivity, 1, sizeof(cl_mem),
-                           &last_img_src->gpu_mem);
+                           &last_img_src_mem);
   status |= clSetKernelArg(eopencl->color_sensitivity, 3, sizeof(cl_mem),
                            gpu_op_pro_me);
   if (status != CL_SUCCESS)
@@ -283,11 +290,13 @@ static int vp9_eopencl_set_dynamic_kernel_args_me(VP9_COMP *cpi, int async) {
   VP9_EOPENCL *const eopencl = cpi->egpu.compute_framework;
   YV12_BUFFER_CONFIG *img_src = cpi->Source;
   YV12_BUFFER_CONFIG *frm_ref = get_ref_frame_buffer(cpi, LAST_FRAME);
+  cl_mem img_src_mem, frm_ref_mem;
   cl_mem *gpu_op_pro_me =
       &eopencl->gpu_output_pro_me[cm->current_video_frame & 1];
   cl_mem *rdopt_params_dyn =
       &eopencl->rdopt_params_dyn[cm->current_video_frame & 1].opencl_mem;
   GPU_BLOCK_SIZE gpu_bsize;
+  opencl_pic_buf *frame_buff = NULL;
   cl_int status;
 
   if (async) {
@@ -302,11 +311,16 @@ static int vp9_eopencl_set_dynamic_kernel_args_me(VP9_COMP *cpi, int async) {
         &eopencl->rdopt_params_dyn[(cm->current_video_frame + 1) & 1].opencl_mem;
   }
 
+  frame_buff = img_src->frame_buff;
+  img_src_mem = frame_buff->frame_buffer.opencl_mem;
+  frame_buff = frm_ref->frame_buff;
+  frm_ref_mem = frame_buff->frame_buffer.opencl_mem;
+
   // choose partitions
   status = clSetKernelArg(eopencl->choose_partitions, 0, sizeof(cl_mem),
-                          &img_src->gpu_mem);
+                          &img_src_mem);
   status |= clSetKernelArg(eopencl->choose_partitions, 1, sizeof(cl_mem),
-                           &frm_ref->gpu_mem);
+                           &frm_ref_mem);
   status |= clSetKernelArg(eopencl->choose_partitions, 3, sizeof(cl_mem),
                            gpu_op_pro_me);
   status |= clSetKernelArg(eopencl->choose_partitions, 4, sizeof(cl_mem),
@@ -317,34 +331,34 @@ static int vp9_eopencl_set_dynamic_kernel_args_me(VP9_COMP *cpi, int async) {
   for (gpu_bsize = 0; gpu_bsize < GPU_BLOCK_SIZES; gpu_bsize++) {
 
     status = clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 0,
-                            sizeof(cl_mem), &frm_ref->gpu_mem);
+                            sizeof(cl_mem), &frm_ref_mem);
     status |= clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 1,
-                             sizeof(cl_mem), &img_src->gpu_mem);
+                             sizeof(cl_mem), &img_src_mem);
     status |= clSetKernelArg(eopencl->rd_calculation_zeromv[gpu_bsize], 5,
                              sizeof(cl_mem), rdopt_params_dyn);
     if (status != CL_SUCCESS)
       goto fail;
 
     status = clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 0,
-                            sizeof(cl_mem), &frm_ref->gpu_mem);
+                            sizeof(cl_mem), &frm_ref_mem);
     status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 1,
-                             sizeof(cl_mem), &img_src->gpu_mem);
+                             sizeof(cl_mem), &img_src_mem);
     status |= clSetKernelArg(eopencl->full_pixel_search[gpu_bsize], 6,
                              sizeof(cl_mem), rdopt_params_dyn);
     if (status != CL_SUCCESS)
       goto fail;
 
     status = clSetKernelArg(eopencl->hpel_search[gpu_bsize], 0,
-                            sizeof(cl_mem), &frm_ref->gpu_mem);
+                            sizeof(cl_mem), &frm_ref_mem);
     status |= clSetKernelArg(eopencl->hpel_search[gpu_bsize], 1,
-                             sizeof(cl_mem), &img_src->gpu_mem);
+                             sizeof(cl_mem), &img_src_mem);
     if (status != CL_SUCCESS)
       goto fail;
 
     status = clSetKernelArg(eopencl->qpel_search[gpu_bsize], 0,
-                            sizeof(cl_mem), &frm_ref->gpu_mem);
+                            sizeof(cl_mem), &frm_ref_mem);
     status |= clSetKernelArg(eopencl->qpel_search[gpu_bsize], 1,
-                             sizeof(cl_mem), &img_src->gpu_mem);
+                             sizeof(cl_mem), &img_src_mem);
     if (status != CL_SUCCESS)
       goto fail;
   }
@@ -352,9 +366,9 @@ static int vp9_eopencl_set_dynamic_kernel_args_me(VP9_COMP *cpi, int async) {
   // Lowest GPU Block size selected for the merged kernels
   gpu_bsize = GPU_BLOCK_32X32;
   status = clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 0,
-                          sizeof(cl_mem), &frm_ref->gpu_mem);
+                          sizeof(cl_mem), &frm_ref_mem);
   status |= clSetKernelArg(eopencl->inter_prediction_and_sse[gpu_bsize], 1,
-                           sizeof(cl_mem), &img_src->gpu_mem);
+                           sizeof(cl_mem), &img_src_mem);
   if (status != CL_SUCCESS)
     goto fail;
 
@@ -793,6 +807,8 @@ static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
   opencl_buffer *gpu_output_pro_me_sub_buffer =
       &eopencl->gpu_output_pro_me_sub_buf[(cm->current_video_frame + 1) & 1][0];
   struct lookahead_entry *next_source = NULL;
+  opencl_pic_buf *frame_buff;
+  opencl_buffer *sub_buffer;
   int blocks_in_col, blocks_in_row;
   FRAME_TYPE frame_type = cm->frame_type;
   size_t local_size[2];
@@ -824,19 +840,23 @@ static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
   // source and reference buffers are available for GPU
 
   // release source buffer to GPU
-  if (img_src->buffer_alloc_dup != NULL) {
-    status = clEnqueueUnmapMemObject(opencl->cmd_queue, img_src->gpu_mem_sub,
-                                     img_src->buffer_alloc_dup, 0, NULL, NULL);
-    img_src->buffer_alloc_dup = NULL;
+  frame_buff = img_src->frame_buff;
+  sub_buffer = &frame_buff->sub_buffer;
+  if (sub_buffer->mapped_pointer != NULL) {
+    status = clEnqueueUnmapMemObject(opencl->cmd_queue, sub_buffer->opencl_mem,
+                                     sub_buffer->mapped_pointer, 0, NULL, NULL);
+    sub_buffer->mapped_pointer = NULL;
     if (status != CL_SUCCESS)
       goto fail;
   }
 
   // release last source buffer to GPU
-  if (last_img_src->buffer_alloc_dup != NULL && frame_type == KEY_FRAME) {
-    status = clEnqueueUnmapMemObject(opencl->cmd_queue, last_img_src->gpu_mem_sub,
-                                     last_img_src->buffer_alloc_dup, 0, NULL, NULL);
-    last_img_src->buffer_alloc_dup = NULL;
+  frame_buff = last_img_src->frame_buff;
+  sub_buffer = &frame_buff->sub_buffer;
+  if (sub_buffer->mapped_pointer != NULL && frame_type == KEY_FRAME) {
+    status = clEnqueueUnmapMemObject(opencl->cmd_queue, sub_buffer->opencl_mem,
+                                     sub_buffer->mapped_pointer, 0, NULL, NULL);
+    sub_buffer->mapped_pointer = NULL;
     if (status != CL_SUCCESS)
       goto fail;
   }
@@ -919,20 +939,28 @@ static void vp9_eopencl_execute_prologue(VP9_COMP *cpi) {
     goto fail;
 
   // acquire current & last source buffer
-  if (img_src->buffer_alloc_dup == NULL) {
-    img_src->buffer_alloc_dup =
-        clEnqueueMapBuffer(opencl->cmd_queue, img_src->gpu_mem_sub, CL_FALSE,
-                           CL_MAP_READ | CL_MAP_WRITE, 0,
-                           img_src->buffer_alloc_sz, 0, NULL, NULL, &status);
+  frame_buff = img_src->frame_buff;
+  sub_buffer = &frame_buff->sub_buffer;
+  if (sub_buffer->mapped_pointer == NULL) {
+    sub_buffer->mapped_pointer = clEnqueueMapBuffer(opencl->cmd_queue,
+                                                    sub_buffer->opencl_mem,
+                                                    CL_FALSE,
+                                                    CL_MAP_READ | CL_MAP_WRITE,
+                                                    0, sub_buffer->size, 0,
+                                                    NULL, NULL, &status);
     if (status != CL_SUCCESS)
       goto fail;
   }
 
-  if (last_img_src->buffer_alloc_dup == NULL) {
-    last_img_src->buffer_alloc_dup =
-        clEnqueueMapBuffer(opencl->cmd_queue, last_img_src->gpu_mem_sub, CL_FALSE,
-                           CL_MAP_READ | CL_MAP_WRITE, 0,
-                           last_img_src->buffer_alloc_sz, 0, NULL, NULL, &status);
+  frame_buff = last_img_src->frame_buff;
+  sub_buffer = &frame_buff->sub_buffer;
+  if (sub_buffer->mapped_pointer == NULL) {
+    sub_buffer->mapped_pointer = clEnqueueMapBuffer(opencl->cmd_queue,
+                                                    sub_buffer->opencl_mem,
+                                                    CL_FALSE,
+                                                    CL_MAP_READ | CL_MAP_WRITE,
+                                                    0, sub_buffer->size, 0,
+                                                    NULL, NULL, &status);
     if (status != CL_SUCCESS)
       goto fail;
   }
@@ -960,6 +988,8 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
       &eopencl->gpu_output_me_sub_buf[sub_frame_idx];
   opencl_buffer *rdopt_params_static = &eopencl->rdopt_params_static;
   opencl_buffer *rdopt_params_dyn = &eopencl->rdopt_params_dyn[buffer_set];
+  opencl_pic_buf *frame_buff;
+  opencl_buffer *sub_buffer;
   SubFrameInfo subframe;
   int subframe_height;
   int blocks_in_col, blocks_in_row;
@@ -995,11 +1025,13 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
   // before launching kernels make sure the buffers needed by GPU are cache
   // synced
   // release reference buffer to GPU
-  if (frm_ref->buffer_alloc_dup != NULL &&
+  frame_buff = frm_ref->frame_buff;
+  sub_buffer = &frame_buff->sub_buffer;
+  if (sub_buffer->mapped_pointer != NULL &&
       (sub_frame_idx == 0 || sub_frame_idx == cpi->b_async)) {
-    status = clEnqueueUnmapMemObject(opencl->cmd_queue, frm_ref->gpu_mem_sub,
-                                     frm_ref->buffer_alloc_dup, 0, NULL, NULL);
-    frm_ref->buffer_alloc_dup = NULL;
+    status = clEnqueueUnmapMemObject(opencl->cmd_queue, sub_buffer->opencl_mem,
+                                     sub_buffer->mapped_pointer, 0, NULL, NULL);
+    sub_buffer->mapped_pointer = NULL;
     if (status != CL_SUCCESS)
       goto fail;
   }
@@ -1232,11 +1264,13 @@ static void vp9_eopencl_execute(VP9_COMP *cpi, int sub_frame_idx, int async) {
 
 skip_execution:
 
-  if (frm_ref->buffer_alloc_dup == NULL) {
-    frm_ref->buffer_alloc_dup =
-        clEnqueueMapBuffer(opencl->cmd_queue, frm_ref->gpu_mem_sub, CL_FALSE,
-                           CL_MAP_READ | CL_MAP_WRITE, 0,
-                           frm_ref->buffer_alloc_sz, 0, NULL, NULL, &status);
+  if (sub_buffer->mapped_pointer == NULL) {
+    sub_buffer->mapped_pointer = clEnqueueMapBuffer(opencl->cmd_queue,
+                                                    sub_buffer->opencl_mem,
+                                                    CL_FALSE,
+                                                    CL_MAP_READ | CL_MAP_WRITE,
+                                                    0, sub_buffer->size, 0,
+                                                    NULL, NULL, &status);
     if (status != CL_SUCCESS)
       goto fail;
   }

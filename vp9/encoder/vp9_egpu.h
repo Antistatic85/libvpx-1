@@ -157,7 +157,6 @@ void vp9_alloc_gpu_interface_buffers(struct VP9_COMP *cpi);
 
 void vp9_free_gpu_interface_buffers(struct VP9_COMP *cpi);
 
-
 #if CONFIG_GPU_COMPUTE
 
 void vp9_egpu_remove(struct VP9_COMP *cpi);

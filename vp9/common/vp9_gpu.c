@@ -24,9 +24,7 @@ int vp9_gpu_get_frame_buffer(void *cb_priv, size_t min_size,
   if (min_size > (size_t)priv->ybf->buffer_alloc_sz) {
     vp9_gpu_free_frame_buffer(cm, priv->ybf);
     fb->data = cm->gpu.alloc_frame_buffers(cm, min_size,
-                                           &priv->ybf->gpu_mem,
-                                           &priv->ybf->gpu_mem_sub,
-                                           &priv->ybf->buffer_alloc_dup);
+                                           &priv->ybf->frame_buff);
     priv->ybf->buffer_alloc_sz = min_size;
     fb->size = min_size;
     fb->priv = NULL;
@@ -44,10 +42,7 @@ int vp9_gpu_get_frame_buffer(void *cb_priv, size_t min_size,
 int vp9_gpu_free_frame_buffer(VP9_COMMON *cm, YV12_BUFFER_CONFIG *ybf) {
   if (ybf) {
     if (ybf->buffer_alloc_sz > 0) {
-      cm->gpu.release_frame_buffers(cm, &ybf->gpu_mem,
-                                    (void **)&ybf->buffer_alloc,
-                                    &ybf->gpu_mem_sub,
-                                    &ybf->buffer_alloc_dup);
+      cm->gpu.release_frame_buffers(cm, ybf->frame_buff);
     }
     /* buffer_alloc isn't accessed by most functions.  Rather y_buffer,
      * u_buffer and v_buffer point to buffer_alloc and are used.  Clear out
