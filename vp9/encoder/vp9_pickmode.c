@@ -1014,8 +1014,8 @@ void vp9_pick_intra_mode(VP9_COMP *cpi, MACROBLOCK *x, RD_COST *rd_cost,
              tx_mode_to_biggest_tx_size[cpi->common.tx_mode]);
   MODE_INFO *const mic = xd->mi[0];
   int *bmode_costs;
-  const MODE_INFO *above_mi = xd->mi[-xd->mi_stride];
-  const MODE_INFO *left_mi = xd->left_available ? xd->mi[-1] : NULL;
+  const MODE_INFO *above_mi = xd->above_mi;
+  const MODE_INFO *left_mi = xd->left_mi;
   const PREDICTION_MODE A = vp9_above_block_mode(mic, above_mi, 0);
   const PREDICTION_MODE L = vp9_left_block_mode(mic, left_mi, 0);
   bmode_costs = cpi->y_mode_costs[A][L];
@@ -1407,10 +1407,10 @@ void vp9_pick_inter_mode(VP9_COMP *cpi, MACROBLOCK *x,
   x->skip_encode = cpi->sf.skip_encode_frame && x->q_index < QIDX_SKIP_THRESH;
   x->skip = 0;
 
-  if (xd->up_available)
-    filter_ref = xd->mi[-xd->mi_stride]->interp_filter;
-  else if (xd->left_available)
-    filter_ref = xd->mi[-1]->interp_filter;
+  if (xd->above_mi)
+    filter_ref = xd->above_mi->interp_filter;
+  else if (xd->left_mi)
+    filter_ref = xd->left_mi->interp_filter;
   else
     filter_ref = cm->interp_filter;
 
@@ -2050,8 +2050,8 @@ skip_gpu:
   if (cpi->oxcf.noise_sensitivity > 0 &&
       cpi->resize_pending == 0) {
     VP9_DENOISER_DECISION decision = COPY_BLOCK;
-    vp9_denoiser_denoise(&cpi->denoiser, x, mi_row, mi_col,
-                         VPXMAX(BLOCK_8X8, bsize), ctx, &decision);
+    vp9_denoiser_denoise(cpi, x, mi_row, mi_col, VPXMAX(BLOCK_8X8, bsize),
+                         ctx, &decision);
     // If INTRA or GOLDEN reference was selected, re-evaluate ZEROMV on denoised
     // result. Only do this under noise conditions, and if rdcost of ZEROMV on
     // original source is not significantly higher than rdcost of best mode.
