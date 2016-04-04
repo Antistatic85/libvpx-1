@@ -45,6 +45,9 @@ cglobal lpf_horizontal_4, 5, 6, 8, 0 - lstacksize, \
                                 s, p, _blimit, _limit, _thresh, s1
     movq                  m7, [_limitq]
     GET_GOT         goffsetq
+%if GET_GOT_DEFINED=1
+    add rsp, gprsize                          ; restore stack
+%endif
     lea                  s1q, [sq + pq]       ; s1q points to row +1
 
     ; calculate breakout conditions
@@ -192,7 +195,6 @@ cglobal lpf_horizontal_4, 5, 6, 8, 0 - lstacksize, \
     psubsb                m7, m4              ; q1-= q1 add
     pxor                  m7, m1              ; unoffset
     movq               [s1q], m7              ; write back
-    RESTORE_GOT
     RET
 
 ;void vpx_lpf_vertical_4_mmx(unsigned char *src_ptr, int  src_pixel_step,
@@ -270,6 +272,9 @@ cglobal lpf_vertical_4, 5, 6, 8, 0 - lstacksize, \
     por                   m1, m2              ; m1=abs(p2-p1)
     movq                  m4, [_limitq]
     GET_GOT         goffsetq
+%if GET_GOT_DEFINED=1
+    add rsp, gprsize                          ; restore stack
+%endif
     psubusb               m7, m4
     psubusb               m0, m4
     psubusb               m1, m4
@@ -428,5 +433,4 @@ cglobal lpf_vertical_4, 5, 6, 8, 0 - lstacksize, \
     movd      [s1q + pq + 2], m5
     psrlq                 m5, 32
     movd  [s1q + pq * 2 + 2], m5
-    RESTORE_GOT
     RET

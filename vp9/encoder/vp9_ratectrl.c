@@ -1574,40 +1574,28 @@ static int calc_iframe_target_size_one_pass_cbr(const VP9_COMP *cpi) {
   return vp9_rc_clamp_iframe_target_size(cpi, target);
 }
 
-// Reset information needed to set proper reference frames and buffer updates
-// for temporal layering. This is called when a key frame is encoded.
-static void reset_temporal_layer_to_zero(VP9_COMP *cpi) {
-  int sl;
-  LAYER_CONTEXT *lc = NULL;
-  cpi->svc.temporal_layer_id = 0;
-
-  for (sl = 0; sl < cpi->svc.number_spatial_layers; ++sl) {
-    lc = &cpi->svc.layer_context[sl * cpi->svc.number_temporal_layers];
-    lc->current_video_frame_in_layer = 0;
-    lc->frames_from_key_frame = 0;
-  }
-}
-
 void vp9_rc_get_svc_params(VP9_COMP *cpi) {
   VP9_COMMON *const cm = &cpi->common;
   RATE_CONTROL *const rc = &cpi->rc;
   int target = rc->avg_frame_bandwidth;
   int layer = LAYER_IDS_TO_IDX(cpi->svc.spatial_layer_id,
       cpi->svc.temporal_layer_id, cpi->svc.number_temporal_layers);
-
+  // Periodic key frames is based on the super-frame counter
+  // (svc.current_superframe), also only base spatial layer is key frame.
   if ((cm->current_video_frame == 0) ||
       (cpi->frame_flags & FRAMEFLAGS_KEY) ||
-      (cpi->oxcf.auto_key && (rc->frames_since_key %
-          cpi->oxcf.key_freq == 0))) {
+      (cpi->oxcf.auto_key &&
+       (cpi->svc.current_superframe % cpi->oxcf.key_freq == 0) &&
+       cpi->svc.spatial_layer_id == 0)) {
     cm->frame_type = KEY_FRAME;
     rc->source_alt_ref_active = 0;
-
     if (is_two_pass_svc(cpi)) {
       cpi->svc.layer_context[layer].is_key_frame = 1;
       cpi->ref_frame_flags &=
           (~VP9_LAST_FLAG & ~VP9_GOLD_FLAG & ~VP9_ALT_FLAG);
     } else if (is_one_pass_cbr_svc(cpi)) {
-      reset_temporal_layer_to_zero(cpi);
+      if (cm->current_video_frame > 0)
+        vp9_svc_reset_key_frame(cpi);
       layer = LAYER_IDS_TO_IDX(cpi->svc.spatial_layer_id,
            cpi->svc.temporal_layer_id, cpi->svc.number_temporal_layers);
       cpi->svc.layer_context[layer].is_key_frame = 1;

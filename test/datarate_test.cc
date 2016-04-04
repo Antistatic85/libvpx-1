@@ -901,14 +901,12 @@ TEST_P(DatarateOnePassCbrSvc, OnePassCbrSvc2SpatialLayers) {
   svc_params_.scaling_factor_num[1] = 288;
   svc_params_.scaling_factor_den[1] = 288;
   cfg_.rc_dropframe_thresh = 10;
-  // TODO(marpan): another test should be added for default/small kf_max_dist
-  // once https://bugs.chromium.org/p/webm/issues/detail?id=1150 is fixed.
   cfg_.kf_max_dist = 9999;
   ::libvpx_test::I420VideoSource video("hantro_collage_w352h288.yuv", 352, 288,
                                        30, 1, 0, 200);
   // TODO(wonkap/marpan): Check that effective_datarate for each layer hits the
-  // layer target_bitrate. Also check if test can pass at lower bitrate (~200k).
-  for (int i = 400; i <= 800; i += 200) {
+  // layer target_bitrate.
+  for (int i = 200; i <= 800; i += 200) {
     cfg_.rc_target_bitrate = i;
     ResetModel();
     assign_layer_bitrates(&cfg_, &svc_params_, cfg_.ss_number_layers,
@@ -918,8 +916,88 @@ TEST_P(DatarateOnePassCbrSvc, OnePassCbrSvc2SpatialLayers) {
             << " The datarate for the file exceeds the target by too much!";
     ASSERT_LE(cfg_.rc_target_bitrate, file_datarate_ * 1.15)
         << " The datarate for the file is lower than the target by too much!";
-    EXPECT_EQ(GetMismatchFrames(), (unsigned int) 0);
+    EXPECT_EQ(static_cast<unsigned int>(0), GetMismatchFrames());
   }
+}
+
+// Check basic rate targeting for 1 pass CBR SVC: 2 spatial layers and 3
+// temporal layers. Run CIF clip with 1 thread, and few short key frame periods.
+TEST_P(DatarateOnePassCbrSvc, OnePassCbrSvc2SpatialLayersSmallKf) {
+  cfg_.rc_buf_initial_sz = 500;
+  cfg_.rc_buf_optimal_sz = 500;
+  cfg_.rc_buf_sz = 1000;
+  cfg_.rc_min_quantizer = 0;
+  cfg_.rc_max_quantizer = 63;
+  cfg_.rc_end_usage = VPX_CBR;
+  cfg_.g_lag_in_frames = 0;
+  cfg_.ss_number_layers = 2;
+  cfg_.ts_number_layers = 3;
+  cfg_.ts_rate_decimator[0] = 4;
+  cfg_.ts_rate_decimator[1] = 2;
+  cfg_.ts_rate_decimator[2] = 1;
+  cfg_.g_error_resilient = 1;
+  cfg_.g_threads = 1;
+  cfg_.temporal_layering_mode = 3;
+  svc_params_.scaling_factor_num[0] = 144;
+  svc_params_.scaling_factor_den[0] = 288;
+  svc_params_.scaling_factor_num[1] = 288;
+  svc_params_.scaling_factor_den[1] = 288;
+  cfg_.rc_dropframe_thresh = 10;
+  ::libvpx_test::I420VideoSource video("hantro_collage_w352h288.yuv", 352, 288,
+                                       30, 1, 0, 200);
+  cfg_.rc_target_bitrate = 400;
+  // For this 3 temporal layer case, pattern repeats every 4 frames, so choose
+  // 4 key neighboring key frame periods (so key frame will land on 0-2-1-2).
+  for (int j = 64; j <= 67; j++) {
+    cfg_.kf_max_dist = j;
+    ResetModel();
+    assign_layer_bitrates(&cfg_, &svc_params_, cfg_.ss_number_layers,
+        cfg_.ts_number_layers, cfg_.temporal_layering_mode);
+    ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
+    ASSERT_GE(cfg_.rc_target_bitrate, file_datarate_ * 0.85)
+            << " The datarate for the file exceeds the target by too much!";
+    ASSERT_LE(cfg_.rc_target_bitrate, file_datarate_ * 1.15)
+        << " The datarate for the file is lower than the target by too much!";
+    EXPECT_EQ(static_cast<unsigned int>(0), GetMismatchFrames());
+  }
+}
+
+// Check basic rate targeting for 1 pass CBR SVC: 2 spatial layers and
+// 3 temporal layers. Run HD clip with 4 threads.
+TEST_P(DatarateOnePassCbrSvc, OnePassCbrSvc2SpatialLayers4threads) {
+  cfg_.rc_buf_initial_sz = 500;
+  cfg_.rc_buf_optimal_sz = 500;
+  cfg_.rc_buf_sz = 1000;
+  cfg_.rc_min_quantizer = 0;
+  cfg_.rc_max_quantizer = 63;
+  cfg_.rc_end_usage = VPX_CBR;
+  cfg_.g_lag_in_frames = 0;
+  cfg_.ss_number_layers = 2;
+  cfg_.ts_number_layers = 3;
+  cfg_.ts_rate_decimator[0] = 4;
+  cfg_.ts_rate_decimator[1] = 2;
+  cfg_.ts_rate_decimator[2] = 1;
+  cfg_.g_error_resilient = 1;
+  cfg_.g_threads = 4;
+  cfg_.temporal_layering_mode = 3;
+  svc_params_.scaling_factor_num[0] = 144;
+  svc_params_.scaling_factor_den[0] = 288;
+  svc_params_.scaling_factor_num[1] = 288;
+  svc_params_.scaling_factor_den[1] = 288;
+  cfg_.rc_dropframe_thresh = 10;
+  cfg_.kf_max_dist = 9999;
+  ::libvpx_test::I420VideoSource video("niklas_1280_720_30.y4m", 1280, 720,
+                                       30, 1, 0, 300);
+  cfg_.rc_target_bitrate = 800;
+  ResetModel();
+  assign_layer_bitrates(&cfg_, &svc_params_, cfg_.ss_number_layers,
+      cfg_.ts_number_layers, cfg_.temporal_layering_mode);
+  ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
+  ASSERT_GE(cfg_.rc_target_bitrate, file_datarate_ * 0.85)
+          << " The datarate for the file exceeds the target by too much!";
+  ASSERT_LE(cfg_.rc_target_bitrate, file_datarate_ * 1.15)
+      << " The datarate for the file is lower than the target by too much!";
+  EXPECT_EQ(static_cast<unsigned int>(0), GetMismatchFrames());
 }
 
 // Check basic rate targeting for 1 pass CBR SVC: 3 spatial layers and
@@ -959,12 +1037,12 @@ TEST_P(DatarateOnePassCbrSvc, OnePassCbrSvc3SpatialLayers) {
           << " The datarate for the file exceeds the target by too much!";
   ASSERT_LE(cfg_.rc_target_bitrate, file_datarate_ * 1.22)
       << " The datarate for the file is lower than the target by too much!";
-  EXPECT_EQ(GetMismatchFrames(), (unsigned int) 0);
+  EXPECT_EQ(static_cast<unsigned int>(0), GetMismatchFrames());
 }
 
-// Check basic rate targeting for 1 pass CBR SVC: 2 spatial layers and
-// 3 temporal layers. Run HD clip with 4 threads.
-TEST_P(DatarateOnePassCbrSvc, OnePassCbrSvc2SpatialLayers4threads) {
+// Check basic rate targeting for 1 pass CBR SVC: 3 spatial layers and 3
+// temporal layers. Run CIF clip with 1 thread, and few short key frame periods.
+TEST_P(DatarateOnePassCbrSvc, OnePassCbrSvc3SpatialLayersSmallKf) {
   cfg_.rc_buf_initial_sz = 500;
   cfg_.rc_buf_optimal_sz = 500;
   cfg_.rc_buf_sz = 1000;
@@ -972,32 +1050,38 @@ TEST_P(DatarateOnePassCbrSvc, OnePassCbrSvc2SpatialLayers4threads) {
   cfg_.rc_max_quantizer = 63;
   cfg_.rc_end_usage = VPX_CBR;
   cfg_.g_lag_in_frames = 0;
-  cfg_.ss_number_layers = 2;
+  cfg_.ss_number_layers = 3;
   cfg_.ts_number_layers = 3;
   cfg_.ts_rate_decimator[0] = 4;
   cfg_.ts_rate_decimator[1] = 2;
   cfg_.ts_rate_decimator[2] = 1;
   cfg_.g_error_resilient = 1;
-  cfg_.g_threads = 4;
+  cfg_.g_threads = 1;
   cfg_.temporal_layering_mode = 3;
-  svc_params_.scaling_factor_num[0] = 144;
+  svc_params_.scaling_factor_num[0] = 72;
   svc_params_.scaling_factor_den[0] = 288;
-  svc_params_.scaling_factor_num[1] = 288;
+  svc_params_.scaling_factor_num[1] = 144;
   svc_params_.scaling_factor_den[1] = 288;
+  svc_params_.scaling_factor_num[2] = 288;
+  svc_params_.scaling_factor_den[2] = 288;
   cfg_.rc_dropframe_thresh = 10;
-  cfg_.kf_max_dist = 9999;
   ::libvpx_test::I420VideoSource video("niklas_1280_720_30.y4m", 1280, 720,
                                        30, 1, 0, 300);
   cfg_.rc_target_bitrate = 800;
-  ResetModel();
-  assign_layer_bitrates(&cfg_, &svc_params_, cfg_.ss_number_layers,
-      cfg_.ts_number_layers, cfg_.temporal_layering_mode);
-  ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
-  ASSERT_GE(cfg_.rc_target_bitrate, file_datarate_ * 0.85)
-          << " The datarate for the file exceeds the target by too much!";
-  ASSERT_LE(cfg_.rc_target_bitrate, file_datarate_ * 1.15)
-      << " The datarate for the file is lower than the target by too much!";
-  EXPECT_EQ(GetMismatchFrames(), (unsigned int) 0);
+  // For this 3 temporal layer case, pattern repeats every 4 frames, so choose
+  // 4 key neighboring key frame periods (so key frame will land on 0-2-1-2).
+  for (int j = 32; j <= 35; j++) {
+    cfg_.kf_max_dist = j;
+    ResetModel();
+    assign_layer_bitrates(&cfg_, &svc_params_, cfg_.ss_number_layers,
+       cfg_.ts_number_layers, cfg_.temporal_layering_mode);
+    ASSERT_NO_FATAL_FAILURE(RunLoop(&video));
+    ASSERT_GE(cfg_.rc_target_bitrate, file_datarate_ * 0.85)
+            << " The datarate for the file exceeds the target by too much!";
+    ASSERT_LE(cfg_.rc_target_bitrate, file_datarate_ * 1.30)
+        << " The datarate for the file is lower than the target by too much!";
+    EXPECT_EQ(static_cast<unsigned int>(0), GetMismatchFrames());
+  }
 }
 
 // Check basic rate targeting for 1 pass CBR SVC: 3 spatial layers and
@@ -1037,7 +1121,7 @@ TEST_P(DatarateOnePassCbrSvc, OnePassCbrSvc3SpatialLayers4threads) {
           << " The datarate for the file exceeds the target by too much!";
   ASSERT_LE(cfg_.rc_target_bitrate, file_datarate_ * 1.22)
       << " The datarate for the file is lower than the target by too much!";
-  EXPECT_EQ(GetMismatchFrames(), (unsigned int) 0);
+  EXPECT_EQ(static_cast<unsigned int>(0), GetMismatchFrames());
 }
 
 VP8_INSTANTIATE_TEST_CASE(DatarateTestLarge, ALL_TEST_MODES);

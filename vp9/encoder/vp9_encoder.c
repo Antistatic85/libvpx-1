@@ -3198,9 +3198,38 @@ static void output_frame_level_debug_stats(VP9_COMP *cpi) {
 
   vpx_clear_system_state();
 
+#if CONFIG_VP9_HIGHBITDEPTH
+  if (cm->use_highbitdepth) {
+    recon_err = vp9_highbd_get_y_sse(cpi->Source, get_frame_new_buffer(cm));
+  } else {
+    recon_err = vp9_get_y_sse(cpi->Source, get_frame_new_buffer(cm));
+  }
+#else
   recon_err = vp9_get_y_sse(cpi->Source, get_frame_new_buffer(cm));
+#endif  // CONFIG_VP9_HIGHBITDEPTH
 
-  if (cpi->twopass.total_left_stats.coded_error != 0.0)
+
+  if (cpi->twopass.total_left_stats.coded_error != 0.0) {
+    double dc_quant_devisor;
+#if CONFIG_VP9_HIGHBITDEPTH
+    switch (cm->bit_depth) {
+      case VPX_BITS_8:
+        dc_quant_devisor = 4.0;
+        break;
+      case VPX_BITS_10:
+        dc_quant_devisor = 16.0;
+        break;
+      case VPX_BITS_12:
+        dc_quant_devisor = 64.0;
+        break;
+      default:
+        assert(0 && "bit_depth must be VPX_BITS_8, VPX_BITS_10 or VPX_BITS_12");
+        break;
+    }
+#else
+    dc_quant_devisor = 4.0;
+#endif
+
     fprintf(f, "%10u %dx%d %10d %10d %d %d %10d %10d %10d %10d"
        "%10"PRId64" %10"PRId64" %5d %5d %10"PRId64" "
        "%10"PRId64" %10"PRId64" %10d "
@@ -3226,7 +3255,8 @@ static void output_frame_level_debug_stats(VP9_COMP *cpi) {
         (cpi->rc.starting_buffer_level - cpi->rc.bits_off_target),
         cpi->rc.total_actual_bits, cm->base_qindex,
         vp9_convert_qindex_to_q(cm->base_qindex, cm->bit_depth),
-        (double)vp9_dc_quant(cm->base_qindex, 0, cm->bit_depth) / 4.0,
+        (double)vp9_dc_quant(cm->base_qindex, 0, cm->bit_depth) /
+            dc_quant_devisor,
         vp9_convert_qindex_to_q(cpi->twopass.active_worst_quality,
                                 cm->bit_depth),
         cpi->rc.avg_q,
@@ -3241,7 +3271,7 @@ static void output_frame_level_debug_stats(VP9_COMP *cpi) {
         cpi->twopass.kf_zeromotion_pct,
         cpi->twopass.fr_content_type,
         cm->lf.filter_level);
-
+  }
   fclose(f);
 
   if (0) {
@@ -4081,6 +4111,12 @@ static void encode_frame_to_data_rate(VP9_COMP *cpi,
       ++cm->current_video_frame;
       cpi->ext_refresh_frame_flags_pending = 0;
       cpi->svc.rc_drop_superframe = 1;
+      // TODO(marpan): Advancing the svc counters on dropped frames can break
+      // the referencing scheme for the fixed svc patterns defined in
+      // vp9_one_pass_cbr_svc_start_layer(). Look into fixing this issue, but
+      // for now, don't advance the svc frame counters on dropped frame.
+      // if (cpi->use_svc)
+      //   vp9_inc_frame_in_layer(cpi);
       return;
     }
   }

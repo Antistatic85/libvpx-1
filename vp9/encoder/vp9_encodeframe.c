@@ -779,20 +779,16 @@ int choose_partitioning(VP9_COMP *cpi,
   const int use_4x4_partition = cm->frame_type == KEY_FRAME;
   const int low_res = (cm->width <= 352 && cm->height <= 288);
   int variance4x4downsample[16];
+  int segment_id;
 
-  int segment_id = CR_SEGMENT_ID_BASE;
+  set_offsets(cpi, tile, x, mi_row, mi_col, BLOCK_64X64);
+  segment_id = xd->mi[0]->segment_id;
   if (cpi->oxcf.aq_mode == CYCLIC_REFRESH_AQ && cm->seg.enabled) {
-    const uint8_t *const map = cm->seg.update_map ? cpi->segmentation_map :
-                                                    cm->last_frame_seg_map;
-    segment_id = get_segment_id(cm, map, BLOCK_64X64, mi_row, mi_col);
-
     if (cyclic_refresh_segment_id_boosted(segment_id)) {
       int q = vp9_get_qindex(&cm->seg, segment_id, cm->base_qindex);
       set_vbp_thresholds(cpi, thresholds, q);
     }
   }
-
-  set_offsets(cpi, tile, x, mi_row, mi_col, BLOCK_64X64);
 
   if (xd->mb_to_right_edge < 0)
     pixels_wide += (xd->mb_to_right_edge >> 3);
@@ -862,34 +858,55 @@ int choose_partitioning(VP9_COMP *cpi,
     vp9_build_inter_predictors_sb(xd, mi_row, mi_col, BLOCK_64X64);
 
     // Check if most of the superblock is skin content, and if so, force split
-    // to 32x32. Avoid checking superblocks on/near boundary and avoid low
-    // resolutons for now.
+    // to 32x32, and set x->sb_is_skin for use in mode selection.
+    // Avoid checking superblocks on/near boundary and avoid low resolutions.
     // Note superblock may still pick 64X64 if y_sad is very small
     // (i.e., y_sad < cpi->vbp_threshold_sad) below. For now leave this as is.
     x->sb_is_skin = 0;
 #if !CONFIG_VP9_HIGHBITDEPTH
     if (cpi->use_skin_detection && !low_res && (mi_col >= 8 &&
         mi_col + 8 < cm->mi_cols && mi_row >= 8 && mi_row + 8 < cm->mi_rows)) {
+      CYCLIC_REFRESH *const cr = cpi->cyclic_refresh;
+      int bl_index1, bl_index2, bl_index3;
       int num_16x16_skin = 0;
       int num_16x16_nonskin = 0;
+      int is_skin = 0;
+      int consec_zeromv = 0;
       uint8_t *ysignal = x->plane[0].src.buf;
       uint8_t *usignal = x->plane[1].src.buf;
       uint8_t *vsignal = x->plane[2].src.buf;
       int spuv = x->plane[1].src.stride;
-      for (i = 0; i < 4; i++) {
-        for (j = 0; j < 4; j++) {
-          int is_skin = vp9_compute_skin_block(ysignal,
-                                               usignal,
-                                               vsignal,
-                                               sp,
-                                               spuv,
-                                               BLOCK_16X16);
+      const int block_index = mi_row * cm->mi_cols + mi_col;
+      const int bw = num_8x8_blocks_wide_lookup[BLOCK_64X64];
+      const int bh = num_8x8_blocks_high_lookup[BLOCK_64X64];
+      const int xmis = VPXMIN(cm->mi_cols - mi_col, bw);
+      const int ymis = VPXMIN(cm->mi_rows - mi_row, bh);
+      // Loop through the 16x16 sub-blocks.
+      int j, i;
+      for (i = 0; i < ymis; i+=2) {
+        for (j = 0; j < xmis; j+=2) {
+          int bl_index = block_index + i * cm->mi_cols + j;
+          bl_index1 = bl_index + 1;
+          bl_index2 = bl_index + cm->mi_cols;
+          bl_index3 = bl_index2 + 1;
+          consec_zeromv = VPXMIN(cr->consec_zero_mv[bl_index],
+                                 VPXMIN(cr->consec_zero_mv[bl_index1],
+                                 VPXMIN(cr->consec_zero_mv[bl_index2],
+                                 cr->consec_zero_mv[bl_index3])));
+          is_skin = vp9_compute_skin_block(ysignal,
+                                           usignal,
+                                           vsignal,
+                                           sp,
+                                           spuv,
+                                           BLOCK_16X16,
+                                           consec_zeromv,
+                                           0);
           num_16x16_skin += is_skin;
           num_16x16_nonskin += (1 - is_skin);
           if (num_16x16_nonskin > 3) {
             // Exit loop if at least 4 of the 16x16 blocks are not skin.
-            i = 4;
-            j = 4;
+            i = ymis;
+            j = xmis;
           }
           ysignal += 16;
           usignal += 8;
